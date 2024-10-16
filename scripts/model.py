@@ -28,16 +28,43 @@ gas_availability = np.ones(24) * 4.0
 # 2. Functions
 # ========================
 
-# Objective function: Minimize total cost of generation
-def objective(generation):
-    P1, P2, P3, P4 = generation
-    return cost_coefficients[0] * P1 + cost_coefficients[1] * P2 + cost_coefficients[2] * P3 + cost_coefficients[3] * P4
+def objective(P):
+    """Objective function: total cost of generation"""
+    return np.dot(cost_coefficients, P)
 
-# Power balance constraint: Ensure generation meets demand
-def power_balance_constraint(generation, demand):
-    P1, P2, P3, P4 = generation
-    total_generation = P1 + P2 + P3 + P4
-    return total_generation - demand
+def power_balance_constraint(P, demand):
+    """Power balance constraint: ensures total generation meets demand"""
+    return np.sum(P) - demand
+
+def jacobian():
+    """Jacobian matrix for power balance"""
+    # Since power balance constraint is linear in P, the Jacobian is just ones.
+    return np.array([1, 1, 1, 1])
+
+def newton_raphson(demand, initial_guess, tol=1e-6, max_iter=100):
+    """Newton-Raphson method for solving the power generation optimization problem"""
+    P = initial_guess
+    for i in range(max_iter):
+        # Evaluate the power balance constraint (F)
+        F = power_balance_constraint(P, demand)
+        
+        # Check if solution is within tolerance
+        if abs(F) < tol:
+            print(f"Converged after {i+1} iterations")
+            return P
+        
+        # Compute the Jacobian (J)
+        J = jacobian()
+        
+        # Update generation values
+        delta_P = -F / np.sum(J)
+        P = P + delta_P
+        
+        # Ensure generation is within limits (generation limits can be set here)
+        P = np.clip(P, [0, 0, 0, 0], [nuclear_availability[0], wind_availability[0], solar_availability[0], gas_availability[0]])
+    
+    print("Did not converge within the maximum number of iterations")
+    return P
 
 # ================================
 # 3. Main
@@ -56,38 +83,23 @@ initial_generation = [1.0,  # nuclear
                       0.5,  # solar
                       2.0]  # gas
 
-# Opti-Loop to optimize generation over each hour 
 for hour in range(24):
-    # Available generation limits for this hour
-    generation_limits = [(0, nuclear_availability[hour]), # nuclear
-                         (0, wind_availability[hour]),    # wind
-                         (0, solar_availability[hour]),   # solar
-                         (0, gas_availability[hour])]     # gas
-
-    # Define demand for this hour
     demand = hourly_demand[hour]
+    # Run Newton-Raphson to solve for generation values
+    P_opt = newton_raphson(demand, initial_generation)
+    
+    # Append the optimized generation values
+    nuclear_gen.append(P_opt[0])
+    wind_gen.append(P_opt[1])
+    solar_gen.append(P_opt[2])
+    gas_gen.append(P_opt[3])
+    
+    # Calculate and store total cost
+    total_cost = objective(P_opt)
+    total_costs.append(total_cost)
 
-    # Define constraints for the current hour
-    constraints = [{'type': 'eq', 'fun': lambda gen: power_balance_constraint(gen, demand)}]
-
-    # Perform optimization
-    result = minimize(objective, initial_generation, bounds=generation_limits, constraints=constraints)
-
-    # Optimized generation values
-    P1_opt, P2_opt, P3_opt, P4_opt = result.x
-
-    # Append results to arrays (for plot)
-    nuclear_gen.append(P1_opt)
-    wind_gen.append(P2_opt)
-    solar_gen.append(P3_opt)
-    gas_gen.append(P4_opt)
-    total_costs.append(objective(result.x))
-
-    # Print the results for this hour
-    print(f"Hour {hour}:")
-    print(f"  Nuclear: {P1_opt:.2f} p.u., Wind: {P2_opt:.2f} p.u., Solar: {P3_opt:.2f} p.u., Gas: {P4_opt:.2f} p.u.")
-    print(f"  Total generation cost: ${objective(result.x):.2f}")
-    print("-" * 40)
+    print(f"Hour {hour}: Nuclear: {P_opt[0]:.2f} p.u., Wind: {P_opt[1]:.2f} p.u., Solar: {P_opt[2]:.2f} p.u., Gas: {P_opt[3]:.2f} p.u.")
+    print(f"Total Generation Cost: ${total_cost:.2f}")
 
 # ================================
 # 4. Save Data 
