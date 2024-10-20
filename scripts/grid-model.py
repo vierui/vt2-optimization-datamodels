@@ -29,14 +29,21 @@ x_nuclear_wind = 0.1
 x_nuclear_solar = 0.15
 x_wind_gas = 0.2
 x_solar_gas = 0.1
-
+x_gas_load1 = 0.2
+x_gas_load2 = 0.25
+x_nuclear_load1 = 0.2
+x_solar_load1 = 0.25
+x_nuclear_load2 = 0.3
+x_wind_load2 = 0.15
 
 # Admittance matrix B' (inverse of reactances)
 B_prime = np.array([
-    [1/x_nuclear_wind + 1/x_nuclear_solar, -1/x_nuclear_wind, -1/x_nuclear_solar, 0],
-    [-1/x_nuclear_wind, 1/x_nuclear_wind + 1/x_wind_gas, 0, -1/x_wind_gas],
-    [-1/x_nuclear_solar, 0, 1/x_nuclear_solar + 1/x_solar_gas, -1/x_solar_gas],
-    [0, -1/x_wind_gas, -1/x_solar_gas, 1/x_wind_gas + 1/x_solar_gas]
+    [1/x_nuclear_wind + 1/x_nuclear_solar + 1/x_nuclear_load1 + 1/x_nuclear_load2, -1/x_nuclear_wind, -1/x_nuclear_solar, 0, -1/x_nuclear_load1, -1/x_nuclear_load2],
+    [-1/x_nuclear_wind, 1/x_nuclear_wind + 1/x_wind_gas + 1/x_wind_load2, 0, -1/x_wind_gas, 0, -1/x_wind_load2],
+    [-1/x_nuclear_solar, 0, 1/x_nuclear_solar + 1/x_solar_gas + 1/x_solar_load1, -1/x_solar_gas, -1/x_solar_load1, 0],
+    [0, -1/x_wind_gas, -1/x_solar_gas, 1/x_wind_gas + 1/x_solar_gas, 0, 0],
+    [-1/x_nuclear_load1, 0, -1/x_solar_load1, 0, 1/x_nuclear_load1 + 1/x_solar_load1 + 1/x_gas_load1, 0],
+    [-1/x_nuclear_load2, -1/x_wind_load2, 0, 0, 0, 1/x_nuclear_load2 + 1/x_wind_load2 + 1/x_gas_load2]
 ])
 
 # ========================
@@ -49,21 +56,25 @@ def objective(P):
 
 def dc_power_flow(P_injections):
     """Solves DC power flow for bus angles and calculates power flow between buses"""
-    # Remove the last row/column for the reference bus (gas bus here)
+    # Remove the last row/column for the reference bus (Gas bus here)
     B_prime_reduced = B_prime[:-1, :-1]
     P_injections_reduced = P_injections[:-1]
     
     # Solve for bus angles (excluding reference bus)
     theta = np.linalg.solve(B_prime_reduced, P_injections_reduced)
-    theta = np.append(theta, 0)  # Reference bus angle set to 0 (gas bus)
+    theta = np.append(theta, 0)  # Reference bus angle set to 0 (Gas bus)
 
     # Calculate power flows between buses
     P_nuclear_wind = (theta[0] - theta[1]) / x_nuclear_wind
     P_nuclear_solar = (theta[0] - theta[2]) / x_nuclear_solar
     P_wind_gas = (theta[1] - theta[3]) / x_wind_gas
     P_solar_gas = (theta[2] - theta[3]) / x_solar_gas
+    P_nuclear_load1 = (theta[0] - theta[4]) / x_nuclear_load1
+    P_solar_load1 = (theta[2] - theta[4]) / x_solar_load1
+    P_nuclear_load2 = (theta[0] - theta[5]) / x_nuclear_load2
+    P_wind_load2 = (theta[1] - theta[5]) / x_wind_load2
 
-    return theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas
+    return theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas, P_nuclear_load1, P_solar_load1, P_nuclear_load2, P_wind_load2
 
 # ================================
 # 3. Main
@@ -75,6 +86,8 @@ wind_gen = []
 solar_gen = []
 gas_gen = []
 total_costs = []
+load1_demand = np.array([1.0] * 24)  # Example constant load for bus 5
+load2_demand = np.array([0.5] * 24)  # Example constant load for bus 6
 
 # Initial guesses for power generation at buses 1-4
 initial_generation = [1.0,  # nuclear
@@ -91,9 +104,12 @@ for hour in range(24):
                     min(solar_availability[hour], initial_generation[2]),    # solar
                     demand - (min(nuclear_availability[hour], initial_generation[0]) +
                               min(wind_availability[hour], initial_generation[1]) +
-                              min(solar_availability[hour], initial_generation[2]))]  # gas
+                              min(solar_availability[hour], initial_generation[2])),  # gas
+                    -load1_demand[hour],  # Negative injection for load 1
+                    -load2_demand[hour]]  # Negative injection for load 2
     
-    theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas = dc_power_flow(P_injections)
+    # Run power flow with new injections
+    theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas, P_nuclear_load1, P_solar_load1, P_nuclear_load2, P_wind_load2 = dc_power_flow(P_injections)
     
     # Assign generation outputs
     nuclear_gen.append(P_injections[0])
@@ -101,11 +117,11 @@ for hour in range(24):
     solar_gen.append(P_injections[2])
     gas_gen.append(P_injections[3])
     
-    # Calculate and store total cost
-    total_cost = objective(P_injections)
+    # Calculate and store total cost (only considering generation, not loads)
+    total_cost = objective(P_injections[:4])
     total_costs.append(total_cost)
 
-    print(f"Hour {hour}: Nuclear: {P_injections[0]:.2f} p.u., Wind: {P_injections[1]:.2f} p.u., Solar: {P_injections[2]:.2f} p.u., Gas: {P_injections[3]:.2f} p.u.")
+    print(f"Hour {hour}: Nuclear: {P_injections[0]:.2f} p.u., Wind: {P_injections[1]:.2f} p.u., Solar: {P_injections[2]:.2f} p.u., Gas: {P_injections[3]:.2f} p.u., Load1: {P_injections[4]:.2f} p.u., Load2: {P_injections[5]:.2f} p.u.")
     print(f"Total Generation Cost: ${total_cost:.2f}")
 
 # ================================
@@ -187,12 +203,21 @@ G.add_node("Nuclear", pos=(0, 2))
 G.add_node("Wind", pos=(2, 3))
 G.add_node("Solar", pos=(2, 1))
 G.add_node("Gas", pos=(4, 2))
+G.add_node("Load 1", pos=(5, 1))
+G.add_node("Load 2", pos=(5, 3))
 
 # Add edges representing transmission lines (reactances)
 G.add_edge("Nuclear", "Wind", weight=x_nuclear_wind)
 G.add_edge("Nuclear", "Solar", weight=x_nuclear_solar)
 G.add_edge("Wind", "Gas", weight=x_wind_gas)
 G.add_edge("Solar", "Gas", weight=x_solar_gas)
+G.add_edge("Nuclear", "Load 1", weight=x_nuclear_load1)
+G.add_edge("Solar", "Load 1", weight=x_solar_load1)
+G.add_edge("Gas", "Load 1", weight=x_gas_load1)
+G.add_edge("Nuclear", "Load 2", weight=x_nuclear_load2)
+G.add_edge("Wind", "Load 2", weight=x_wind_load2)
+G.add_edge("Gas", "Load 2", weight=x_gas_load2)
+
 
 # Get positions for all nodes
 pos = nx.get_node_attributes(G, 'pos') 
