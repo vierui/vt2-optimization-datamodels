@@ -17,6 +17,9 @@ cost_coefficients = np.array([50,   # nuclear
 
 # Hourly demand for 24 hours
 hourly_demand = np.array([3, 3, 3, 2.5, 2.5, 3, 4, 5, 5.5, 6, 6.5, 7, 7.5, 7, 6.5, 6, 6, 6.5, 6, 5, 4, 3.5, 3, 3])
+# Split total demand between Load 1 and Load 2 (e.g., 60% to Load 1, 40% to Load 2)
+load1_demand = hourly_demand * 0.6  # 60% of total demand to Load 1
+load2_demand = hourly_demand * 0.4  # 40% of total demand to Load 2
 
 # Generation availability for each source (in p.u.)
 nuclear_availability = np.ones(24) * 2.0
@@ -96,33 +99,48 @@ initial_generation = [1.0,  # nuclear
                       2.0]  # gas
 
 for hour in range(24):
+    # Total demand for the current hour
     demand = hourly_demand[hour]
     
-    # Solve power generation using DC Power Flow
-    P_injections = [min(nuclear_availability[hour], initial_generation[0]),  # nuclear
-                    min(wind_availability[hour], initial_generation[1]),     # wind
-                    min(solar_availability[hour], initial_generation[2]),    # solar
-                    demand - (min(nuclear_availability[hour], initial_generation[0]) +
-                              min(wind_availability[hour], initial_generation[1]) +
-                              min(solar_availability[hour], initial_generation[2])),  # gas
-                    -load1_demand[hour],  # Negative injection for load 1
-                    -load2_demand[hour]]  # Negative injection for load 2
+    # Use wind and solar first, capped by their availability
+    wind_gen_hour = min(wind_availability[hour], demand)
+    remaining_demand = demand - wind_gen_hour
     
-    # Run power flow with new injections
+    solar_gen_hour = min(solar_availability[hour], remaining_demand)
+    remaining_demand -= solar_gen_hour
+    
+    # Use nuclear generation next
+    nuclear_gen_hour = min(nuclear_availability[hour], remaining_demand)
+    remaining_demand -= nuclear_gen_hour
+    
+    # Gas fills any remaining demand (if any)
+    gas_gen_hour = max(0, remaining_demand)  # Ensure gas generation is non-negative
+    
+    # Power injections now include generation for Load 1 and Load 2
+    P_injections = [nuclear_gen_hour,        # Nuclear
+                    wind_gen_hour,           # Wind
+                    solar_gen_hour,          # Solar
+                    gas_gen_hour,            # Gas
+                    -load1_demand[hour],     # Negative injection for Load 1
+                    -load2_demand[hour]]     # Negative injection for Load 2
+    
+    # Run power flow with the updated injections
     theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas, P_nuclear_load1, P_solar_load1, P_nuclear_load2, P_wind_load2 = dc_power_flow(P_injections)
     
-    # Assign generation outputs
-    nuclear_gen.append(P_injections[0])
-    wind_gen.append(P_injections[1])
-    solar_gen.append(P_injections[2])
-    gas_gen.append(P_injections[3])
+    # Store generation outputs
+    nuclear_gen.append(nuclear_gen_hour)
+    wind_gen.append(wind_gen_hour)
+    solar_gen.append(solar_gen_hour)
+    gas_gen.append(gas_gen_hour)
     
-    # Calculate and store total cost (only considering generation, not loads)
-    total_cost = objective(P_injections[:4])
+    # Calculate and store total cost (only for generation, not loads)
+    total_cost = objective(P_injections[:4])  # Only consider the generation part of P_injections
     total_costs.append(total_cost)
 
-    print(f"Hour {hour}: Nuclear: {P_injections[0]:.2f} p.u., Wind: {P_injections[1]:.2f} p.u., Solar: {P_injections[2]:.2f} p.u., Gas: {P_injections[3]:.2f} p.u., Load1: {P_injections[4]:.2f} p.u., Load2: {P_injections[5]:.2f} p.u.")
+    print(f"Hour {hour}: Nuclear: {P_injections[0]:.2f} p.u., Wind: {P_injections[1]:.2f} p.u., Solar: {P_injections[2]:.2f} p.u., Gas: {P_injections[3]:.2f} p.u.")
     print(f"Total Generation Cost: ${total_cost:.2f}")
+
+
 
 # ================================
 # 4. Save Data 
@@ -147,7 +165,7 @@ with open('data/optimization_results.pkl', 'wb') as f:
 print("Optimization results saved to 'data/optimization_results.pkl'")
 
 # Save the results in a CSV file
-with open("generation_results.csv", "w", newline='') as csvfile:
+with open("data/results/generation_results.csv", "w", newline='') as csvfile:
     writer = csv.writer(csvfile)
     # Write the header with units
     writer.writerow(["Hour", "Nuclear (p.u.)", "Wind (p.u.)", "Solar (p.u.)", "Gas (p.u.)", "Total Cost ($)"])
