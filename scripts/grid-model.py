@@ -28,7 +28,7 @@ def load_filtered_data(wind_file, solar_file, demand_file, selected_date):
     # Extract electricity and demand columns
     wind_gen = wind_filtered['electricity'].values
     solar_gen = solar_filtered['electricity'].values
-    total_demand = demand_filtered['total_demand'].values
+    total_demand = demand_filtered['total_demand'].values * 100
     
     return wind_gen, solar_gen, total_demand
 
@@ -217,33 +217,31 @@ plt.show()
 # ================================
 
 # Grid overview
-G = nx.DiGraph() # Create a directed graph
+G = nx.DiGraph()  # Create a directed graph
+
+# Add nodes
 G.add_node("Nuclear", pos=(0, 2))
 G.add_node("Wind", pos=(2, 3))
 G.add_node("Solar", pos=(2, 1))
 G.add_node("Gas", pos=(4, 2))
-G.add_node("Load 1", pos=(5, 1))
-G.add_node("Load 2", pos=(5, 3))
+G.add_node("Load", pos=(5, 2))  # Single load bus
 
 # Add edges representing transmission lines (reactances)
 G.add_edge("Nuclear", "Wind", weight=x_nuclear_wind)
 G.add_edge("Nuclear", "Solar", weight=x_nuclear_solar)
 G.add_edge("Wind", "Gas", weight=x_wind_gas)
 G.add_edge("Solar", "Gas", weight=x_solar_gas)
-G.add_edge("Nuclear", "Load 1", weight=x_nuclear_load1)
-G.add_edge("Solar", "Load 1", weight=x_solar_load1)
-G.add_edge("Gas", "Load 1", weight=x_gas_load1)
-G.add_edge("Nuclear", "Load 2", weight=x_nuclear_load2)
-G.add_edge("Wind", "Load 2", weight=x_wind_load2)
-G.add_edge("Gas", "Load 2", weight=x_gas_load2)
-
+G.add_edge("Nuclear", "Load", weight=x_nuclear_load)  # Single load
+G.add_edge("Solar", "Load", weight=x_solar_load)
+G.add_edge("Gas", "Load", weight=x_gas_load)
+G.add_edge("Wind", "Load", weight=x_wind_load)
 
 # Get positions for all nodes
-pos = nx.get_node_attributes(G, 'pos') 
+pos = nx.get_node_attributes(G, 'pos')
 
 # Draw the network
 plt.figure(figsize=(8, 6))
-nx.draw(G, pos, with_labels=True, node_size=3000, node_color='lightblue', font_size=12, font_weight='bold', edge_color='gray', width=2) # Draw the network
+nx.draw(G, pos, with_labels=True, node_size=3000, node_color='lightblue', font_size=12, font_weight='bold', edge_color='gray', width=2)
 
 # Draw edge labels (reactances)
 edge_labels = nx.get_edge_attributes(G, 'weight')
@@ -251,4 +249,9 @@ nx.draw_networkx_edge_labels(G, pos, edge_labels={(u, v): f'{d["weight"]} p.u.' 
 
 plt.title("Grid Overview with Reactances (p.u.)")
 plt.grid(False)
+
+# Save the grid plot
+plt.savefig('logs/figures/grid_overview.png')
+
+# Show the plot
 plt.show()

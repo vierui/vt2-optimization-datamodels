@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Load the optimization results from the pickle file
-with open('data/optimization_results.pkl', 'rb') as f:
+with open('data/results/optimization_results.pkl', 'rb') as f:
     data = pickle.load(f)
 
 # Extract data
