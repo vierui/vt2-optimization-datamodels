@@ -4,9 +4,36 @@ import matplotlib.pyplot as plt
 import os
 import pickle
 import networkx as nx
+import pandas as pd
 
 # ===========================
-# 1. Variables and Set-up
+# 1. Data Loading
+# ===========================
+
+def load_filtered_data(wind_file, solar_file, demand_file, selected_date):
+    # Load the data
+    wind_data = pd.read_csv('data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'])
+    solar_data = pd.read_csv('data/raw/pv-sion-2023.csv', skiprows=3, parse_dates=['time'])
+    demand_data = pd.read_csv('data/raw/demand-sion-2023.csv', skiprows=3, parse_dates=['time'])
+
+    # Define the time range for the selected date
+    start_date = selected_date + ' 00:00'
+    end_date = selected_date + ' 23:59'
+    
+    # Filter data for the selected date
+    wind_filtered = wind_data[(wind_data['time'] >= start_date) & (wind_data['time'] <= end_date)]
+    solar_filtered = solar_data[(solar_data['time'] >= start_date) & (solar_data['time'] <= end_date)]
+    demand_filtered = demand_data[(demand_data['time'] >= start_date) & (demand_data['time'] <= end_date)]
+    
+    # Extract electricity and demand columns
+    wind_gen = wind_filtered['electricity'].values
+    solar_gen = solar_filtered['electricity'].values
+    total_demand = demand_filtered['total_demand'].values
+    
+    return wind_gen, solar_gen, total_demand
+
+# ===========================
+# 2. Variables and Set-up
 # ===========================
 
 # Cost coefficients per p.u. for:
@@ -21,36 +48,31 @@ hourly_demand = np.array([3, 3, 3, 2.5, 2.5, 3, 4, 5, 5.5, 6, 6.5, 7, 7.5, 7, 6.
 load1_demand = hourly_demand * 0.6  # 60% of total demand to Load 1
 load2_demand = hourly_demand * 0.4  # 40% of total demand to Load 2
 
-# Generation availability for each source (in p.u.)
+# Estimation of Generation availability (in p.u.)
 nuclear_availability = np.ones(24) * 2.0
-wind_availability = np.array([0.5, 0.4, 0.3, 0.4, 0.5, 1.0, 1.2, 1.5, 1.3, 1.0, 0.8, 0.6, 0.7, 1.0, 1.2, 1.5, 1.3, 1.0, 0.8, 0.6, 0.4, 0.3, 0.2, 0.1])
-solar_availability = np.array([0, 0, 0, 0, 0, 0, 0.3, 0.5, 0.8, 1.0, 1.2, 1.5, 1.7, 1.6, 1.5, 1.0, 0.8, 0.5, 0.2, 0, 0, 0, 0, 0])
 gas_availability = np.ones(24) * 4.0
 
-# Reactances between buses - GUESS (in p.u.)
+# Estimation of Reactances between buses (in p.u.)
 x_nuclear_wind = 0.1
 x_nuclear_solar = 0.15
 x_wind_gas = 0.2
 x_solar_gas = 0.1
-x_gas_load1 = 0.2
-x_gas_load2 = 0.25
-x_nuclear_load1 = 0.2
-x_solar_load1 = 0.25
-x_nuclear_load2 = 0.3
-x_wind_load2 = 0.15
+x_gas_load = 0.2
+x_nuclear_load = 0.2
+x_solar_load = 0.25
+x_wind_load = 0.3
 
 # Admittance matrix B' (inverse of reactances)
 B_prime = np.array([
-    [1/x_nuclear_wind + 1/x_nuclear_solar + 1/x_nuclear_load1 + 1/x_nuclear_load2, -1/x_nuclear_wind, -1/x_nuclear_solar, 0, -1/x_nuclear_load1, -1/x_nuclear_load2],
-    [-1/x_nuclear_wind, 1/x_nuclear_wind + 1/x_wind_gas + 1/x_wind_load2, 0, -1/x_wind_gas, 0, -1/x_wind_load2],
-    [-1/x_nuclear_solar, 0, 1/x_nuclear_solar + 1/x_solar_gas + 1/x_solar_load1, -1/x_solar_gas, -1/x_solar_load1, 0],
-    [0, -1/x_wind_gas, -1/x_solar_gas, 1/x_wind_gas + 1/x_solar_gas, 0, 0],
-    [-1/x_nuclear_load1, 0, -1/x_solar_load1, 0, 1/x_nuclear_load1 + 1/x_solar_load1 + 1/x_gas_load1, 0],
-    [-1/x_nuclear_load2, -1/x_wind_load2, 0, 0, 0, 1/x_nuclear_load2 + 1/x_wind_load2 + 1/x_gas_load2]
+    [1/x_nuclear_wind + 1/x_nuclear_solar + 1/x_nuclear_load, -1/x_nuclear_wind, -1/x_nuclear_solar, 0, -1/x_nuclear_load],
+    [-1/x_nuclear_wind, 1/x_nuclear_wind + 1/x_wind_gas + 1/x_wind_load, 0, -1/x_wind_gas, -1/x_wind_load],
+    [-1/x_nuclear_solar, 0, 1/x_nuclear_solar + 1/x_solar_gas + 1/x_solar_load, -1/x_solar_gas, -1/x_solar_load],
+    [0, -1/x_wind_gas, -1/x_solar_gas, 1/x_wind_gas + 1/x_solar_gas, 0],
+    [-1/x_nuclear_load, -1/x_wind_load, -1/x_solar_load, 0, 1/x_nuclear_load + 1/x_wind_load + 1/x_solar_load + 1/x_gas_load]
 ])
 
 # ========================
-# 2. Functions
+# 3. Functions
 # ========================
 
 def objective(P):
@@ -58,7 +80,6 @@ def objective(P):
     return np.dot(cost_coefficients, P)
 
 def dc_power_flow(P_injections):
-    """Solves DC power flow for bus angles and calculates power flow between buses"""
     # Remove the last row/column for the reference bus (Gas bus here)
     B_prime_reduced = B_prime[:-1, :-1]
     P_injections_reduced = P_injections[:-1]
@@ -72,15 +93,14 @@ def dc_power_flow(P_injections):
     P_nuclear_solar = (theta[0] - theta[2]) / x_nuclear_solar
     P_wind_gas = (theta[1] - theta[3]) / x_wind_gas
     P_solar_gas = (theta[2] - theta[3]) / x_solar_gas
-    P_nuclear_load1 = (theta[0] - theta[4]) / x_nuclear_load1
-    P_solar_load1 = (theta[2] - theta[4]) / x_solar_load1
-    P_nuclear_load2 = (theta[0] - theta[5]) / x_nuclear_load2
-    P_wind_load2 = (theta[1] - theta[5]) / x_wind_load2
+    P_nuclear_load = (theta[0] - theta[4]) / x_nuclear_load
+    P_solar_load = (theta[2] - theta[4]) / x_solar_load
+    P_wind_load = (theta[1] - theta[4]) / x_wind_load
 
-    return theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas, P_nuclear_load1, P_solar_load1, P_nuclear_load2, P_wind_load2
+    return theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas, P_nuclear_load, P_solar_load, P_wind_load
 
 # ================================
-# 3. Main
+# 4. Main
 # ================================
 
 # Optimized results storage
@@ -89,43 +109,40 @@ wind_gen = []
 solar_gen = []
 gas_gen = []
 total_costs = []
-load1_demand = np.array([1.0] * 24)  # Example constant load for bus 5
-load2_demand = np.array([0.5] * 24)  # Example constant load for bus 6
+# Optimized results storage
+nuclear_gen = []
+wind_gen = []
+solar_gen = []
+gas_gen = []
+total_costs = []
 
-# Initial guesses for power generation at buses 1-4
-initial_generation = [1.0,  # nuclear
-                      0.5,  # wind
-                      0.5,  # solar
-                      2.0]  # gas
+# DATE SELECTION
+selected_date = '2023-01-01'
+wind_gen_data, solar_gen_data, total_demand = load_filtered_data('data/raw/wind.csv', 'data/raw/pv.csv', 'data/raw/demand.csv', selected_date)
 
+# Loop through the 24 hours
 for hour in range(24):
-    # Total demand for the current hour
-    demand = hourly_demand[hour]
+    demand = total_demand[hour]
     
     # Use wind and solar first, capped by their availability
-    wind_gen_hour = min(wind_availability[hour], demand)
+    wind_gen_hour = min(wind_gen_data[hour], demand)
     remaining_demand = demand - wind_gen_hour
     
-    solar_gen_hour = min(solar_availability[hour], remaining_demand)
+    solar_gen_hour = min(solar_gen_data[hour], remaining_demand)
     remaining_demand -= solar_gen_hour
     
     # Use nuclear generation next
     nuclear_gen_hour = min(nuclear_availability[hour], remaining_demand)
     remaining_demand -= nuclear_gen_hour
     
-    # Gas fills any remaining demand (if any)
-    gas_gen_hour = max(0, remaining_demand)  # Ensure gas generation is non-negative
+    # Gas fills any remaining demand
+    gas_gen_hour = max(0, remaining_demand)
     
-    # Power injections now include generation for Load 1 and Load 2
-    P_injections = [nuclear_gen_hour,        # Nuclear
-                    wind_gen_hour,           # Wind
-                    solar_gen_hour,          # Solar
-                    gas_gen_hour,            # Gas
-                    -load1_demand[hour],     # Negative injection for Load 1
-                    -load2_demand[hour]]     # Negative injection for Load 2
+    # Power injections (no load splitting)
+    P_injections = [nuclear_gen_hour, wind_gen_hour, solar_gen_hour, gas_gen_hour, -demand]
     
     # Run power flow with the updated injections
-    theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas, P_nuclear_load1, P_solar_load1, P_nuclear_load2, P_wind_load2 = dc_power_flow(P_injections)
+    theta, P_nuclear_wind, P_nuclear_solar, P_wind_gas, P_solar_gas, P_nuclear_load, P_solar_load, P_wind_load = dc_power_flow(P_injections)
     
     # Store generation outputs
     nuclear_gen.append(nuclear_gen_hour)
@@ -133,56 +150,39 @@ for hour in range(24):
     solar_gen.append(solar_gen_hour)
     gas_gen.append(gas_gen_hour)
     
-    # Calculate and store total cost (only for generation, not loads)
-    total_cost = objective(P_injections[:4])  # Only consider the generation part of P_injections
+    # Calculate and store total cost (only for generation)
+    total_cost = objective([nuclear_gen_hour, wind_gen_hour, solar_gen_hour, gas_gen_hour])
     total_costs.append(total_cost)
-
-    print(f"Hour {hour}: Nuclear: {P_injections[0]:.2f} p.u., Wind: {P_injections[1]:.2f} p.u., Solar: {P_injections[2]:.2f} p.u., Gas: {P_injections[3]:.2f} p.u.")
+    
+    print(f"Hour {hour}: Nuclear: {nuclear_gen_hour:.2f} p.u., Wind: {wind_gen_hour:.2f} p.u., Solar: {solar_gen_hour:.2f} p.u., Gas: {gas_gen_hour:.2f} p.u.")
     print(f"Total Generation Cost: ${total_cost:.2f}")
 
-
-
 # ================================
-# 4. Save Data 
+# 5. Save Data 
 # ================================
 
 # Save the variables into a pickle file after optimization completes
 data_to_save = {
-    "hourly_demand": hourly_demand,
-    "nuclear_availability": nuclear_availability,
-    "wind_availability": wind_availability,
-    "solar_availability": solar_availability,
-    "gas_availability": gas_availability,
-    "nuclear_gen": nuclear_gen,
-    "wind_gen": wind_gen,
-    "solar_gen": solar_gen,
-    "gas_gen": gas_gen,
-    "total_costs": total_costs
+    "total_demand": total_demand,                   # Total demand without splitting
+    "nuclear_availability": nuclear_availability,   # Nuclear availability (estimated)
+    "wind_availability": wind_gen_data,             # Actual wind data (loaded from file)
+    "solar_availability": solar_gen_data,           # Actual solar data (loaded from file)
+    "gas_availability": gas_availability,           # Gas availability (estimated)
+    "nuclear_gen": nuclear_gen,                     # Nuclear generation results
+    "wind_gen": wind_gen,                           # Wind generation results
+    "solar_gen": solar_gen,                         # Solar generation results
+    "gas_gen": gas_gen,                             # Gas generation results
+    "total_costs": total_costs                      # Total cost per hour
 }
 
-with open('data/optimization_results.pkl', 'wb') as f:
+# Save the data in a pickle file for future use
+with open('data/results/optimization_results.pkl', 'wb') as f:
     pickle.dump(data_to_save, f)
-print("Optimization results saved to 'data/optimization_results.pkl'")
+print("Optimization results saved to 'data/results/optimization_results.pkl'")
 
-# Save the results in a CSV file
-with open("data/results/generation_results.csv", "w", newline='') as csvfile:
-    writer = csv.writer(csvfile)
-    # Write the header with units
-    writer.writerow(["Hour", "Nuclear (p.u.)", "Wind (p.u.)", "Solar (p.u.)", "Gas (p.u.)", "Total Cost ($)"])
-    
-    # Write the data for each hour with formatted numbers
-    for hour in range(24):
-        writer.writerow([
-            f"{hour:02}",  # Ensure hour is always 2 digits
-            f"{nuclear_gen[hour]:.2f}", 
-            f"{wind_gen[hour]:.2f}", 
-            f"{solar_gen[hour]:.2f}", 
-            f"{gas_gen[hour]:.2f}", 
-            f"{total_costs[hour]:.2f}"
-        ])
 
 # ================================
-# 5. Results Plotting 
+# 6. Results Plotting 
 # ================================
 
 # Ensure the logs/figures directory exists
@@ -191,7 +191,7 @@ os.makedirs('logs/figures', exist_ok=True)
 # Plot the results
 hours = np.arange(24)
 
-# Plot the generation per source
+# Plot results for the selected date
 plt.figure(figsize=(10, 6))
 plt.plot(hours, nuclear_gen, label="Nuclear Generation", marker='o')
 plt.plot(hours, wind_gen, label="Wind Generation", marker='o')
@@ -199,10 +199,11 @@ plt.plot(hours, solar_gen, label="Solar Generation", marker='o')
 plt.plot(hours, gas_gen, label="Gas Generation", marker='o')
 plt.xlabel("Hour of the Day")
 plt.ylabel("Generation (p.u.)")
-plt.title("Generation per Source Over 24 Hours")
+plt.title(f"Generation per Source on {selected_date}")
 plt.legend()
 plt.grid(True)
 plt.show()
+
 
 # Plot total generation costs over time
 plt.figure(figsize=(10, 6))
