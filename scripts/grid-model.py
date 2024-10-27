@@ -43,14 +43,14 @@ cost_coefficients = np.array([50,   # nuclear
                               70])  # gas
 
 # Hourly demand for 24 hours
-hourly_demand = np.array([3, 3, 3, 2.5, 2.5, 3, 4, 5, 5.5, 6, 6.5, 7, 7.5, 7, 6.5, 6, 6, 6.5, 6, 5, 4, 3.5, 3, 3])
+# hourly_demand = np.array([3, 3, 3, 2.5, 2.5, 3, 4, 5, 5.5, 6, 6.5, 7, 7.5, 7, 6.5, 6, 6, 6.5, 6, 5, 4, 3.5, 3, 3])
 # Split total demand between Load 1 and Load 2 (e.g., 60% to Load 1, 40% to Load 2)
-load1_demand = hourly_demand * 0.6  # 60% of total demand to Load 1
-load2_demand = hourly_demand * 0.4  # 40% of total demand to Load 2
+# load1_demand = hourly_demand * 0.6  # 60% of total demand to Load 1
+# load2_demand = hourly_demand * 0.4  # 40% of total demand to Load 2
 
 # Estimation of Generation availability (in p.u.)
-nuclear_availability = np.ones(24) * 2.0
-gas_availability = np.ones(24) * 4.0
+nuclear_availability = np.ones(24) * 200.0
+gas_availability = np.ones(24) * 400.0
 
 # Estimation of Reactances between buses (in p.u.)
 x_nuclear_wind = 0.1
@@ -109,15 +109,9 @@ wind_gen = []
 solar_gen = []
 gas_gen = []
 total_costs = []
-# Optimized results storage
-nuclear_gen = []
-wind_gen = []
-solar_gen = []
-gas_gen = []
-total_costs = []
 
 # DATE SELECTION
-selected_date = '2023-01-01'
+selected_date = '2023-02-01'
 wind_gen_data, solar_gen_data, total_demand = load_filtered_data('data/raw/wind.csv', 'data/raw/pv.csv', 'data/raw/demand.csv', selected_date)
 
 # Loop through the 24 hours
@@ -180,7 +174,6 @@ with open('data/results/optimization_results.pkl', 'wb') as f:
     pickle.dump(data_to_save, f)
 print("Optimization results saved to 'data/results/optimization_results.pkl'")
 
-
 # ================================
 # 6. Results Plotting 
 # ================================
@@ -204,7 +197,6 @@ plt.legend()
 plt.grid(True)
 plt.show()
 
-
 # Plot total generation costs over time
 plt.figure(figsize=(10, 6))
 plt.plot(hours, total_costs, label="Total Generation Cost", marker='o', color='r')
@@ -218,8 +210,6 @@ plt.show()
 
 # Grid overview
 G = nx.DiGraph()  # Create a directed graph
-
-# Add nodes
 G.add_node("Nuclear", pos=(0, 2))
 G.add_node("Wind", pos=(2, 3))
 G.add_node("Solar", pos=(2, 1))
