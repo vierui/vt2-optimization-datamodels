@@ -7,19 +7,23 @@ import numpy as np
 # ===========================
 
 # Load data files (assuming CSV format similar to initial code)
-wind_data = pd.read_csv('data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'])
-solar_data = pd.read_csv('data/raw/pv-sion-2023.csv', skiprows=3, parse_dates=['time'])
-demand_data = pd.read_csv('data/raw/demand-sion-2023.csv', skiprows=3, parse_dates=['time'])
+wind_data = pd.read_csv('data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'],delimiter=',')
+solar_data = pd.read_csv('data/raw/pv-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
+demand_data = pd.read_csv('data/raw/data-load-becc.csv', header=None, names=['time', 'load'], parse_dates=['time'], delimiter=';')
 
 # Select a specific day
+# selected_date = '2023-08-01'
+# start_date = f"{selected_date} 00:00"
+# end_date = f"{selected_date} 23:59"
 selected_date = '2023-02-01'
 start_date = selected_date + ' 00:00'
 end_date = selected_date + ' 23:59'
 
+
 # Filter data for the selected day
 wind_gen_data = wind_data[(wind_data['time'] >= start_date) & (wind_data['time'] <= end_date)]['electricity'].values
 solar_gen_data = solar_data[(solar_data['time'] >= start_date) & (solar_data['time'] <= end_date)]['electricity'].values
-total_demand_data = demand_data[(demand_data['time'] >= start_date) & (demand_data['time'] <= end_date)]['total_demand'].values * 100  # Scaling demand
+demand_filtered = demand_data[(demand_data['time'] >= start_date) & (demand_data['time'] <= end_date)]['load'].values
 
 # ===========================
 # 2. Equality and Inequality Constraint Matrices
@@ -30,63 +34,93 @@ c = []
 for t in range(24):
     # Wind (15), Solar (5), Load (0), Free Bus (0), Angles (0, 0, 0, 0)
     c += [15, 5, 0, 0, 0, 0, 0, 0]
+
+# Define reactances
+x_12 = 0.1
+x_13 = 0.15
+x_14 = 0.2
+x_23 = 0.2
+x_34 = 0.1 
     
 # Initialize empty lists for equality constraint matrix and vector
 A_eq = []
 b_eq = []
 
 for t in range(24):
-    # Power balance constraint at each bus
-    # Wind, Solar, Load, Free, Reference angle, Angle2, Angle3, Angle4
-    row_eq_wind = [1, 0, -1, 0, 0, 0, 0, 0]   # Power balance for Wind
-    row_eq_solar = [0, 1, -1, 0, 0, 0, 0, 0]  # Power balance for Solar
-    row_eq_load = [0, 0, 1, 0, 0, 0, 0, 0]    # Load power injection equal to demand
-    row_eq_free = [0, 0, 0, 1, 0, 0, 0, 0]    # Free bus power injection is zero
-    row_eq_theta1 = [0, 0, 0, 0, 1, 0, 0, 0]  # Reference angle constraint (theta_1 = 0)
+    # For each hour, calculate the start index for that hour's 8 variables in the decision vector
+    start_idx = t * 8
+    
+    # Example constraint for power balance at Bus 1 (Wind Bus)
+    row_eq_bus1 = [0] * 192
+    row_eq_bus1[start_idx] = 1  # P_wind(t)
+    row_eq_bus1[start_idx + 4] = -1 / x_12  # Theta_1 reference angle (if needed in the constraint)
+    row_eq_bus1[start_idx + 5] = -1 / x_13  # Theta_2 angle component
+    row_eq_bus1[start_idx + 6] = -1 / x_14  # Theta_3 angle component
+    A_eq.append(row_eq_bus1)
+    b_eq.append(0)  # The target power injection for the wind bus (if zero, adjust as needed)
 
-    # Add these rows for the current hour t to A_eq
-    A_eq.extend([row_eq_wind, row_eq_solar, row_eq_load, row_eq_free, row_eq_theta1])
+    # Example constraint for power balance at Bus 3 (Load Bus)
+    row_eq_bus3 = [0] * 192
+    row_eq_bus3[start_idx + 2] = 1  # P_load(t)
+    row_eq_bus3[start_idx + 5] = -1 / x_23  # Theta_2 angle component
+    row_eq_bus3[start_idx + 6] = -1 / x_34  # Theta_3 angle component
+    A_eq.append(row_eq_bus3)
+    b_eq.append(-demand_filtered[t] * 1000)  # Scale the demand if needed
 
-    # Corresponding values for b_eq
-    b_eq.extend([0, 0, -total_demand_data[t], 0, 0])  # Demand as negative load injection
+    # Reference angle constraint for Theta_1 (setting it to 0)
+    row_eq_theta1 = [0] * 192
+    row_eq_theta1[start_idx + 4] = 1  # Theta_1 position (reference angle set to 0)
+    A_eq.append(row_eq_theta1)
+    b_eq.append(0)
+    
+A_eq = np.array(A_eq)
+b_eq = np.array(b_eq)
+
+# ===========================
 
 # Initialize inequality constraint matrix and vector
 A_ineq = []
 b_ineq = []
 
 for t in range(24):
-    # Upper limit for wind generation
-    row_ineq_wind_upper = [1, 0, 0, 0, 0, 0, 0, 0]
+    # For each hour, position the 8-variable constraints in the right location
+    # Start index for the current hour's variables in the full decision vector
+    start_idx = t * 8
+
+    # Upper limit for wind generation (places 1 at the wind position for hour t)
+    row_ineq_wind_upper = [0] * 192
+    row_ineq_wind_upper[start_idx] = 1  # Wind variable position for hour t
     A_ineq.append(row_ineq_wind_upper)
-    b_ineq.append(wind_gen_data[t])
+    b_ineq.append(wind_gen_data[t] *1000)  # Apply capacity in kW if needed
 
     # Upper limit for solar generation
-    row_ineq_solar_upper = [0, 1, 0, 0, 0, 0, 0, 0]
+    row_ineq_solar_upper = [0] * 192
+    row_ineq_solar_upper[start_idx + 1] = 1  # Solar variable position for hour t
     A_ineq.append(row_ineq_solar_upper)
-    b_ineq.append(solar_gen_data[t])
+    b_ineq.append(solar_gen_data[t] *1000)
 
-    # Lower limit for wind generation (non-negativity)
-    row_ineq_wind_lower = [-1, 0, 0, 0, 0, 0, 0, 0]
+    # Lower limit for wind generation (non-negativity constraint)
+    row_ineq_wind_lower = [0] * 192
+    row_ineq_wind_lower[start_idx] = -1  # Wind variable position for hour t
     A_ineq.append(row_ineq_wind_lower)
     b_ineq.append(0)
 
-    # Lower limit for solar generation (non-negativity)
-    row_ineq_solar_lower = [0, -1, 0, 0, 0, 0, 0, 0]
+    # Lower limit for solar generation (non-negativity constraint)
+    row_ineq_solar_lower = [0] * 192
+    row_ineq_solar_lower[start_idx + 1] = -1  # Solar variable position for hour t
     A_ineq.append(row_ineq_solar_lower)
     b_ineq.append(0)
+
+# Convert A_ineq and b_ineq to numpy arrays
+A_ineq = np.array(A_ineq)
+b_ineq = np.array(b_ineq)
 
 # ===========================
 # 4. Solve
 # ===========================
 
-# Convert lists to matrices
-A_eq = np.array(A_eq)
-b_eq = np.array(b_eq)
-A_ineq = np.array(A_ineq)
-b_ineq = np.array(b_ineq)
-
 # Solve the linear programming problem
-result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_ineq, b_ub=b_ineq)
+result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_ineq, b_ub=b_ineq, options={'disp': True})
 
 # Check and extract the solution
 if result.success:
@@ -94,3 +128,51 @@ if result.success:
     solution = result.x  # Optimal values of power injections and angles
 else:
     print("Optimization failed:", result.message)
+
+# ===========================
+# 5. Debug
+# ===========================
+
+# # Solve without equality constraints
+# result_no_eq = linprog(c, A_ub=A_ineq, b_ub=b_ineq, options={'disp': True})
+
+# # Check result
+# if result_no_eq.success:
+#     print("Optimization feasible without equality constraints.")
+# else:
+#     print("Still infeasible without equality constraints.")
+#     print(result_no_eq.message)
+
+# ===========================
+
+# # Solve without inequality constraints
+# result_no_ineq = linprog(c, A_eq=A_eq, b_eq=b_eq, options={'disp': True})
+# # Solve without inequality constraints
+# result_no_ineq = linprog(c, A_eq=A_eq, b_eq=b_eq, options={'disp': True})
+
+# # Check result
+# if result_no_ineq.success:
+#     print("Optimization feasible without inequality constraints.")
+# else:
+#     print("Still infeasible without inequality constraints.")
+#     print(result_no_ineq.message)
+
+# ===========================
+
+# b_eq_relaxed = b_eq * 0.95  # Decrease demand by 5%
+# b_ineq_relaxed = b_ineq * 1.05  # Increase generation bounds by 5%
+
+# result_relaxed = linprog(c, A_eq=A_eq, b_eq=b_eq_relaxed, A_ub=A_ineq, b_ub=b_ineq_relaxed, options={'disp': True})
+
+# if result_relaxed.success:
+#     print("Optimization feasible with relaxed constraints.")
+# else:
+#     print("Still infeasible with relaxed constraints.")
+#     print(result_relaxed.message)
+
+# ===========================
+
+# total_generation_capacity = sum(wind_gen_data * 1000) + sum(solar_gen_data * 1000)
+# total_demand = sum(demand_filtered * 1000)
+# print("Total generation capacity:", total_generation_capacity)
+# print("Total demand:", total_demand)
