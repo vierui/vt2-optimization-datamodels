@@ -1,30 +1,31 @@
+# %%
 from scipy.optimize import linprog
 import pandas as pd
 import numpy as np
-
+# %%
 # ===========================
 # 1. Data Loading
 # ===========================
 
 # Load data files (assuming CSV format similar to initial code)
-wind_data = pd.read_csv('data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'],delimiter=',')
+wind_data = pd.read_csv('data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
 solar_data = pd.read_csv('data/raw/pv-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
 demand_data = pd.read_csv('data/raw/data-load-becc.csv', header=None, names=['time', 'load'], parse_dates=['time'], delimiter=';')
 
 # Select a specific day
-# selected_date = '2023-08-01'
-# start_date = f"{selected_date} 00:00"
-# end_date = f"{selected_date} 23:59"
-selected_date = '2023-02-01'
-start_date = selected_date + ' 00:00'
-end_date = selected_date + ' 23:59'
-
+selected_date = '2023-08-01'
+start_date = f"{selected_date} 00:00"
+end_date = f"{selected_date} 23:59"
+# selected_date = '2023-02-01'
+# start_date = selected_date + ' 00:00'
+# end_date = selected_date + ' 23:59'
 
 # Filter data for the selected day
 wind_gen_data = wind_data[(wind_data['time'] >= start_date) & (wind_data['time'] <= end_date)]['electricity'].values
 solar_gen_data = solar_data[(solar_data['time'] >= start_date) & (solar_data['time'] <= end_date)]['electricity'].values
 demand_filtered = demand_data[(demand_data['time'] >= start_date) & (demand_data['time'] <= end_date)]['load'].values
 
+# %%
 # ===========================
 # 2. Equality and Inequality Constraint Matrices
 # ===========================
@@ -116,7 +117,7 @@ A_ineq = np.array(A_ineq)
 b_ineq = np.array(b_ineq)
 
 # ===========================
-# 4. Solve
+# 3. Solve
 # ===========================
 
 # Solve the linear programming problem
@@ -128,6 +129,9 @@ if result.success:
     solution = result.x  # Optimal values of power injections and angles
 else:
     print("Optimization failed:", result.message)
+
+# print("Optimal solution (result.x):")
+# print(result.x)
 
 # ===========================
 # 5. Debug
@@ -176,3 +180,4 @@ else:
 # total_demand = sum(demand_filtered * 1000)
 # print("Total generation capacity:", total_generation_capacity)
 # print("Total demand:", total_demand)
+# %%
