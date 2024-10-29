@@ -8,9 +8,9 @@ import numpy as np
 # ===========================
 
 # Load data files (assuming CSV format similar to initial code)
-wind_data = pd.read_csv('data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
-solar_data = pd.read_csv('data/raw/pv-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
-demand_data = pd.read_csv('data/raw/data-load-becc.csv', header=None, names=['time', 'load'], parse_dates=['time'], delimiter=';')
+wind_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
+solar_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/pv-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
+demand_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv', header=None, names=['time', 'load'], parse_dates=['time'], delimiter=';')
 
 # Select a specific day
 selected_date = '2023-08-01'
@@ -116,6 +116,7 @@ for t in range(24):
 A_ineq = np.array(A_ineq)
 b_ineq = np.array(b_ineq)
 
+# %%
 # ===========================
 # 3. Solve
 # ===========================
@@ -133,51 +134,4 @@ else:
 # print("Optimal solution (result.x):")
 # print(result.x)
 
-# ===========================
-# 5. Debug
-# ===========================
-
-# # Solve without equality constraints
-# result_no_eq = linprog(c, A_ub=A_ineq, b_ub=b_ineq, options={'disp': True})
-
-# # Check result
-# if result_no_eq.success:
-#     print("Optimization feasible without equality constraints.")
-# else:
-#     print("Still infeasible without equality constraints.")
-#     print(result_no_eq.message)
-
-# ===========================
-
-# # Solve without inequality constraints
-# result_no_ineq = linprog(c, A_eq=A_eq, b_eq=b_eq, options={'disp': True})
-# # Solve without inequality constraints
-# result_no_ineq = linprog(c, A_eq=A_eq, b_eq=b_eq, options={'disp': True})
-
-# # Check result
-# if result_no_ineq.success:
-#     print("Optimization feasible without inequality constraints.")
-# else:
-#     print("Still infeasible without inequality constraints.")
-#     print(result_no_ineq.message)
-
-# ===========================
-
-# b_eq_relaxed = b_eq * 0.95  # Decrease demand by 5%
-# b_ineq_relaxed = b_ineq * 1.05  # Increase generation bounds by 5%
-
-# result_relaxed = linprog(c, A_eq=A_eq, b_eq=b_eq_relaxed, A_ub=A_ineq, b_ub=b_ineq_relaxed, options={'disp': True})
-
-# if result_relaxed.success:
-#     print("Optimization feasible with relaxed constraints.")
-# else:
-#     print("Still infeasible with relaxed constraints.")
-#     print(result_relaxed.message)
-
-# ===========================
-
-# total_generation_capacity = sum(wind_gen_data * 1000) + sum(solar_gen_data * 1000)
-# total_demand = sum(demand_filtered * 1000)
-# print("Total generation capacity:", total_generation_capacity)
-# print("Total demand:", total_demand)
 # %%
