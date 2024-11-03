@@ -181,8 +181,15 @@ def dcopf(gen, branch, gencost, bus):
                  for idx in range(len(branch))]
     })
     
-    # LMP (Locational Marginal Price) or nodal prices, if duals are available in the solver
-    prices = {i: constraint.pi for i, constraint in DCOPF.constraints.items() if f"Balance_at_Node_{i}" in constraint.name}
+    # Attempt to retrieve dual values (if available) for LMP calculations
+    prices = {}
+    for i in N:
+        constraint_name = f"Balance_at_Node_{i}"
+        if constraint_name in DCOPF.constraints:
+            dual_value = DCOPF.constraints[constraint_name].pi
+            if dual_value is not None:
+                prices[i] = dual_value
+
     prices_df = pd.DataFrame({
         'node': list(prices.keys()),
         'value': list(prices.values())
