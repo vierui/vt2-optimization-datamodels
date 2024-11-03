@@ -1,47 +1,52 @@
 # %%
 from scipy.optimize import linprog
 
-# Final cost vector with θ3 included
-c = [5, 9, 0, 0]  # Cost for [P_wind, P_solar, θ2, θ3]
+# Cost vector with penalty for unmet demand
+penalty = 1000  # Large penalty to enforce demand fulfillment
+c_test = [5, 9, 0, 0, penalty]  # Cost for [P_wind, P_solar, θ2, θ3, demand_shortfall]
 
-# Reactances for all connections
-x_12 = 0.01  # Between Bus 1 and Bus 2
-x_23 = 0.01  # Between Bus 2 and Bus 3
-x_13 = 0.005  # Between Bus 1 and Bus 3 (direct line)
+# Reactances
+x_12 = 0.01
+x_23 = 0.01
+x_13 = 0.005  # Adjusted for flexibility
+
 demand_value = 98.4  # Full demand at Bus 3
 
-# Power balance equations with θ2 and θ3, and direct line from Bus 1 to Bus 3
-A_eq = [
-    [1, 0, -1 / x_12, -1 / x_13],         # Bus 1: P_wind - (1/x_12) * θ2 - (1/x_13) * θ3 = 0
-    [0, 1, 1 / x_12, -1 / x_23],          # Bus 2: P_solar + (1/x_12) * θ2 - (1/x_23) * θ3 = 0
-    [0, 0, -1 / x_13, 1 / x_23]           # Bus 3: Flow from θ3 to meet demand
+# Power balance equations with θ2 and θ3, and demand shortfall
+A_eq_test = [
+    [1, 0, -1 / x_12, -1 / x_13, 0],           # Bus 1: P_wind - (1/x_12) * θ2 - (1/x_13) * θ3 = 0
+    [0, 1, 1 / x_12, -1 / x_23, 0],            # Bus 2: P_solar + (1/x_12) * θ2 - (1/x_23) * θ3 = 0
+    [0, 0, 0, 1 / x_23, -1]                    # Bus 3: Flow from θ3 meets demand with shortfall option
 ]
-b_eq = [0, 0, demand_value]  # Set demand at Bus 3
+b_eq_test = [0, 0, demand_value]  # Full demand at Bus 3
 
-# Inequality constraints for generation limits and non-negativity
-A_ineq = [
-    [1, 0, 0, 0],    # Upper bound for P_wind
-    [0, 1, 0, 0],    # Upper bound for P_solar
-    [-1, 0, 0, 0],   # Non-negativity for P_wind
-    [0, -1, 0, 0]    # Non-negativity for P_solar
+# Inequality constraints for generation limits, non-negativity, and demand shortfall
+A_ineq_test = [
+    [1, 0, 0, 0, 0],    # Upper bound for P_wind
+    [0, 1, 0, 0, 0],    # Upper bound for P_solar
+    [-1, 0, 0, 0, 0],   # Non-negativity for P_wind
+    [0, -1, 0, 0, 0],   # Non-negativity for P_solar
+    [0, 0, 0, 0, -1]    # Non-negativity for demand_shortfall
 ]
-b_ineq = [45.058, 250, 0, 0]  # Generation limits
+b_ineq_test = [45.058, 250, 0, 0, 0]
 
-# Solve the final model
-result = linprog(
-    c,
-    A_eq=A_eq,
-    b_eq=b_eq,
-    A_ub=A_ineq,
-    b_ub=b_ineq,
+# %%
+# Solve the model
+result_test = linprog(
+    c_test,
+    A_eq=A_eq_test,
+    b_eq=b_eq_test,
+    A_ub=A_ineq_test,
+    b_ub=b_ineq_test,
     options={'disp': True}
 )
 
 # Output results
-if result.success:
-    print("Feasibility test with full model (Bus 1-2-3) successful!")
-    print("Solution:", result.x)
+if result_test.success:
+    print("Feasibility test with soft demand constraint successful!")
+    print("Solution:", result_test.x)
 else:
-    print("Feasibility test failed:", result.message)
+    print("Feasibility test failed:", result_test.message)
+
 
 # %%
