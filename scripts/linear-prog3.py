@@ -51,6 +51,7 @@ print(branch)
 # 3. Solver function
 # ===========================
 
+# Transport problem (no physical limitation, no lines limitations)
 def transport(gen, branch, gencost, bus):
     # Create the optimization model
     Transport = pulp.LpProblem("TransportFlowProblem", pulp.LpMinimize)
@@ -112,11 +113,95 @@ def transport(gen, branch, gencost, bus):
         'status': pulp.LpStatus[Transport.status]
     }
 
+# Optimal Power Flow Problem
+def dcopf(gen, branch, gencost, bus):
+    # Create the optimization model
+    DCOPF = pulp.LpProblem("DCOPF_Problem", pulp.LpMinimize)
+    
+    # Define sets
+    G = gen['id'].values  # Set of all generators
+    N = bus['bus_i'].values  # Set of all nodes
+
+    # Define base MVA for power flow calculations (assuming first value for all)
+    baseMVA = gen['mbase'].iloc[0]
+
+    # Decision variables
+    GEN = {g: pulp.LpVariable(f"GEN_{g}", lowBound=0) for g in G}  # Generation at each generator (non-negative)
+    THETA = {i: pulp.LpVariable(f"THETA_{i}", lowBound=None) for i in N}  # Voltage phase angles for each bus
+    FLOW = {(i, j): pulp.LpVariable(f"FLOW_{i}_{j}", lowBound=None) for i in N for j in N}  # Flow variables
+
+    # Set slack bus with reference angle = 0 (assuming bus 1 is the slack bus)
+    DCOPF += THETA[1] == 0
+
+    # Objective function: Minimize generation costs
+    DCOPF += pulp.lpSum(gencost.loc[idx, 'x1'] * GEN[g] for idx, g in enumerate(G)), "Total Generation Cost"
+    
+    # Supply-demand balance constraints
+    for i in N:
+        DCOPF += (
+            pulp.lpSum(GEN[g] for g in gen[gen['bus'] == i]['id']) 
+            - bus.loc[bus['bus_i'] == i, 'pd'].values[0]
+            == pulp.lpSum(FLOW[i, j] for j in branch[branch['fbus'] == i]['tbus'].values)
+        ), f"Balance_at_Node_{i}"
+
+    # Max generation constraints
+    for g in G:
+        DCOPF += GEN[g] <= gen.loc[gen['id'] == g, 'pmax'].values[0], f"MaxGen_{g}"
+
+    # Flow constraints based on voltage angles (DC OPF approximation)
+    for l in range(len(branch)):
+        fbus = branch.iloc[l]['fbus']
+        tbus = branch.iloc[l]['tbus']
+        sus = branch.iloc[l]['sus']
+        DCOPF += FLOW[fbus, tbus] == baseMVA * sus * (THETA[fbus] - THETA[tbus]), f"LineFlow_{fbus}_{tbus}"
+
+    # Max line flow constraints
+    for l in range(len(branch)):
+        fbus = branch.iloc[l]['fbus']
+        tbus = branch.iloc[l]['tbus']
+        rate_a = branch.iloc[l]['ratea']
+        DCOPF += FLOW[fbus, tbus] <= rate_a, f"LineLimit_{fbus}_{tbus}"
+    
+    # Solve the optimization problem using GLPK
+    DCOPF.solve(pulp.GLPK(msg=True))
+
+    # Extracting output variables after solving
+    generation = pd.DataFrame({
+        'id': gen['id'],
+        'node': gen['bus'],
+        'gen': [pulp.value(GEN[g]) for g in G]
+    })
+    
+    angles = {i: pulp.value(THETA[i]) for i in N}
+
+    flows = pd.DataFrame({
+        'fbus': branch['fbus'],
+        'tbus': branch['tbus'],
+        'flow': [baseMVA * branch['sus'].iloc[idx] * (angles[branch['fbus'].iloc[idx]] - angles[branch['tbus'].iloc[idx]]) 
+                 for idx in range(len(branch))]
+    })
+    
+    # LMP (Locational Marginal Price) or nodal prices, if duals are available in the solver
+    prices = {i: constraint.pi for i, constraint in DCOPF.constraints.items() if f"Balance_at_Node_{i}" in constraint.name}
+    prices_df = pd.DataFrame({
+        'node': list(prices.keys()),
+        'value': list(prices.values())
+    })
+
+    # Return the solution and objective as a dictionary
+    return {
+        'generation': generation,
+        'angles': angles,
+        'flows': flows,
+        'prices': prices_df,
+        'cost': pulp.value(DCOPF.objective),
+        'status': pulp.LpStatus[DCOPF.status]
+    }
 
 # %%
 # 4. Solve
 # ===========================
-result = transport(gen, branch, gencost, bus)
+result = dcopf(gen, branch, gencost, bus)
 # Display the generation results
 print("Generation:")
 print(result['generation'])
@@ -126,10 +211,8 @@ print("\nFlows:")
 for (i, j), flow_value in result['flows'].items():
     print(f"Flow from {i} to {j}: {flow_value}")
 
-# Display the total cost of the solution
+# Display the total cost + solver status
 print("\nTotal Cost:", result['cost'])
-
-# Display the solver status
 print("Solver Status:", result['status'])
 
 # %%
