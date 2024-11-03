@@ -5,6 +5,7 @@
 import pandas as pd
 import numpy as np
 import pulp
+# from pulp import GLPK_CMD, CPLEX_CMD, GUROBI_CMD, HiGHS_CMD
 
 # Working directory
 datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/24-Autumn/power-systems-optimization/Notebooks/opf_data/"
@@ -63,8 +64,8 @@ def transport(gen, branch, gencost, bus):
     
     FLOW = {(i, j): pulp.LpVariable(f"FLOW_{i}_{j}", lowBound=None) for i in N for j in N}  # Flow variable (can be positive or negative)
     
-    # Objective function: Minimize generation costs
-    Transport += pulp.lpSum(gencost.loc[g, 'x1'] * GEN[g] for g in G), "Total Generation Cost"
+   # Objective function: Minimize generation costs
+    Transport += pulp.lpSum(gencost.loc[idx, 'x1'] * GEN[g] for idx, g in enumerate(G)), "Total Generation Cost"
     
     # Supply/demand balance constraints
     for i in N:
@@ -115,7 +116,7 @@ def transport(gen, branch, gencost, bus):
 # %%
 # 4. Solve
 # ===========================
-solution = transport(gen, branch, gencost, bus)
+result = transport(gen, branch, gencost, bus)
 # Display the generation results
 print("Generation:")
 print(result['generation'])
