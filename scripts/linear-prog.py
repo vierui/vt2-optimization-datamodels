@@ -34,8 +34,8 @@ demand_filtered = demand_data[(demand_data['time'] >= start_date) & (demand_data
 # Define cost vector (cost coefficients for wind and solar for all hours)
 c = []
 for t in range(24):
-    # Wind (5), Solar (9), Load (0), Free Bus (0), Angles (0, 0, 0, 0)
-    c += [5, 9, 0, 0, 0, 0, 0, 0]
+    # P_wind (5), P_solar (9), Theta_1 (0), Theta_2 (0), Theta_3 (0), Theta_4 (0)
+    c += [5, 9, 0, 0, 0, 0]
 
 # Define reactances
 x_12 = 0.1
@@ -48,64 +48,58 @@ x_34 = 0.1
 A_eq = []
 b_eq = []
 
+total_variables = 24 * 6  # 144 variables
+
 for t in range(24):
-    # Start index for the current hour's 8 variables in the decision vector
-    start_idx = t * 8
+    start_idx = t * 6
 
     # Power balance at Bus 1 (Wind Bus)
-    row_eq_bus1 = [0] * 192
-    row_eq_bus1[start_idx] = 1  # P_wind(t)
-    row_eq_bus1[start_idx + 4] = (1 / x_12) + (1 / x_13) + (1 / x_14)  # Theta_1 coefficient
-    row_eq_bus1[start_idx + 5] = -1 / x_12  # Theta_2 connection
-    row_eq_bus1[start_idx + 6] = -1 / x_13  # Theta_3 connection
-    row_eq_bus1[start_idx + 7] = -1 / x_14  # Theta_4 connection
+    row_eq_bus1 = [0] * total_variables
+    row_eq_bus1[start_idx + 0] = 1  # P_wind(t)
+    row_eq_bus1[start_idx + 2] = (1 / x_12) + (1 / x_13) + (1 / x_14)
+    row_eq_bus1[start_idx + 3] = -1 / x_12
+    row_eq_bus1[start_idx + 4] = -1 / x_13
+    row_eq_bus1[start_idx + 5] = -1 / x_14
     A_eq.append(row_eq_bus1)
-    b_eq.append(0)                          # No net injection for the wind bus
+    b_eq.append(0)
 
     # Power balance at Bus 2 (Solar Bus)
-    row_eq_bus2 = [0] * 192
-    row_eq_bus2[start_idx + 1] = 1          # P_solar(t)
-    row_eq_bus2[start_idx + 4] = -1 / x_12  # Flow from Bus 2 to Bus 1
-    row_eq_bus2[start_idx + 5] = (1 / x_12) + (1 / x_23)  # Theta_2 coefficient
-    row_eq_bus2[start_idx + 6] = -1 / x_23  # Flow from Bus 2 to Bus 3
+    row_eq_bus2 = [0] * total_variables
+    row_eq_bus2[start_idx + 1] = 1  # P_solar(t)
+    row_eq_bus2[start_idx + 2] = -1 / x_12
+    row_eq_bus2[start_idx + 3] = (1 / x_12) + (1 / x_23)
+    row_eq_bus2[start_idx + 4] = -1 / x_23
     A_eq.append(row_eq_bus2)
     b_eq.append(0)
 
-    # Power balance at Bus 3 (Load)
-    row_eq_bus3 = [0] * 192
-    row_eq_bus3[start_idx + 2] = 1  # P_load(t)
-    row_eq_bus3[start_idx + 4] = -1 / x_13  # Flow from Bus 3 to Bus 1
-    row_eq_bus3[start_idx + 5] = -1 / x_23  # Flow from Bus 3 to Bus 2
-    row_eq_bus3[start_idx + 6] = (1 / x_13) + (1 / x_23) + (1 / x_34)  # Theta_3 coefficient
-    row_eq_bus3[start_idx + 7] = -1 / x_34  # Flow from Bus 3 to Bus 4
+    # Power balance at Bus 3 (Load Bus)
+    row_eq_bus3 = [0] * total_variables
+    row_eq_bus3[start_idx + 2] = -1 / x_13
+    row_eq_bus3[start_idx + 3] = -1 / x_23
+    row_eq_bus3[start_idx + 4] = (1 / x_13) + (1 / x_23) + (1 / x_34)
+    row_eq_bus3[start_idx + 5] = -1 / x_34
     A_eq.append(row_eq_bus3)
-    b_eq.append(0)  # Demand for time t
+    b_eq.append(-demand_filtered[t])
 
-    # Power balance at Bus 4 (Free Bus)
-    row_eq_bus4 = [0] * 192
-    row_eq_bus4[start_idx + 3] = 1  # P_free(t)
-    row_eq_bus4[start_idx + 4] = -1 / x_14  # Flow from Bus 4 to Bus 1
-    row_eq_bus4[start_idx + 6] = -1 / x_34  # Flow from Bus 4 to Bus 3
-    row_eq_bus4[start_idx + 7] = (1 / x_14) + (1 / x_34)  # Theta_4 coefficient
+    # Power balance at Bus 4 (Transit Node)
+    row_eq_bus4 = [0] * total_variables
+    row_eq_bus4[start_idx + 2] = -1 / x_14
+    row_eq_bus4[start_idx + 4] = -1 / x_34
+    row_eq_bus4[start_idx + 5] = (1 / x_14) + (1 / x_34)
     A_eq.append(row_eq_bus4)
     b_eq.append(0)
 
-    # Reference angle constraint for Theta_1 (setting it to 0)
-    row_eq_theta1 = [0] * 192
-    row_eq_theta1[start_idx + 4] = 1  # Theta_1 position
+    # Reference angle constraint for Theta_1
+    row_eq_theta1 = [0] * total_variables
+    row_eq_theta1[start_idx + 2] = 1
     A_eq.append(row_eq_theta1)
-    b_eq.append(0)  # Set Theta_1 to 0 as the reference angle
-
-    # Load constraint at Bus 3 (generation must meet load demand at time t)
-    row_eq_load = [0] * 192
-    row_eq_load[start_idx + 2] = 1  # P_load(t) coefficient
-    A_eq.append(row_eq_load)
-    b_eq.append(demand_filtered[t])  # The load requirement for time t
+    b_eq.append(0)
 
 # Convert A_eq and b_eq to numpy arrays
 A_eq = np.array(A_eq)
 b_eq = np.array(b_eq)
 
+# %%
 # ===========================
 
 # Initialize inequality constraint matrix and vector
@@ -113,31 +107,29 @@ A_ineq = []
 b_ineq = []
 
 for t in range(24):
-    # For each hour, position the 8-variable constraints in the right location
-    # Start index for the current hour's variables in the full decision vector
-    start_idx = t * 8
+    start_idx = t * 6
 
-    # Upper limit for wind generation (places 1 at the wind position for hour t)
-    row_ineq_wind_upper = [0] * 192
-    row_ineq_wind_upper[start_idx] = 1  # Wind variable position for hour t
+    # Upper limit for wind generation
+    row_ineq_wind_upper = [0] * total_variables
+    row_ineq_wind_upper[start_idx] = 1
     A_ineq.append(row_ineq_wind_upper)
-    b_ineq.append(wind_gen_data[t])  # Apply capacity in kW if needed
+    b_ineq.append(wind_gen_data[t])
 
-    # Upper limit for solar generation
-    row_ineq_solar_upper = [0] * 192
-    row_ineq_solar_upper[start_idx + 1] = 1  # Solar variable position for hour t
-    A_ineq.append(row_ineq_solar_upper)
-    b_ineq.append(solar_gen_data[t])
-
-    # Lower limit for wind generation (non-negativity constraint)
-    row_ineq_wind_lower = [0] * 192
-    row_ineq_wind_lower[start_idx] = -1  # Wind variable position for hour t
+    # Lower limit for wind generation
+    row_ineq_wind_lower = [0] * total_variables
+    row_ineq_wind_lower[start_idx] = -1
     A_ineq.append(row_ineq_wind_lower)
     b_ineq.append(0)
 
-    # Lower limit for solar generation (non-negativity constraint)
-    row_ineq_solar_lower = [0] * 192
-    row_ineq_solar_lower[start_idx + 1] = -1  # Solar variable position for hour t
+    # Upper limit for solar generation
+    row_ineq_solar_upper = [0] * total_variables
+    row_ineq_solar_upper[start_idx + 1] = 1
+    A_ineq.append(row_ineq_solar_upper)
+    b_ineq.append(solar_gen_data[t])
+
+    # Lower limit for solar generation
+    row_ineq_solar_lower = [0] * total_variables
+    row_ineq_solar_lower[start_idx + 1] = -1
     A_ineq.append(row_ineq_solar_lower)
     b_ineq.append(0)
 
@@ -145,13 +137,37 @@ for t in range(24):
 A_ineq = np.array(A_ineq)
 b_ineq = np.array(b_ineq)
 
+bounds = []
+for t in range(24):
+    bounds.append((0, wind_gen_data[t]))  # P_wind(t)
+    bounds.append((0, solar_gen_data[t]))  # P_solar(t)
+    bounds.extend([(None, None)] * 4)     # Theta_1 to Theta_4
+
 # %%
 # ===========================
 # 3. Solve
 # ===========================
 
 # Solve the linear programming problem
-result = linprog(c, A_eq=A_eq, b_eq=b_eq, A_ub=A_ineq, b_ub=b_ineq, options={'disp': True})
+result = linprog(
+    c,
+    A_eq=A_eq,
+    b_eq=b_eq,
+    A_ub=A_ineq,
+    b_ub=b_ineq,
+    bounds=bounds,
+    method='highs',
+    options={'disp': True}
+)
+
+# result = linprog(
+#     c,
+#     A_eq=A_eq,
+#     b_eq=b_eq,
+#     bounds=bounds,
+#     method='highs',
+#     options={'disp': True}
+# )
 
 # Check and extract the solution
 if result.success:
