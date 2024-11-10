@@ -156,9 +156,12 @@ def dcopf(gen_t, branch, bus):
                               upBound=gen_t.loc[gen_t['id'] == g, 'pmax'].values[0])
            for g in G}
     THETA = {i: pulp.LpVariable(f"THETA_{i}", lowBound=None) for i in N}
-    FLOW = {(row['fbus'], row['tbus']): pulp.LpVariable(f"FLOW_{row['fbus']}_{row['tbus']}", lowBound=None)
-            for idx, row in branch.iterrows()}
-
+    FLOW = {}
+    for idx, row in branch.iterrows():
+        i = row['fbus']
+        j = row['tbus']
+        FLOW[i, j] = pulp.LpVariable(f"FLOW_{i}_{j}", lowBound=None)
+    
     # Set slack bus with reference angle = 0 (assuming bus 1 is the slack bus)
     DCOPF += THETA[1] == 0
 
@@ -186,6 +189,14 @@ def dcopf(gen_t, branch, bus):
         j = row['tbus']
         DCOPF += FLOW[i, j] == row['sus'] * (THETA[i] - THETA[j]), f"Flow_Constraint_{i}_{j}"
     
+    # Flow limits
+    for idx, row in branch.iterrows():
+        i = row['fbus']
+        j = row['tbus']
+        rate_a = row['ratea']
+        DCOPF += FLOW[i, j] <= rate_a, f"Flow_Limit_{i}_{j}_Upper"
+        DCOPF += FLOW[i, j] >= -rate_a, f"Flow_Limit_{i}_{j}_Lower"
+    
     # Solve the optimization problem using GLPK
     DCOPF.solve(pulp.GLPK(msg=True))
 
@@ -198,11 +209,14 @@ def dcopf(gen_t, branch, bus):
 
     angles = {i: pulp.value(THETA[i]) for i in N}
     
+    # Extract flows after solving and store them in a dictionnary
+    flows = {(i, j): pulp.value(FLOW[i, j]) for (i, j) in FLOW}
+    
     # Return the solution and objective as a dictionary
     return {
         'generation': generation,
         'angles': angles,
-        # 'flows': flows,
+        'flows': flows,
         # 'prices': prices_df,
         'cost': pulp.value(DCOPF.objective),
         'status': pulp.LpStatus[DCOPF.status]
@@ -223,31 +237,6 @@ if result['status'] == 'Optimal':
     print(result['generation'])
 else:
     print(f"Optimization failed at time {selected_time}: {result['status']}")
-
-
-
-# time_steps = wind_data['time'].unique()
-
-# # Initialize a list to store results
-# results = []
-
-# for t in time_steps:
-#     # Filter generator data for time t
-#     gen_t = gen_time_series[gen_time_series['time'] == t]
-    
-#     # Run the optimization for time t
-#     result_t = dcopf(gen_t, branch, bus)
-    
-#     # Check optimization status
-#     if result_t['status'] == 'Optimal':
-#         # Add time to the generation DataFrame
-#         result_t['generation']['time'] = t
-#         results.append(result_t['generation'])
-#     else:
-#         print(f"Optimization failed at time {t}: {result_t['status']}")
-
-# # Combine results into a single DataFrame
-# generation_over_time = pd.concat(results, ignore_index=True)
 
 # Display the generation results
 print("Generation:")
@@ -276,5 +265,42 @@ plt.title(f'Generation Dispatch at {selected_time}')
 plt.xticks(generation['id'])
 plt.show()
 
+# Prepare Data for Network Visualization
+G = nx.DiGraph()
+
+# Add nodes (buses)
+for bus_id in bus['bus_i']:
+    G.add_node(bus_id)
+
+# Add edges (branches) with flow as edge attribute
+flows = result['flows']
+edge_labels = {}
+for (i, j), flow in flows.items():
+    G.add_edge(i, j, weight=abs(flow))
+    edge_labels[(i, j)] = f"{flow:.2f} MW"
+
+# Position nodes using a layout
+pos = nx.spring_layout(G, seed=42)
+
+# Node sizes based on generation
+bus_generation = generation.groupby('node')['gen'].sum().to_dict()
+bus_load = bus.set_index('bus_i')['pd'].to_dict()
+node_sizes = []
+for node in G.nodes():
+    gen = bus_generation.get(node, 0)
+    load = bus_load.get(node, 0)
+    size = 300 + (gen - load) * 5  # Adjust the multiplier for visualization
+    node_sizes.append(size)
+
+# Draw nodes and edges
+nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color='lightgreen')
+edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
+nx.draw_networkx_edges(G, pos, width=edge_weights, edge_color='gray', arrows=True)
+nx.draw_networkx_labels(G, pos)
+nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+
+plt.title(f'Network Visualization at {selected_time}')
+plt.axis('off')
+plt.show()
 
 # %%
