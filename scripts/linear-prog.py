@@ -15,16 +15,16 @@ solar_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/p
 demand_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv', header=None, names=['time', 'load'], parse_dates=['time'], delimiter=';',
                           date_format="%d.%m.%y %H:%M")
 
-# Select a specific day
-selected_date = '2023-08-01'
-start_date = f"{selected_date} 00:00"
-end_date = f"{selected_date} 23:59"
+# Select a specific date and hour
+selected_date = '2023-01-01'
+selected_hour = '12:00'  # Choose the hour you want to model
+selected_time = f"{selected_date} {selected_hour}"
 
-# Filter data for the selected day
-wind_gen_data = wind_data[(wind_data['time'] >= start_date) & (wind_data['time'] <= end_date)]['electricity'].values
-# solar_gen_data = solar_data[(solar_data['time'] >= start_date) & (solar_data['time'] <= end_date)]['electricity'].values
-solar_gen_data = [250] * 24
-demand_filtered = demand_data[(demand_data['time'] >= start_date) & (demand_data['time'] <= end_date)]['load'].values * 600
+# Filter data for the selected hour
+wind_gen_data = wind_data[wind_data['time'] == selected_time]['electricity'].values
+solar_gen_data = [250]  # Or use actual solar data for the selected hour
+demand_filtered = demand_data[demand_data['time'] == selected_time]['load'].values * 60
+
 
 # %%
 # ===========================
@@ -32,68 +32,63 @@ demand_filtered = demand_data[(demand_data['time'] >= start_date) & (demand_data
 # ===========================
 
 # Define cost vector (cost coefficients for wind and solar for all hours)
-c = []
-for t in range(24):
-    # P_wind (5), P_solar (9), Theta_1 (0), Theta_2 (0), Theta_3 (0), Theta_4 (0)
-    c += [5, 9, 0, 0, 0, 0]
+c = [5, 9, 0, 0, 0, 0]
 
-# Define reactances
-x_12 = 0.1
-x_13 = 0.15
-x_14 = 0.2
-x_23 = 0.2
-x_34 = 0.1 
-    
+# Define susceptances (inverse of reactances)
+b_12 = 1 / 0.1  # Susceptance between Bus 1 and Bus 2
+b_13 = 1 / 0.15 # Susceptance between Bus 1 and Bus 3
+b_14 = 1 / 0.2  # Susceptance between Bus 1 and Bus 4
+b_23 = 1 / 0.2  # Susceptance between Bus 2 and Bus 3
+b_34 = 1 / 0.1  # Susceptance between Bus 3 and Bus 4
+  
 # Initialize empty lists for equality constraint matrix and vector
 A_eq = []
 b_eq = []
 
-total_variables = 24 * 6  # 144 variables
+total_variables = 1 * 6  # 6 variables
+start_idx = 0 
 
-for t in range(24):
-    start_idx = t * 6
+# Power balance at Bus 1 (Wind Bus)
+row_eq_bus1 = [0] * total_variables
+row_eq_bus1[0] = 1  # P_wind
+row_eq_bus1[2] = -(b_12 + b_13 + b_14)
+row_eq_bus1[3] = b_12
+row_eq_bus1[4] = b_13
+row_eq_bus1[5] = b_14
+A_eq.append(row_eq_bus1)
+b_eq.append(0)
 
-    # Power balance at Bus 1 (Wind Bus)
-    row_eq_bus1 = [0] * total_variables
-    row_eq_bus1[start_idx + 0] = 1  # P_wind(t)
-    row_eq_bus1[start_idx + 2] = (1 / x_12) + (1 / x_13) + (1 / x_14)
-    row_eq_bus1[start_idx + 3] = -1 / x_12
-    row_eq_bus1[start_idx + 4] = -1 / x_13
-    row_eq_bus1[start_idx + 5] = -1 / x_14
-    A_eq.append(row_eq_bus1)
-    b_eq.append(0)
+# Power balance at Bus 2 (Solar Bus)
+row_eq_bus2 = [0] * total_variables
+row_eq_bus2[1] = 1  # P_solar
+row_eq_bus2[2] = b_12
+row_eq_bus2[3] = -(b_12 + b_23)
+row_eq_bus2[4] = b_23
+A_eq.append(row_eq_bus2)
+b_eq.append(0)
 
-    # Power balance at Bus 2 (Solar Bus)
-    row_eq_bus2 = [0] * total_variables
-    row_eq_bus2[start_idx + 1] = 1  # P_solar(t)
-    row_eq_bus2[start_idx + 2] = -1 / x_12
-    row_eq_bus2[start_idx + 3] = (1 / x_12) + (1 / x_23)
-    row_eq_bus2[start_idx + 4] = -1 / x_23
-    A_eq.append(row_eq_bus2)
-    b_eq.append(0)
+# Power balance at Bus 3 (Load Bus)
+row_eq_bus3 = [0] * total_variables
+row_eq_bus3[2] = -b_13
+row_eq_bus3[3] = -b_23
+row_eq_bus3[4] = -(b_13 + b_23 + b_34)
+row_eq_bus3[5] = -b_34
+A_eq.append(row_eq_bus3)
+b_eq.append(demand_filtered[0])  # P_load is positive in b_eq
 
-    # Power balance at Bus 3 (Load Bus)
-    row_eq_bus3 = [0] * total_variables
-    row_eq_bus3[start_idx + 2] = -1 / x_13
-    row_eq_bus3[start_idx + 3] = -1 / x_23
-    row_eq_bus3[start_idx + 4] = (1 / x_13) + (1 / x_23) + (1 / x_34)
-    row_eq_bus3[start_idx + 5] = -1 / x_34
-    A_eq.append(row_eq_bus3)
-    b_eq.append(-demand_filtered[t])
+# Power balance at Bus 4 (Transit Node)
+row_eq_bus4 = [0] * total_variables
+row_eq_bus4[2] = b_14
+row_eq_bus4[4] = b_34
+row_eq_bus4[5] = -(b_14 + b_34)
+A_eq.append(row_eq_bus4)
+b_eq.append(0)
 
-    # Power balance at Bus 4 (Transit Node)
-    row_eq_bus4 = [0] * total_variables
-    row_eq_bus4[start_idx + 2] = -1 / x_14
-    row_eq_bus4[start_idx + 4] = -1 / x_34
-    row_eq_bus4[start_idx + 5] = (1 / x_14) + (1 / x_34)
-    A_eq.append(row_eq_bus4)
-    b_eq.append(0)
-
-    # Reference angle constraint for Theta_1
-    row_eq_theta1 = [0] * total_variables
-    row_eq_theta1[start_idx + 2] = 1
-    A_eq.append(row_eq_theta1)
-    b_eq.append(0)
+# Reference angle constraint for Theta_1
+row_eq_theta1 = [0] * total_variables
+row_eq_theta1[2] = 1  # Theta_1 position
+A_eq.append(row_eq_theta1)
+b_eq.append(0)
 
 # Convert A_eq and b_eq to numpy arrays
 A_eq = np.array(A_eq)
@@ -103,45 +98,49 @@ b_eq = np.array(b_eq)
 # ===========================
 
 # Initialize inequality constraint matrix and vector
-A_ineq = []
-b_ineq = []
+# A_ineq = []
+# b_ineq = []
 
-for t in range(24):
-    start_idx = t * 6
+# for t in range(24):
+#     start_idx = t * 6
 
-    # Upper limit for wind generation
-    row_ineq_wind_upper = [0] * total_variables
-    row_ineq_wind_upper[start_idx] = 1
-    A_ineq.append(row_ineq_wind_upper)
-    b_ineq.append(wind_gen_data[t])
+#     # Upper limit for wind generation
+#     row_ineq_wind_upper = [0] * total_variables
+#     row_ineq_wind_upper[start_idx] = 1
+#     A_ineq.append(row_ineq_wind_upper)
+#     b_ineq.append(wind_gen_data[t])
 
-    # Lower limit for wind generation
-    row_ineq_wind_lower = [0] * total_variables
-    row_ineq_wind_lower[start_idx] = -1
-    A_ineq.append(row_ineq_wind_lower)
-    b_ineq.append(0)
+#     # Lower limit for wind generation
+#     row_ineq_wind_lower = [0] * total_variables
+#     row_ineq_wind_lower[start_idx] = -1
+#     A_ineq.append(row_ineq_wind_lower)
+#     b_ineq.append(0)
 
-    # Upper limit for solar generation
-    row_ineq_solar_upper = [0] * total_variables
-    row_ineq_solar_upper[start_idx + 1] = 1
-    A_ineq.append(row_ineq_solar_upper)
-    b_ineq.append(solar_gen_data[t])
+#     # Upper limit for solar generation
+#     row_ineq_solar_upper = [0] * total_variables
+#     row_ineq_solar_upper[start_idx + 1] = 1
+#     A_ineq.append(row_ineq_solar_upper)
+#     b_ineq.append(solar_gen_data[t])
 
-    # Lower limit for solar generation
-    row_ineq_solar_lower = [0] * total_variables
-    row_ineq_solar_lower[start_idx + 1] = -1
-    A_ineq.append(row_ineq_solar_lower)
-    b_ineq.append(0)
+#     # Lower limit for solar generation
+#     row_ineq_solar_lower = [0] * total_variables
+#     row_ineq_solar_lower[start_idx + 1] = -1
+#     A_ineq.append(row_ineq_solar_lower)
+#     b_ineq.append(0)
 
-# Convert A_ineq and b_ineq to numpy arrays
-A_ineq = np.array(A_ineq)
-b_ineq = np.array(b_ineq)
+# # Convert A_ineq and b_ineq to numpy arrays
+# A_ineq = np.array(A_ineq)
+# b_ineq = np.array(b_ineq)
 
-bounds = []
-for t in range(24):
-    bounds.append((0, wind_gen_data[t]))  # P_wind(t)
-    bounds.append((0, solar_gen_data[t]))  # P_solar(t)
-    bounds.extend([(None, None)] * 4)     # Theta_1 to Theta_4
+bounds = [
+    (0, wind_gen_data[0]),  # P_wind
+    (0, solar_gen_data[0]),  # P_solar
+    (0, 0),                 # Theta_1 (reference angle fixed at zero)
+    (-0.5, 0.5),            # Theta_2
+    (-0.5, 0.5),            # Theta_3
+    (-3, 0.5)             # Theta_4
+]
+
 
 # %%
 # ===========================
@@ -153,8 +152,6 @@ result = linprog(
     c,
     A_eq=A_eq,
     b_eq=b_eq,
-    A_ub=A_ineq,
-    b_ub=b_ineq,
     bounds=bounds,
     method='highs',
     options={'disp': True}
