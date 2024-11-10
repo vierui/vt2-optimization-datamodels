@@ -16,7 +16,16 @@ datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/"
 # 2. Data
 # ===========================
 
-# Load the wind data into
+demand_data = pd.read_csv(
+    '/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
+    delimiter=';',
+    names=['time', 'demand'],  # Specify the column names
+    parse_dates=['time'],
+    dayfirst=True
+)
+
+demand_data['demand'] = pd.to_numeric(demand_data['demand']) * 100
+
 wind_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
 
 # Load into DataFrames
@@ -38,6 +47,16 @@ solar_gen = pd.DataFrame({
 })
 # Combine wind and solar generator data
 gen_time_series = pd.concat([wind_gen, solar_gen], ignore_index=True)
+
+# Create a DataFrame for time-varying demand at bus 3
+demand_time_series = pd.DataFrame({
+    'time': demand_data['time'],
+    'bus': 3,  # Demand is at bus 3
+    'pd': demand_data['demand'],
+})
+
+# Ensure 'time' column is datetime
+demand_time_series['time'] = pd.to_datetime(demand_time_series['time'])
 
 # Load branch and bus data
 branch = pd.read_csv(datadir + "branch.csv")
@@ -126,7 +145,7 @@ branch['sus'] = 1 / branch['x']
 #     }
 
 # Optimal Power Flow Problem
-def dcopf(gen_t, branch, bus):
+def dcopf(gen_t, branch, bus, demand_t):
     # Create the optimization model
     DCOPF = pulp.LpProblem("DCOPF_Problem", pulp.LpMinimize)
     
@@ -160,15 +179,16 @@ def dcopf(gen_t, branch, bus):
         # Sum of generation at bus i
         gen_sum = pulp.lpSum(GEN[g] for g in gen_t[gen_t['bus'] == i]['id'])
         
-        # Demand at bus i
-        demand = bus.loc[bus['bus_i'] == i, 'pd'].values[0]
-        
+        # Demand at bus i from demand_t
+        demand = demand_t.loc[demand_t['bus'] == i, 'pd']
+        demand_value = demand.values[0] if not demand.empty else 0
+
         # Net flow out of bus i
         flow_out = pulp.lpSum(FLOW[i, j] for (i_, j) in FLOW if i_ == i)
         flow_in = pulp.lpSum(FLOW[j, i] for (j, i_) in FLOW if i_ == i)
         
         # Power balance constraint
-        DCOPF += gen_sum - demand + flow_in - flow_out == 0, f"Power_Balance_at_Bus_{i}"
+        DCOPF += gen_sum - demand_value + flow_in - flow_out == 0, f"Power_Balance_at_Bus_{i}"
     
     # DC power flow equations
     for idx, row in branch.iterrows():
@@ -234,8 +254,11 @@ for t in time_steps:
     # Filter generator data for time t
     gen_t = gen_time_series[gen_time_series['time'] == t]
     
+    # Filter demand data for time t
+    demand_t = demand_time_series[demand_time_series['time'] == t]
+    
     # Run the DCOPF for time t
-    result_t = dcopf(gen_t, branch, bus)
+    result_t = dcopf(gen_t, branch, bus, demand_t)
     
     # Check optimization status
     if result_t['status'] == 'Optimal':
@@ -300,24 +323,19 @@ print("Total Generation Cost:", result['cost'])
 # 5. Visualisation
 # ===========================
 
-import pandas as pd
-import matplotlib.pyplot as plt
-
-# Assuming generation_over_time is your DataFrame with 'time', 'id', 'gen' columns
-
 # 1. Pivot the Generation Data
 gen_pivot = generation_over_time.pivot(index='time', columns='id', values='gen')
 gen_pivot = gen_pivot.sort_index()
 
 # 2. Prepare the Total Demand Series
-total_demand = pd.Series(100, index=gen_pivot.index)  # For constant demand
+total_demand = demand_time_series.set_index('time')['pd'].reindex(gen_pivot.index)
 
-# 3. Map Generator IDs to Names (Optional)
-gen_id_to_name = {
+# Map generator IDs to names (optional)
+gen_pivot.rename(columns={
     1: 'Wind Generator',
     2: 'Solar Generator',
-}
-gen_pivot.rename(columns=gen_id_to_name, inplace=True)
+    # Add more mappings if necessary
+}, inplace=True)
 
 # 4. Plot the Stacked Area Chart
 fig, ax = plt.subplots(figsize=(12, 6))
@@ -334,14 +352,8 @@ ax.set_ylabel('Power (MW)')
 ax.set_title('Generation Distribution Over Time vs. Demand')
 ax.legend(loc='upper left', title='Generators')
 ax.grid(True)
-
-# Rotate x-axis labels if necessary
 plt.xticks(rotation=45)
-
-# Adjust layout to prevent clipping of labels
 plt.tight_layout()
-
-# Show the plot
 plt.show()
 
 
