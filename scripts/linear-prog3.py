@@ -212,6 +212,13 @@ def dcopf(gen_t, branch, bus):
     # Extract flows after solving and store them in a dictionnary
     flows = {(i, j): pulp.value(FLOW[i, j]) for (i, j) in FLOW}
     
+    # Extract nodal prices (shadow prices)
+    # prices = {}
+    # for i in N:
+    #     constraint_name = f"Power_Balance_at_Bus_{i}"
+    #     dual = DCOPF.constraints[constraint_name].pi  # Dual value (shadow price)
+    #     prices[i] = dual
+    
     # Return the solution and objective as a dictionary
     return {
         'generation': generation,
