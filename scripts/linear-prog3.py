@@ -5,6 +5,9 @@
 import pandas as pd
 import numpy as np
 import pulp
+import matplotlib.pyplot as plt
+import networkx as nx
+
 
 # Working directory
 datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/"
@@ -53,12 +56,12 @@ for df in [branch, bus]:
 branch['id'] = np.arange(1, len(branch) + 1)
 
 # Add reverse direction rows in branch DataFrame
-branch2 = branch.copy()
-branch2['f'] = branch2['fbus']
-branch2['fbus'] = branch['tbus']
-branch2['tbus'] = branch2['f']
-branch2 = branch2[branch.columns]  # Ensure branch2 has the same column order as branch
-branch = pd.concat([branch, branch2], ignore_index=True)
+# branch2 = branch.copy()
+# branch2['f'] = branch2['fbus']
+# branch2['fbus'] = branch['tbus']
+# branch2['tbus'] = branch2['f']
+# branch2 = branch2[branch.columns]  # Ensure branch2 has the same column order as branch
+# branch = pd.concat([branch, branch2], ignore_index=True)
 
 # Susceptance of each line based on reactance
 # Assuming reactance >> resistance, susceptance ≈ 1 / reactance
@@ -256,5 +259,22 @@ print("Total Generation Cost:", result['cost'])
 # print("\nFlows:")
 # for (i, j), flow_value in result['flows'].items():
 #     print(f"Flow from {i} to {j}: {flow_value}")
+
+# %%
+# 5. Visualisation
+# ===========================
+
+# Extract generation data
+generation = result['generation']
+
+# Plot generation dispatch
+plt.figure(figsize=(8, 6))
+plt.bar(generation['id'], generation['gen'], color='skyblue')
+plt.xlabel('Generator ID')
+plt.ylabel('Generation Output (MW)')
+plt.title(f'Generation Dispatch at {selected_time}')
+plt.xticks(generation['id'])
+plt.show()
+
 
 # %%
