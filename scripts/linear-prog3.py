@@ -7,7 +7,7 @@ import numpy as np
 import pulp
 import matplotlib.pyplot as plt
 import networkx as nx
-
+import plotly.graph_objects as go
 
 # Working directory
 datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/"
@@ -272,42 +272,94 @@ plt.title(f'Generation Dispatch at {selected_time}')
 plt.xticks(generation['id'])
 plt.show()
 
+import numpy as np
+import pandas as pd
+
 # Prepare Data for Network Visualization
 G = nx.DiGraph()
 
 # Add nodes (buses)
-for bus_id in bus['bus_i']:
-    G.add_node(bus_id)
+G.add_nodes_from(bus['bus_i'])
 
-# Add edges (branches) with flow as edge attribute
+# Add edges (branches)
 flows = result['flows']
-edge_labels = {}
-for (i, j), flow in flows.items():
-    G.add_edge(i, j, weight=abs(flow))
-    edge_labels[(i, j)] = f"{flow:.2f} MW"
+edge_labels = {(i, j): f"{flow:.2f} MW" for (i, j), flow in flows.items()}
+G.add_edges_from(flows.keys())
 
 # Position nodes using a layout
-pos = nx.spring_layout(G, seed=42)
+pos = nx.circular_layout(G)  # You can choose different layouts
 
-# Node sizes based on generation
+# Node sizes and colors
 bus_generation = generation.groupby('node')['gen'].sum().to_dict()
 bus_load = bus.set_index('bus_i')['pd'].to_dict()
+max_node_size = 1000
+min_node_size = 300
+
+# Create Series with all nodes as index
+nodes = list(G.nodes())
+bus_generation_series = pd.Series(bus_generation, index=nodes).fillna(0)
+bus_load_series = pd.Series(bus_load, index=nodes).fillna(0)
+
+# Compute net generation
+net_gen_series = bus_generation_series - bus_load_series
+net_gen_abs = net_gen_series.abs()
+max_net_gen = net_gen_abs.max() if net_gen_abs.max() != 0 else 1  # Avoid division by zero
+
+# Initialize lists for node sizes and colors
 node_sizes = []
-for node in G.nodes():
-    gen = bus_generation.get(node, 0)
-    load = bus_load.get(node, 0)
-    size = 300 + (gen - load) * 5  # Adjust the multiplier for visualization
+node_colors = []
+for node in nodes:
+    net_gen = net_gen_series[node]
+    # Scale node size
+    size = min_node_size + (max_node_size - min_node_size) * abs(net_gen) / max_net_gen
     node_sizes.append(size)
+    # Assign node color
+    if net_gen > 0:
+        node_colors.append('green')  # Net generator
+    elif net_gen < 0:
+        node_colors.append('red')    # Net load
+    else:
+        node_colors.append('grey')   # Neutral
+
+# Edge widths and colors
+max_edge_width = 5
+min_edge_width = 1
+flow_values = [abs(flow) for flow in flows.values()]
+max_flow = max(flow_values) if flow_values else 1  # Avoid division by zero
+edge_widths = []
+edge_colors = []
+for u, v in G.edges():
+    flow = abs(flows.get((u, v), 0))
+    width = min_edge_width + (max_edge_width - min_edge_width) * flow / max_flow
+    edge_widths.append(width)
+    edge_colors.append('blue' if flows.get((u, v), 0) >= 0 else 'red')
 
 # Draw nodes and edges
-nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color='lightgreen')
-edge_weights = [G[u][v]['weight'] for u, v in G.edges()]
-nx.draw_networkx_edges(G, pos, width=edge_weights, edge_color='gray', arrows=True)
-nx.draw_networkx_labels(G, pos)
-nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
+plt.figure(figsize=(12, 8), dpi=100)
+nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors, edgecolors='black')
+nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, arrowsize=20, arrowstyle='-|>')
 
-plt.title(f'Network Visualization at {selected_time}')
+# Labels
+nx.draw_networkx_labels(G, pos, font_size=14, font_color='white', font_weight='bold')
+threshold = 10  # Only label edges with significant flow
+significant_edges = {k: v for k, v in edge_labels.items() if abs(flows[k]) >= threshold}
+nx.draw_networkx_edge_labels(G, pos, edge_labels=significant_edges, font_size=12)
+
+# Legend
+from matplotlib.lines import Line2D
+legend_elements = [
+    Line2D([0], [0], marker='o', color='w', label='Net Generator', markerfacecolor='green', markersize=10),
+    Line2D([0], [0], marker='o', color='w', label='Net Load', markerfacecolor='red', markersize=10),
+    Line2D([0], [0], marker='o', color='w', label='Neutral', markerfacecolor='grey', markersize=10),
+    Line2D([0], [0], color='blue', lw=2, label='Flow Direction (Positive)'),
+    Line2D([0], [0], color='red', lw=2, label='Flow Direction (Negative)')
+]
+plt.legend(handles=legend_elements, loc='upper right', fontsize=12)
+
+plt.title(f'Network Visualization at {selected_time}', fontsize=16)
 plt.axis('off')
+plt.tight_layout()
 plt.show()
+
 
 # %%
