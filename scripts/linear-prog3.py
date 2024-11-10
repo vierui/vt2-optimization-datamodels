@@ -39,11 +39,6 @@ solar_gen = pd.DataFrame({
 # Combine wind and solar generator data
 gen_time_series = pd.concat([wind_gen, solar_gen], ignore_index=True)
 
-# Test
-selected_time = pd.Timestamp('2023-01-01 12:00')
-gen_t = gen_time_series[gen_time_series['time'] == selected_time]
-
-
 # Load branch and bus data
 branch = pd.read_csv(datadir + "branch.csv")
 bus = pd.read_csv(datadir + "bus.csv")
@@ -54,14 +49,6 @@ for df in [branch, bus]:
 
 # Create generator and line IDs
 branch['id'] = np.arange(1, len(branch) + 1)
-
-# Add reverse direction rows in branch DataFrame
-# branch2 = branch.copy()
-# branch2['f'] = branch2['fbus']
-# branch2['fbus'] = branch['tbus']
-# branch2['tbus'] = branch2['f']
-# branch2 = branch2[branch.columns]  # Ensure branch2 has the same column order as branch
-# branch = pd.concat([branch, branch2], ignore_index=True)
 
 # Susceptance of each line based on reactance
 # Assuming reactance >> resistance, susceptance ≈ 1 / reactance
@@ -232,6 +219,57 @@ def dcopf(gen_t, branch, bus):
 # %%
 # 4. Solve
 # ===========================
+selected_day = '2023-01-01'  # Example date
+gen_time_series = gen_time_series[gen_time_series['time'].dt.date == pd.to_datetime(selected_day).date()]
+
+# Get the unique time steps sorted in chronological order
+time_steps = sorted(gen_time_series['time'].unique())
+
+# Initialize lists to store results
+generation_results = []
+flow_results = []
+cost_results = []
+
+for t in time_steps:
+    # Filter generator data for time t
+    gen_t = gen_time_series[gen_time_series['time'] == t]
+    
+    # Run the DCOPF for time t
+    result_t = dcopf(gen_t, branch, bus)
+    
+    # Check optimization status
+    if result_t['status'] == 'Optimal':
+        # Add time to the generation DataFrame
+        result_t['generation']['time'] = t
+        generation_results.append(result_t['generation'])
+        
+        # Store flows with time
+        flows_t = pd.DataFrame({
+            'time': t,
+            'from_bus': [k[0] for k in result_t['flows'].keys()],
+            'to_bus': [k[1] for k in result_t['flows'].keys()],
+            'flow': list(result_t['flows'].values())
+        })
+        flow_results.append(flows_t)
+        
+        # Store total cost
+        cost_results.append({'time': t, 'cost': result_t['cost']})
+    else:
+        print(f"Optimization failed at time {t}: {result_t['status']}")
+
+#Combine generations results, flow and costs results
+generation_over_time = pd.concat(generation_results, ignore_index=True)
+flows_over_time = pd.concat(flow_results, ignore_index=True)
+costs_over_time = pd.DataFrame(cost_results)
+
+# Display the flow results
+# print("\nFlows:")
+# for (i, j), flow_value in result['flows'].items():
+#     print(f"Flow from {i} to {j}: {flow_value}")
+
+# %%
+# 4. Solve for one
+# ===========================
 
 result = dcopf(gen_t, branch, bus)
 
@@ -256,110 +294,156 @@ print("Total Generation Cost:", result['cost'])
 # for (i, j), flow_value in result['flows'].items():
 #     print(f"Flow from {i} to {j}: {flow_value}")
 
+
+
 # %%
 # 5. Visualisation
 # ===========================
 
-# Extract generation data
-generation = result['generation']
-
-# Plot generation dispatch
-plt.figure(figsize=(8, 6))
-plt.bar(generation['id'], generation['gen'], color='skyblue')
-plt.xlabel('Generator ID')
-plt.ylabel('Generation Output (MW)')
-plt.title(f'Generation Dispatch at {selected_time}')
-plt.xticks(generation['id'])
-plt.show()
-
-import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
-# Prepare Data for Network Visualization
-G = nx.DiGraph()
+# Assuming generation_over_time is your DataFrame with 'time', 'id', 'gen' columns
 
-# Add nodes (buses)
-G.add_nodes_from(bus['bus_i'])
+# 1. Pivot the Generation Data
+gen_pivot = generation_over_time.pivot(index='time', columns='id', values='gen')
+gen_pivot = gen_pivot.sort_index()
 
-# Add edges (branches)
-flows = result['flows']
-edge_labels = {(i, j): f"{flow:.2f} MW" for (i, j), flow in flows.items()}
-G.add_edges_from(flows.keys())
+# 2. Prepare the Total Demand Series
+total_demand = pd.Series(100, index=gen_pivot.index)  # For constant demand
 
-# Position nodes using a layout
-pos = nx.circular_layout(G)  # You can choose different layouts
+# 3. Map Generator IDs to Names (Optional)
+gen_id_to_name = {
+    1: 'Wind Generator',
+    2: 'Solar Generator',
+}
+gen_pivot.rename(columns=gen_id_to_name, inplace=True)
 
-# Node sizes and colors
-bus_generation = generation.groupby('node')['gen'].sum().to_dict()
-bus_load = bus.set_index('bus_i')['pd'].to_dict()
-max_node_size = 1000
-min_node_size = 300
+# 4. Plot the Stacked Area Chart
+fig, ax = plt.subplots(figsize=(12, 6))
 
-# Create Series with all nodes as index
-nodes = list(G.nodes())
-bus_generation_series = pd.Series(bus_generation, index=nodes).fillna(0)
-bus_load_series = pd.Series(bus_load, index=nodes).fillna(0)
+# Plot stacked generation
+ax.stackplot(gen_pivot.index, gen_pivot.T, labels=gen_pivot.columns, alpha=0.8)
 
-# Compute net generation
-net_gen_series = bus_generation_series - bus_load_series
-net_gen_abs = net_gen_series.abs()
-max_net_gen = net_gen_abs.max() if net_gen_abs.max() != 0 else 1  # Avoid division by zero
+# Plot total demand
+ax.plot(total_demand.index, total_demand.values, label='Total Demand', color='black', linewidth=2)
 
-# Initialize lists for node sizes and colors
-node_sizes = []
-node_colors = []
-for node in nodes:
-    net_gen = net_gen_series[node]
-    # Scale node size
-    size = min_node_size + (max_node_size - min_node_size) * abs(net_gen) / max_net_gen
-    node_sizes.append(size)
-    # Assign node color
-    if net_gen > 0:
-        node_colors.append('green')  # Net generator
-    elif net_gen < 0:
-        node_colors.append('red')    # Net load
-    else:
-        node_colors.append('grey')   # Neutral
+# Customize the plot
+ax.set_xlabel('Time')
+ax.set_ylabel('Power (MW)')
+ax.set_title('Generation Distribution Over Time vs. Demand')
+ax.legend(loc='upper left', title='Generators')
+ax.grid(True)
 
-# Edge widths and colors
-max_edge_width = 5
-min_edge_width = 1
-flow_values = [abs(flow) for flow in flows.values()]
-max_flow = max(flow_values) if flow_values else 1  # Avoid division by zero
-edge_widths = []
-edge_colors = []
-for u, v in G.edges():
-    flow = abs(flows.get((u, v), 0))
-    width = min_edge_width + (max_edge_width - min_edge_width) * flow / max_flow
-    edge_widths.append(width)
-    edge_colors.append('blue' if flows.get((u, v), 0) >= 0 else 'red')
+# Rotate x-axis labels if necessary
+plt.xticks(rotation=45)
 
-# Draw nodes and edges
-plt.figure(figsize=(12, 8), dpi=100)
-nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors, edgecolors='black')
-nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, arrowsize=20, arrowstyle='-|>')
-
-# Labels
-nx.draw_networkx_labels(G, pos, font_size=14, font_color='white', font_weight='bold')
-threshold = 10  # Only label edges with significant flow
-significant_edges = {k: v for k, v in edge_labels.items() if abs(flows[k]) >= threshold}
-nx.draw_networkx_edge_labels(G, pos, edge_labels=significant_edges, font_size=12)
-
-# Legend
-from matplotlib.lines import Line2D
-legend_elements = [
-    Line2D([0], [0], marker='o', color='w', label='Net Generator', markerfacecolor='green', markersize=10),
-    Line2D([0], [0], marker='o', color='w', label='Net Load', markerfacecolor='red', markersize=10),
-    Line2D([0], [0], marker='o', color='w', label='Neutral', markerfacecolor='grey', markersize=10),
-    Line2D([0], [0], color='blue', lw=2, label='Flow Direction (Positive)'),
-    Line2D([0], [0], color='red', lw=2, label='Flow Direction (Negative)')
-]
-plt.legend(handles=legend_elements, loc='upper right', fontsize=12)
-
-plt.title(f'Network Visualization at {selected_time}', fontsize=16)
-plt.axis('off')
+# Adjust layout to prevent clipping of labels
 plt.tight_layout()
+
+# Show the plot
 plt.show()
 
+
+# # Extract generation data
+# generation = result['generation']
+
+# # Plot generation dispatch
+# plt.figure(figsize=(8, 6))
+# plt.bar(generation['id'], generation['gen'], color='skyblue')
+# plt.xlabel('Generator ID')
+# plt.ylabel('Generation Output (MW)')
+# plt.title(f'Generation Dispatch at {selected_time}')
+# plt.xticks(generation['id'])
+# plt.show()
+
+# # Prepare Data for Network Visualization
+# G = nx.DiGraph()
+
+# # Add nodes (buses)
+# G.add_nodes_from(bus['bus_i'])
+
+# # Add edges (branches)
+# flows = result['flows']
+# edge_labels = {(i, j): f"{flow:.2f} MW" for (i, j), flow in flows.items()}
+# G.add_edges_from(flows.keys())
+
+# # Position nodes using a layout
+# pos = nx.shell_layout(G)  # You can choose different layouts
+
+# # Node sizes and colors
+# bus_generation = generation.groupby('node')['gen'].sum().to_dict()
+# bus_load = bus.set_index('bus_i')['pd'].to_dict()
+# max_node_size = 1000
+# min_node_size = 300
+
+# # Create Series with all nodes as index
+# nodes = list(G.nodes())
+# bus_generation_series = pd.Series(bus_generation, index=nodes).fillna(0)
+# bus_load_series = pd.Series(bus_load, index=nodes).fillna(0)
+
+# # Compute net generation
+# net_gen_series = bus_generation_series - bus_load_series
+# net_gen_abs = net_gen_series.abs()
+# max_net_gen = net_gen_abs.max() if net_gen_abs.max() != 0 else 1  # Avoid division by zero
+
+# # Initialize lists for node sizes and colors
+# node_sizes = []
+# node_colors = []
+# for node in nodes:
+#     net_gen = net_gen_series[node]
+#     # Scale node size
+#     size = min_node_size + (max_node_size - min_node_size) * abs(net_gen) / max_net_gen
+#     node_sizes.append(size)
+#     # Assign node color
+#     if net_gen > 0:
+#         node_colors.append('green')  # Net generator
+#     elif net_gen < 0:
+#         node_colors.append('red')    # Net load
+#     else:
+#         node_colors.append('grey')   # Neutral
+
+# max_net_gen = net_gen_abs.max() if net_gen_abs.max() != 0 else 1
+# max_flow = max(flow_values) if flow_values else 1
+
+# # Edge widths and colors
+# max_edge_width = 5
+# min_edge_width = 1
+# flow_values = [abs(flow) for flow in flows.values()]
+# max_flow = max(flow_values) if flow_values else 1  # Avoid division by zero
+# edge_widths = []
+# edge_colors = []
+# for u, v in G.edges():
+#     flow = abs(flows.get((u, v), 0))
+#     width = min_edge_width + (max_edge_width - min_edge_width) * flow / max_flow
+#     edge_widths.append(width)
+#     edge_colors.append('blue' if flows.get((u, v), 0) >= 0 else 'red')
+
+# # Draw nodes and edges
+# plt.figure(figsize=(12, 8), dpi=100)
+# nx.draw_networkx_nodes(G, pos, node_size=node_sizes, node_color=node_colors, edgecolors='black')
+# nx.draw_networkx_edges(G, pos, width=edge_widths, edge_color=edge_colors, arrowsize=20, arrowstyle='-|>')
+
+# # Labels
+# nx.draw_networkx_labels(G, pos, font_size=14, font_color='white', font_weight='bold')
+# threshold = 10  # Only label edges with significant flow
+# significant_edges = {k: v for k, v in edge_labels.items() if abs(flows[k]) >= threshold}
+# nx.draw_networkx_edge_labels(G, pos, edge_labels=significant_edges, font_size=12)
+
+# # Legend
+# from matplotlib.lines import Line2D
+# legend_elements = [
+#     Line2D([0], [0], marker='o', color='w', label='Net Generator', markerfacecolor='green', markersize=10),
+#     Line2D([0], [0], marker='o', color='w', label='Net Load', markerfacecolor='red', markersize=10),
+#     Line2D([0], [0], marker='o', color='w', label='Neutral', markerfacecolor='grey', markersize=10),
+#     Line2D([0], [0], color='blue', lw=2, label='Flow Direction (Positive)'),
+#     Line2D([0], [0], color='red', lw=2, label='Flow Direction (Negative)')
+# ]
+# plt.legend(handles=legend_elements, loc='upper right', fontsize=12)
+
+# plt.title(f'Network Visualization at {selected_time}', fontsize=16)
+# plt.axis('off')
+# plt.tight_layout()
+# plt.show()
 
 # %%
