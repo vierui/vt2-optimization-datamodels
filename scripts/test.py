@@ -4,7 +4,6 @@ from scipy.optimize import linprog
 import matplotlib.pyplot as plt
 from scipy.sparse import lil_matrix
 
-# %%
 # 1. PARAMETERS
 
 # Time horizon (hours)
@@ -39,11 +38,9 @@ G2_max = 0.7  # Capacity of G2 (per unit)
 # Load curve (Assumed as an example)
 yearly_load_elec_housing = 0.5 * np.ones(N)  # Example load curve
 
-# %%
 # 2. VARIABLES
 dim_x = M * 2 * N  # Total number of variables
 
-# %%
 # 3. OBJECTIVE FUNCTION
 f = np.concatenate([
     f1 * np.ones(N),    # Cost for P1
@@ -51,8 +48,7 @@ f = np.concatenate([
     np.zeros(6 * N)     # No cost associated with P3, P4, and all Vs
 ])
 
-# %%
-# 4.1 CONSTRAINTS
+# 4. CONSTRAINTS
 
 def index_P(node, k):
     """Returns the index of P for a given node and time k."""
@@ -62,8 +58,7 @@ def index_V(node, k):
     """Returns the index of V for a given node and time k."""
     return M * N + node * N + k
 
-# %%
-# 4.2 EQUALITY CONSTRAINTS
+# 4. EQUALITY CONSTRAINTS
 A_eq = lil_matrix((N * (4 + 3), dim_x))  # We'll have 7 constraints per time step
 b_eq = np.zeros(N * (4 + 3))
 
@@ -94,13 +89,10 @@ for k in range(N):
     b_eq[row] = 0
     row += 1
 
-# %%
-# 4.3 INEQUALITY CONSTRAINTS
+# No inequality constraints needed since we use bounds
 A_ub = None
 b_ub = None
 
-# %%
-# 4.4 BOUNDS
 # Define bounds for variables
 bounds = []
 
@@ -188,5 +180,3 @@ plt.ylabel('Generation')
 plt.legend()
 plt.title('Generation Units Output')
 plt.show()
-
-# %%
