@@ -63,11 +63,11 @@ Y = np.array([
     [-Y14, -Y24, -Y34, Y14 + Y24 + Y34]
 ])
 
-# Generator 1 at node 1 (PV)
+# Gene, node 1 (PV)
 f1 = 0  # Cost per unit of energy
 # G1_max
 
-# Generator 2 at node 2 (Coal power plant)
+# Gen, node 2 (Coal power plant)
 f2 = 3  # Cost per unit of energy
 G2_max = 100  # Capacity of G2 (per unit)
 
@@ -128,8 +128,42 @@ for k in range(N):
 
 # %%
 # 4.3 INEQUALITY CONSTRAINTS
-A_ub = None
-b_ub = None
+
+# Initialize A_ub and b_ub
+num_lines = 5  # Number of lines
+num_ineq = N * num_lines * 2  # Two constraints per line per time step
+A_ub = lil_matrix((num_ineq, dim_x))
+b_ub = np.zeros(num_ineq)
+
+rate_limit = 100
+line_limits = {
+    (0, 1): {'B': Y12, 'P_max': rate_limit},  # Line 0-1
+    (0, 2): {'B': Y13, 'P_max': rate_limit},  # Line 0-2
+    (0, 3): {'B': Y14, 'P_max': rate_limit},  # Line 0-3
+    (1, 3): {'B': Y24, 'P_max': rate_limit},  # Line 1-3
+    (2, 3): {'B': Y34, 'P_max': rate_limit},  # Line 2-3
+}
+
+row = 0
+for k in range(N):
+    for (i, j), params in line_limits.items():
+        B_ij = params['B']
+        P_ij_max = params['P_max']
+        
+        # Upper limit: B_ij (V_i - V_j) <= P_ij_max
+        A_ub[row, index_V(i, k)] = B_ij
+        A_ub[row, index_V(j, k)] = -B_ij
+        b_ub[row] = P_ij_max
+        row += 1
+        
+        # Lower limit: -B_ij (V_i - V_j) <= P_ij_max
+        A_ub[row, index_V(i, k)] = -B_ij
+        A_ub[row, index_V(j, k)] = B_ij
+        b_ub[row] = P_ij_max
+        row += 1
+
+# Convert A_ub to CSR format for efficiency
+A_ub = A_ub.tocsr()
 
 # %%
 # 4.4 BOUNDS
@@ -161,6 +195,8 @@ A_eq = A_eq.tocsr()
 # 5. SOLVE
 result = linprog(
     c=f,
+    A_ub=A_ub,
+    b_ub=b_ub,
     A_eq=A_eq,
     b_eq=b_eq,
     bounds=bounds,
@@ -197,6 +233,30 @@ for k in range(N):
     V2[k] = x_opt[index_V(1, k)]
     V3[k] = x_opt[index_V(2, k)]
     V4[k] = x_opt[index_V(3, k)]
+
+# Compute power flows
+P12 = Y12 * (V1 - V2)
+P13 = Y13 * (V1 - V3)
+P14 = Y14 * (V1 - V4)
+P24 = Y24 * (V2 - V4)
+P34 = Y34 * (V3 - V4)
+
+# Verify that power flows are within limits
+line_flows = {
+    'P12': P12,
+    'P13': P13,
+    'P14': P14,
+    'P24': P24,
+    'P34': P34
+}
+
+for line, flows in line_flows.items():
+    max_flow = 100  # Adjust if different for each line
+    if np.any(np.abs(flows) > max_flow):
+        print(f"Warning: {line} exceeds the flow limit.")
+    else:
+        print(f"{line} is within limits.")
+
 # %%
 # 7. PLOT
 plt.figure()
@@ -215,11 +275,46 @@ plt.plot(G1_max, 'b--', label='G1 Max')
 plt.plot(P2, 'r', label='G2 (Coal Power Plant)')
 plt.plot([G2_max] * N, 'r--', label='G2 Max')
 plt.grid(True)
+# plt.plot(-P4, label='Load')
 plt.xlabel('Hours')
 plt.ylabel('Generation')
 plt.legend()
 plt.title('Generation Units Output')
 plt.show()
 
+# %%
+# Demand and Generation Stack as Bars
+
+# Extract the demand (negative P4) and generation (P1 and P2)
+demand = -P4  # Since P4 is negative load
+gen_PV = P1
+gen_coal = P2
+
+# Check if total generation matches the demand
+total_generation = gen_PV + gen_coal
+if not np.allclose(total_generation, demand, atol=1e-3):
+    print("Warning: Total generation does not exactly match the demand at all time steps.")
+
+# Create a stacked bar chart
+plt.figure(figsize=(12, 6))
+hours = np.arange(N)
+
+# Plot PV generation
+plt.bar(hours, gen_PV, label='PV Generation', color='goldenrod')
+
+# Plot Coal generation on top of PV generation
+plt.bar(hours, gen_coal, bottom=gen_PV, label='Coal Generation', color='grey')
+
+# Plot the demand as a black line
+plt.plot(hours, demand, label='Demand', linewidth=2)
+
+plt.xlabel('Hour of the Day')
+plt.ylabel('Power [MW]')
+plt.xticks(hours)
+plt.legend(loc='upper left')
+plt.title('Demand and Generation Mix per Hour')
+plt.grid(True, axis='y')
+plt.tight_layout()
+plt.show()
 
 # %%
