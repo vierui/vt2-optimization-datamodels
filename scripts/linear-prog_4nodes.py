@@ -8,31 +8,42 @@ from scipy.sparse import lil_matrix
 # %%
 # 0. DATA
 
-# Load the data
+# Load the demand data
 load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
                         sep=';', decimal=',')
 load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
 load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
 
+g1_max_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/gen-pv.csv', 
+                          sep=';', decimal='.')
+g1_max_data['time'] = pd.to_datetime(g1_max_data['time'], format='%d.%m.%y %H:%M')
+g1_max_data['electricity'] = pd.to_numeric(g1_max_data['electricity'])
 
 # Data selection
 selected_date = '2023-01-01'
-mask = load_data['time'].dt.strftime('%Y-%m-%d') == selected_date
-selected_day_data = load_data.loc[mask]
+
+#Filter data for selected date
+mask_load = load_data['time'].dt.strftime('%Y-%m-%d') == selected_date
+selected_day_data = load_data.loc[mask_load]
+mask_g1 = g1_max_data['time'].dt.strftime('%Y-%m-%d') == selected_date
+selected_g1_data = g1_max_data.loc[mask_g1]
 
 # Check if we have 24 hours
-if len(selected_day_data) != 24:
-    raise ValueError(f"Selected date {selected_date} does not have 24 hours of data.")
+N=24
+if len(selected_day_data) != N:
+    raise ValueError(f"Selected date {selected_date} does not have {N} hours.")
+if len(selected_g1_data) != N:
+    raise ValueError(f"G1 max generation data for {selected_date} does not have {N} hours.")
 
-# Extract Load values
-yearly_load_elec_housing = selected_day_data['load'].values *10
+# Extract Load and PV-Gen values
+yearly_load_elec_housing = selected_day_data['load'].values * 100
+G1_max = selected_g1_data['electricity'].values / 5
 
 # %%
 # 1. PARAMETERS
 
 # Time horizon (hours)
-N = len(yearly_load_elec_housing)
-# N = 24
+N = len(yearly_load_elec_housing) # N = 24
 
 # Network structure: Network with M=4 nodes and 5 lines
 M = 4  # M is fixed as a parameter
@@ -52,13 +63,13 @@ Y = np.array([
     [-Y14, -Y24, -Y34, Y14 + Y24 + Y34]
 ])
 
-# Generator 1 at node 1 (Gas turbine)
-f1 = 10  # Cost per unit of energy
-G1_max = 100  # Capacity of G1 (per unit)
+# Generator 1 at node 1 (PV)
+f1 = 0  # Cost per unit of energy
+# G1_max
 
 # Generator 2 at node 2 (Coal power plant)
 f2 = 3  # Cost per unit of energy
-G2_max = 70  # Capacity of G2 (per unit)
+G2_max = 100  # Capacity of G2 (per unit)
 
 # %%
 # 2. VARIABLES
@@ -127,14 +138,14 @@ bounds = []
 
 # For P variables (Generators and Loads)
 for node in range(M):
-    if node == 0:  # P1
-        bounds.extend([(0, G1_max) for k in range(N)])
-    elif node == 1:  # P2
+    if node == 0:  # P1 (PV Generator at Node 1)
+        bounds.extend([(0, G1_max[k]) for k in range(N)])
+    elif node == 1:  # P2 (Coal)
         bounds.extend([(0, G2_max) for k in range(N)])
-    elif node == 2:  # P3
-        bounds.extend([(0, 0) for k in range(N)])  # P3 fixed at 0
-    elif node == 3:  # P4
-        bounds.extend([(-yearly_load_elec_housing[k], -yearly_load_elec_housing[k]) for k in range(N)])  # P4 fixed
+    elif node == 2:  # P3 (Transit node)
+        bounds.extend([(0, 0) for k in range(N)])
+    elif node == 3:  # P4 (Load)
+        bounds.extend([(-yearly_load_elec_housing[k], -yearly_load_elec_housing[k]) for k in range(N)])
 
 # For V variables (Voltage Angles)
 for node in range(M):
@@ -199,8 +210,8 @@ plt.title('Total Generation vs. Load')
 plt.show()
 
 plt.figure()
-plt.plot(P1, 'b', label='G1 (Gas Turbine)')
-plt.plot([G1_max] * N, 'b--', label='G1 Max')
+plt.plot(P1, 'b', label='G1 (PV Generation)')
+plt.plot(G1_max, 'b--', label='G1 Max')
 plt.plot(P2, 'r', label='G2 (Coal Power Plant)')
 plt.plot([G2_max] * N, 'r--', label='G2 Max')
 plt.grid(True)
@@ -209,5 +220,6 @@ plt.ylabel('Generation')
 plt.legend()
 plt.title('Generation Units Output')
 plt.show()
+
 
 # %%
