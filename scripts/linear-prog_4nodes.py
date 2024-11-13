@@ -1,14 +1,38 @@
 # %%
+import pandas as pd
 import numpy as np
 from scipy.optimize import linprog
 import matplotlib.pyplot as plt
 from scipy.sparse import lil_matrix
 
 # %%
+# 0. DATA
+
+# Load the data
+load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
+                        sep=';', decimal=',')
+load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
+load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
+
+
+# Data selection
+selected_date = '2023-01-01'
+mask = load_data['time'].dt.strftime('%Y-%m-%d') == selected_date
+selected_day_data = load_data.loc[mask]
+
+# Check if we have 24 hours
+if len(selected_day_data) != 24:
+    raise ValueError(f"Selected date {selected_date} does not have 24 hours of data.")
+
+# Extract Load values
+yearly_load_elec_housing = selected_day_data['load'].values *10
+
+# %%
 # 1. PARAMETERS
 
 # Time horizon (hours)
-N = 24  # You can change this to any value
+N = len(yearly_load_elec_housing)
+# N = 24
 
 # Network structure: Network with M=4 nodes and 5 lines
 M = 4  # M is fixed as a parameter
@@ -30,14 +54,11 @@ Y = np.array([
 
 # Generator 1 at node 1 (Gas turbine)
 f1 = 10  # Cost per unit of energy
-G1_max = 1  # Capacity of G1 (per unit)
+G1_max = 100  # Capacity of G1 (per unit)
 
 # Generator 2 at node 2 (Coal power plant)
 f2 = 3  # Cost per unit of energy
-G2_max = 0.7  # Capacity of G2 (per unit)
-
-# Load curve (Assumed as an example)
-yearly_load_elec_housing = 0.5 * np.ones(N)  # Example load curve
+G2_max = 70  # Capacity of G2 (per unit)
 
 # %%
 # 2. VARIABLES

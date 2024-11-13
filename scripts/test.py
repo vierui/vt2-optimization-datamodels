@@ -1,4 +1,5 @@
 # %%
+import pandas as pd
 import numpy as np
 from scipy.optimize import linprog
 import matplotlib.pyplot as plt
@@ -6,8 +7,25 @@ from scipy.sparse import lil_matrix
 
 # 1. PARAMETERS
 
+# Load the data
+load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
+                        sep=';', decimal=',')
+load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
+load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
+
+# Select a specific day
+selected_date = '2023-01-01'  # Replace with the date you want to select
+mask = load_data['time'].dt.strftime('%Y-%m-%d') == selected_date
+selected_day_data = load_data.loc[mask]
+
+if len(selected_day_data) != 24:
+    raise ValueError(f"Selected date {selected_date} does not have 24 hours of data.")
+
+# Extract the load values
+yearly_load_elec_housing = selected_day_data['load'].values
+
 # Time horizon (hours)
-N = 24  # You can change this to any value
+N = len(yearly_load_elec_housing)  # Should be 24
 
 # Network structure: Network with M=4 nodes and 5 lines
 M = 4  # M is fixed as a parameter
@@ -34,9 +52,6 @@ G1_max = 1  # Capacity of G1 (per unit)
 # Generator 2 at node 2 (Coal power plant)
 f2 = 3  # Cost per unit of energy
 G2_max = 0.7  # Capacity of G2 (per unit)
-
-# Load curve (Assumed as an example)
-yearly_load_elec_housing = 0.5 * np.ones(N)  # Example load curve
 
 # 2. VARIABLES
 dim_x = M * 2 * N  # Total number of variables
@@ -133,7 +148,7 @@ if result.success:
 else:
     print("Optimization failed.")
     print(result.message)
-# %%
+
 # 6. EXTRACT
 x_opt = result.x
 
@@ -157,7 +172,7 @@ for k in range(N):
     V2[k] = x_opt[index_V(1, k)]
     V3[k] = x_opt[index_V(2, k)]
     V4[k] = x_opt[index_V(3, k)]
-# %%
+
 # 7. PLOT
 plt.figure()
 plt.plot(P1 + P2, label='Total Generation')
@@ -180,3 +195,5 @@ plt.ylabel('Generation')
 plt.legend()
 plt.title('Generation Units Output')
 plt.show()
+
+# %%
