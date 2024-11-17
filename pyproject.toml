@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "vt_energy_opti"
+version = "0.1.0"
+description = "Optimization model for energy investment decisions"
+authors = ["Your Name <you@example.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^2.1.3"
+scipy = "^1.14.1"
+matplotlib = "^3.9.2"
+pandas = "^2.2.3"
+sympy = "^1.13.3"
+ipykernel = "^6.29.5"
+
+[tool.poetry.dev-dependencies]
+pytest = "^7.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

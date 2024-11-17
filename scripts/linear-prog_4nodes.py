@@ -9,12 +9,12 @@ from scipy.sparse import lil_matrix
 # 0. DATA
 
 # Load the demand data
-load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
+load_data = pd.read_csv('/Users/ruivieira/Documents/Projects/vt_energy_opti/data/raw/data-load-becc.csv',
                         sep=';', decimal=',')
 load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
 load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
 
-g1_max_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/gen-pv.csv', 
+g1_max_data = pd.read_csv('/Users/ruivieira/Documents/Projects/vt_energy_opti/data/processed/gen-pv.csv', 
                           sep=';', decimal='.')
 g1_max_data['time'] = pd.to_datetime(g1_max_data['time'], format='%d.%m.%y %H:%M')
 g1_max_data['electricity'] = pd.to_numeric(g1_max_data['electricity'])
