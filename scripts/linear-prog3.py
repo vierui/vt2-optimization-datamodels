@@ -17,14 +17,14 @@ datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/"
 # ===========================
 
 demand_data = pd.read_csv(
-    '/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
+    '/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/raw/data-load-becc.csv',
     delimiter=';',
-    names=['time', 'demand'],  # Specify the column names
+    names=['time', 'load'],  # Specify the column names
     parse_dates=['time'],
     dayfirst=True
 )
 
-demand_data['demand'] = pd.to_numeric(demand_data['demand']) * 100
+demand_data['load'] = pd.to_numeric(demand_data['load']) * 100
 
 wind_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
 

@@ -14,7 +14,7 @@ load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
 load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
 
 # Select a specific day
-selected_date = '2023-01-01'  # Replace with the date you want to select
+selected_date = '2023-02-01'  # Replace with the date you want to select
 mask = load_data['time'].dt.strftime('%Y-%m-%d') == selected_date
 selected_day_data = load_data.loc[mask]
 
@@ -51,7 +51,7 @@ G1_max = 1  # Capacity of G1 (per unit)
 
 # Generator 2 at node 2 (Coal power plant)
 f2 = 3  # Cost per unit of energy
-G2_max = 0.7  # Capacity of G2 (per unit)
+G2_max = 0.6  # Capacity of G2 (per unit)
 
 # 2. VARIABLES
 dim_x = M * 2 * N  # Total number of variables

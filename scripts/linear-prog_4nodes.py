@@ -9,12 +9,12 @@ from scipy.sparse import lil_matrix
 # 0. DATA
 
 # Load the demand data
-load_data = pd.read_csv('/Users/ruivieira/Documents/Projects/vt_energy_opti/data/raw/data-load-becc.csv',
+load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/raw/data-load-becc.csv',
                         sep=';', decimal=',')
 load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
 load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
 
-g1_max_data = pd.read_csv('/Users/ruivieira/Documents/Projects/vt_energy_opti/data/processed/gen-pv.csv', 
+g1_max_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/processed/gen-pv.csv', 
                           sep=';', decimal='.')
 g1_max_data['time'] = pd.to_datetime(g1_max_data['time'], format='%d.%m.%y %H:%M')
 g1_max_data['electricity'] = pd.to_numeric(g1_max_data['electricity'])
@@ -135,7 +135,7 @@ num_ineq = N * num_lines * 2  # Two constraints per line per time step
 A_ub = lil_matrix((num_ineq, dim_x))
 b_ub = np.zeros(num_ineq)
 
-rate_limit = 100
+rate_limit = 60
 line_limits = {
     (0, 1): {'B': Y12, 'P_max': rate_limit},  # Line 0-1
     (0, 2): {'B': Y13, 'P_max': rate_limit},  # Line 0-2
@@ -173,9 +173,9 @@ bounds = []
 # For P variables (Generators and Loads)
 for node in range(M):
     if node == 0:  # P1 (PV Generator at Node 1)
-        bounds.extend([(0, G1_max[k]) for k in range(N)])
+        bounds.extend([(0, None) for k in range(N)])
     elif node == 1:  # P2 (Coal)
-        bounds.extend([(0, G2_max) for k in range(N)])
+        bounds.extend([(0, None) for k in range(N)])
     elif node == 2:  # P3 (Transit node)
         bounds.extend([(0, 0) for k in range(N)])
     elif node == 3:  # P4 (Load)
