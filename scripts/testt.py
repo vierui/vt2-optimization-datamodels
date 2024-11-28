@@ -32,7 +32,7 @@ M = 4  # M is fixed as a parameter
 
 # Susceptances of the lines (p.u.)
 Y12 = 0.3  # Line between nodes 1 and 2
-Y13 = 0.1  # Line between nodes 1 and 3
+Y13 = 0.7  # Line between nodes 1 and 3
 Y14 = 0.5  # Line between nodes 1 and 4
 Y24 = 0.1  # Line between nodes 2 and 4
 Y34 = 0.4  # Line between nodes 3 and 4
@@ -54,17 +54,17 @@ f2 = 3  # Cost per unit of energy
 G2_max = 0.6  # Capacity of G2 (per unit)
 
 # Storage Energy
-E_max = 4  # Define maximum storage capacity
+E_max = 50  # Define maximum storage capacity
 E_initial = 0.5  # Define initial storage energy
 eta = 0.99  # Storage efficiency factor
 
 # Line flow limits (Define maximum power flow for each line)
 # Assuming you have these values; replace with actual data if different
-P_max_12 = 1
-P_max_13 = 1
-P_max_14 = 1
-P_max_24 = 1
-P_max_34 = 1
+P_max_12 = 100
+P_max_13 = 100
+P_max_14 = 100
+P_max_24 = 100
+P_max_34 = 100
 
 # 2. VARIABLES
 dim_x = M * 2 * N + (N + 1)  # 4 * 2 * 24 + 25 = 217
@@ -82,24 +82,26 @@ def index_E(k):
     return M * 2 * N + k  # E variables start after P and V variables
 
 # 3. OBJECTIVE FUNCTION
+# Cost for P1 and P2; assume no cost for P3 and P4
 f = np.concatenate([
     f1 * np.ones(N),    # Cost for P1
     f2 * np.ones(N),    # Cost for P2
-    np.zeros(N),        # No cost for P3
-    np.zeros(N),        # No cost P4
-    np.zeros(4 * N),    # No cost for all Vs
+    np.zeros(N),        # Cost for P3 (Storage)
+    np.zeros(N),        # Cost for P4 (Load)
+    np.zeros(4 * N),    # No cost for V1, V2, V3, V4
     np.zeros(N + 1)     # No cost for E(k)
 ])
 
 # 4. EQUALITY CONSTRAINTS
-num_constraints = 7 * N + 1  # 7 constraints per hour + 1 initial storage constraint = 169
+# 7 constraints per hour + 2 storage constraints = 7*24 +2 = 170
+num_constraints = 7 * N + 2  # Increased by 2 to accommodate E(0) = E_initial and E(N) = E(0)
 A_eq = lil_matrix((num_constraints, dim_x))
 b_eq = np.zeros(num_constraints)
 
 row = 0
 for k in range(N):
     for i in range(M):
-        # Power Flow Constraints
+        # Power Flow Constraints: Y[i,i]*V_i - sum(Y[i,j]*V_j) - P_i = 0
         A_eq[row, index_V(i, k)] += Y[i, i]  # Self-admittance term
         for j in range(M):
             if j != i:
@@ -121,23 +123,20 @@ for k in range(N):
     # Storage Dynamics: E(k+1) = eta * E(k) + P3(k)
     A_eq[row, index_E(k + 1)] = 1
     A_eq[row, index_E(k)] = -eta
-    A_eq[row, index_P(2, k)] = -1  # P3(k) at node 3 is index 2
+    A_eq[row, index_P(2, k)] = -1  # Negative sign for P3(k)
     b_eq[row] = 0
     row += 1
 
-# Cyclic energy E(0) = E(N)
+# Set E(0) = E_initial
+A_eq[row, index_E(0)] = 1
+b_eq[row] = E_initial
+row += 1
+
+# Set E(N) = E(0)
 A_eq[row, index_E(N)] = 1
 A_eq[row, index_E(0)] = -1
 b_eq[row] = 0
 row += 1
-
-# Set initial energy E(0) = E_initial**
-# A_eq[row, index_E(0)] = 1
-# b_eq[row] = E_initial
-# row += 1
-
-# Convert A_eq to CSR format for efficiency
-A_eq = A_eq.tocsr()
 
 # Verify that all constraints have been added correctly
 assert row == num_constraints, f"Expected {num_constraints} constraints, but got {row}."
@@ -226,12 +225,13 @@ for node in range(M):
 for k in range(N + 1):
     bounds[index_E(k)] = (0, E_max)
 
+# 7. SOLVE THE OPTIMIZATION
 
-
-# %%
-# 5. SOLVE
+# Combine all constraints and bounds in linprog
 result = linprog(
     c=f,
+    A_ub=A_ub,
+    b_ub=b_ub,
     A_eq=A_eq,
     b_eq=b_eq,
     bounds=bounds,
@@ -244,8 +244,9 @@ if result.success:
 else:
     print("Optimization failed.")
     print(result.message)
-# 
-# 6. EXTRACT
+
+# 8. EXTRACT RESULTS
+
 # Initialize arrays
 P1 = np.zeros(N)
 P2 = np.zeros(N)
@@ -271,93 +272,7 @@ for k in range(N):
     E[k] = result.x[index_E(k)]
 E[N] = result.x[index_E(N)]
 
-# 7. PRINT ALL VARIABLES
-# Create a DataFrame to store variables
-data = pd.DataFrame({
-    'Hour': range(N),
-    'P1': P1,
-    'P2': P2,
-    'P3': P3,
-    'P4': P4,
-    'V1': V1,
-    'V2': V2,
-    'V3': V3,
-    'V4': V4,
-    'E': E[:-1],       # E[0] to E[N-1], corresponds to hours 0 to N-1
-    'E_next': E[1:],   # E[1] to E[N], corresponds to hours 0 to N-1
-    'Delta_E': E[1:] - E[:-1]  # Change in storage energy
-})
-
-# Print the DataFrame
-print("All Variables:")
-print(data.to_string(index=False))
-
-# Optionally, save to CSV
-data.to_csv('optimization_variables_corrected.csv', index=False)
-print("Variables saved to 'optimization_variables_corrected.csv'.")
-
-# 8. PLOT
-# Plot individual generation outputs against the load
-plt.figure(figsize=(12, 6))
-plt.plot(data['Hour'], -data['P4'], label='Load', linewidth=2)
-plt.plot(data['Hour'], data['P1'], label='Generator 1 Output (P1)')
-plt.plot(data['Hour'], data['P2'], label='Generator 2 Output (P2)')
-plt.plot(data['Hour'], data['P3'], label='Storage Power (P3)')
-plt.xlabel('Hour')
-plt.ylabel('Power (Units)')
-plt.title('Generation Outputs and Load Over Time')
-plt.legend()
-plt.grid(True)
-plt.show()
-
-# Plot storage energy over time
-plt.figure(figsize=(12, 6))
-plt.plot(data['Hour'], data['E'], label='Storage Energy Start (E)')
-plt.plot(data['Hour'], data['E_next'], label='Storage Energy End (E_next)')
-plt.xlabel('Hour')
-plt.ylabel('Energy Stored')
-plt.title('Storage State of Charge Over Time')
-plt.legend()
-plt.grid(True)
-plt.show()
-
-# 9. GENERATE POWER FLOWS THROUGH THE LINES
-
-# Define lines and their susceptances
-lines = [
-    {'name': 'Line 1-2', 'from': 0, 'to': 1, 'Y': Y12},
-    {'name': 'Line 1-3', 'from': 0, 'to': 2, 'Y': Y13},
-    {'name': 'Line 1-4', 'from': 0, 'to': 3, 'Y': Y14},
-    {'name': 'Line 2-4', 'from': 1, 'to': 3, 'Y': Y24},
-    {'name': 'Line 3-4', 'from': 2, 'to': 3, 'Y': Y34}
-]
-
-# Initialize a dictionary to store power flows for each line
-power_flows = {line['name']: np.zeros(N) for line in lines}
-
-# Compute power flows
-for k in range(N):
-    V = [V1[k], V2[k], V3[k], V4[k]]  # Voltage angles at time k
-    for line in lines:
-        i = line['from']
-        j = line['to']
-        Y_ij = line['Y']
-        flow = Y_ij * (V[i] - V[j])
-        power_flows[line['name']][k] = flow
-
-# Plot power flows
-plt.figure(figsize=(12, 6))
-for line in lines:
-    plt.plot(data['Hour'], power_flows[line['name']], label=line['name'])
-plt.xlabel('Hour')
-plt.ylabel('Power Flow (Units)')
-plt.title('Power Flows Through the Lines Over Time')
-plt.legend()
-plt.grid(True)
-plt.show()
-
-# %%
-# 7. VERIFY LOAD IS MET
+# 9. VERIFY LOAD IS MET
 
 # Calculate total generation for each hour
 total_generation = P1 + P2 + P3  # Sum of Generators and Storage
@@ -366,10 +281,32 @@ total_generation = P1 + P2 + P3  # Sum of Generators and Storage
 residual = total_generation - yearly_load_elec_housing
 
 # Print residuals for each hour
-print("Hour | Total Generation | Load | Residual")
-print("--------------------------------------------")
+print("\nHour | P1       | P2       | P3        | P4      | Total Generation | Load   | Residual")
+print("-------------------------------------------------------------------------------------------")
 for k in range(N):
-    print(f"{k:>4} | {total_generation[k]:>16.4f} | {yearly_load_elec_housing[k]:>4.2f} | {residual[k]:>8.4f}")
+    print(f"{k:>4} | {P1[k]:>8.4f} | {P2[k]:>8.4f} | {P3[k]:>9.4f} | {P4[k]:>7.3f} | {total_generation[k]:>17.4f} | {yearly_load_elec_housing[k]:>6.2f} | {residual[k]:>8.4f}")
 
+# Calculate Maximum and Average Residuals
+max_residual = np.max(np.abs(residual))
+avg_residual = np.mean(np.abs(residual))
+
+print(f"\nMaximum Residual: {max_residual:.6f}")
+print(f"Average Residual: {avg_residual:.6f}")
+
+# Plot Total Generation and Load Over Time
+plt.figure(figsize=(12, 6))
+hours = range(N)
+
+plt.plot(hours, total_generation, label='Total Generation (P1 + P2 + P3)', marker='o')
+plt.plot(hours, yearly_load_elec_housing, label='Load', marker='x')
+
+plt.xlabel('Hour')
+plt.ylabel('Power (Units)')
+plt.title('Total Generation vs. Load Over 24 Hours')
+plt.legend()
+plt.grid(True)
+plt.xticks(hours)  # Show all hours on the x-axis for clarity
+plt.tight_layout()
+plt.show()
 
 # %%
