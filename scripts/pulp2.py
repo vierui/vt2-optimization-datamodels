@@ -10,16 +10,14 @@ import networkx as nx
 import plotly.graph_objects as go
 
 # Working directory
-datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/"
-
+datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/processed/"
 # %%
 # 2. Data
 # ===========================
 
-demand_data = pd.read_csv(
-    '/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/raw/data-load-becc.csv',
+demand_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/raw/data-load-becc.csv',
     delimiter=';',
-    names=['time', 'load'],  # Specify the column names
+    names=['time', 'load'],
     parse_dates=['time'],
     dayfirst=True,
     header=0
@@ -27,7 +25,7 @@ demand_data = pd.read_csv(
 
 demand_data['load'] = pd.to_numeric(demand_data['load']) * 100
 
-wind_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
+wind_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/raw/wind-sion-2023.csv', skiprows=3, parse_dates=['time'], delimiter=',')
 
 # Load into DataFrames
 wind_gen = pd.DataFrame({
@@ -46,6 +44,7 @@ solar_gen = pd.DataFrame({
     'pmin': 0,
     'gencost': 9  # Cost coefficient for solar generator
 })
+
 # Combine wind and solar generator data
 gen_time_series = pd.concat([wind_gen, solar_gen], ignore_index=True)
 
@@ -61,6 +60,7 @@ demand_time_series['time'] = pd.to_datetime(demand_time_series['time'])
 
 # Load branch and bus data
 branch = pd.read_csv(datadir + "branch.csv")
+print(branch)
 bus = pd.read_csv(datadir + "bus.csv")
 
 # Rename all columns to lowercase
@@ -269,51 +269,39 @@ plt.show()
 
 
 # %%
-# Merge flows with branch data to get line limits
-flows_with_limits = pd.merge(
-    flows_over_time,
-    branch[['fbus', 'tbus', 'ratea']],
-    left_on=['from_bus', 'to_bus'],
-    right_on=['fbus', 'tbus'],
-    how='left'
-)
-
-# Calculate absolute flow and compare with limits
-flows_with_limits['abs_flow'] = flows_with_limits['flow'].abs()
-flows_with_limits['within_limits'] = flows_with_limits['abs_flow'] <= flows_with_limits['ratea']
-
-# Identify any flows exceeding limits
-flows_exceeding_limits = flows_with_limits[~flows_with_limits['within_limits']]
-
-# Print any lines exceeding limits
-if not flows_exceeding_limits.empty:
-    print("Lines exceeding limits:")
-    print(flows_exceeding_limits[['time', 'from_bus', 'to_bus', 'flow', 'ratea']])
-else:
-    print("All line flows are within limits.")
-
 # Plot flows over time for each line
 unique_lines = flows_with_limits[['from_bus', 'to_bus']].drop_duplicates()
 
 plt.figure(figsize=(12, 6))
 
+# Iterate over each unique line to plot its flow
 for idx, row in unique_lines.iterrows():
+    # Filter flows for the current line
     line_flows = flows_with_limits[
         (flows_with_limits['from_bus'] == row['from_bus']) & 
         (flows_with_limits['to_bus'] == row['to_bus'])
     ]
+    # Plot the line flows over time
     plt.plot(
         line_flows['time'], 
         line_flows['flow'], 
         label=f"Line {row['from_bus']}->{row['to_bus']}"
     )
 
+# Assuming the line limit is the same for all lines
+line_limit = branch['ratea'].iloc[0]  # Get the limit from the first line
+# Plot horizontal lines for the upper and lower limits
+plt.axhline(y=line_limit, color='red', linestyle='--', label='Line Limit')
+plt.axhline(y=-line_limit, color='red', linestyle='--')
+
+# Set plot labels and title
 plt.xlabel('Time')
 plt.ylabel('Flow (MW)')
-plt.title('Line Flows Over Time')
+plt.title('Line Flows Over Time with Limits')
 plt.legend()
 plt.grid(True)
 plt.show()
+
 
 # %%
 # Create a graph
