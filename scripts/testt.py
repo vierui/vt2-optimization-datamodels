@@ -1,312 +1,388 @@
 # %%
+# 1. Initialization
+# ===========================
+
 import pandas as pd
 import numpy as np
-from scipy.optimize import linprog
+import pulp
 import matplotlib.pyplot as plt
-from scipy.sparse import lil_matrix
+import networkx as nx
 
-# 1. PARAMETERS
-
-# Load the data
-load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
-                        sep=';', decimal=',')
-load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
-load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
-
-# Select a specific day
-selected_date = '2023-02-01'  # Replace with the date you want to select
-mask = load_data['time'].dt.strftime('%Y-%m-%d') == selected_date
-selected_day_data = load_data.loc[mask]
-
-if len(selected_day_data) != 24:
-    raise ValueError(f"Selected date {selected_date} does not have 24 hours of data.")
-
-# Extract the load values
-yearly_load_elec_housing = selected_day_data['load'].values
-
-# Time horizon (hours)
-N = len(yearly_load_elec_housing)  # Should be 24
-
-# Network structure: Network with M=4 nodes and 5 lines
-M = 4  # M is fixed as a parameter
-
-# Susceptances of the lines (p.u.)
-Y12 = 0.3  # Line between nodes 1 and 2
-Y13 = 0.7  # Line between nodes 1 and 3
-Y14 = 0.5  # Line between nodes 1 and 4
-Y24 = 0.1  # Line between nodes 2 and 4
-Y34 = 0.4  # Line between nodes 3 and 4
-
-# Admittance matrix Y
-Y = np.array([
-    [Y12 + Y14 + Y13, -Y12, -Y13, -Y14],
-    [-Y12, Y24 + Y12, 0, -Y24],
-    [-Y13, 0, Y13 + Y34, -Y34],
-    [-Y14, -Y24, -Y34, Y14 + Y24 + Y34]
-])
-
-# Generator 1 at node 1 (Gas turbine)
-f1 = 10  # Cost per unit of energy
-G1_max = 1  # Capacity of G1 (per unit)
-
-# Generator 2 at node 2 (Coal power plant)
-f2 = 3  # Cost per unit of energy
-G2_max = 0.6  # Capacity of G2 (per unit)
-
-# Storage Energy
-E_max = 50  # Define maximum storage capacity
-E_initial = 0.5  # Define initial storage energy
-eta = 0.99  # Storage efficiency factor
-
-# Line flow limits (Define maximum power flow for each line)
-# Assuming you have these values; replace with actual data if different
-P_max_12 = 100
-P_max_13 = 100
-P_max_14 = 100
-P_max_24 = 100
-P_max_34 = 100
-
-# 2. VARIABLES
-dim_x = M * 2 * N + (N + 1)  # 4 * 2 * 24 + 25 = 217
-
-def index_P(node, k):
-    """Returns the index of P for a given node and time k."""
-    return node * N + k
-
-def index_V(node, k):
-    """Returns the index of V for a given node and time k."""
-    return M * N + node * N + k
-
-def index_E(k):
-    """Returns the index of E at time k."""
-    return M * 2 * N + k  # E variables start after P and V variables
-
-# 3. OBJECTIVE FUNCTION
-# Cost for P1 and P2; assume no cost for P3 and P4
-f = np.concatenate([
-    f1 * np.ones(N),    # Cost for P1
-    f2 * np.ones(N),    # Cost for P2
-    np.zeros(N),        # Cost for P3 (Storage)
-    np.zeros(N),        # Cost for P4 (Load)
-    np.zeros(4 * N),    # No cost for V1, V2, V3, V4
-    np.zeros(N + 1)     # No cost for E(k)
-])
-
-# 4. EQUALITY CONSTRAINTS
-# 7 constraints per hour + 2 storage constraints = 7*24 +2 = 170
-num_constraints = 7 * N + 2  # Increased by 2 to accommodate E(0) = E_initial and E(N) = E(0)
-A_eq = lil_matrix((num_constraints, dim_x))
-b_eq = np.zeros(num_constraints)
-
-row = 0
-for k in range(N):
-    for i in range(M):
-        # Power Flow Constraints: Y[i,i]*V_i - sum(Y[i,j]*V_j) - P_i = 0
-        A_eq[row, index_V(i, k)] += Y[i, i]  # Self-admittance term
-        for j in range(M):
-            if j != i:
-                A_eq[row, index_V(j, k)] -= Y[i, j]  # Susceptance to other nodes
-        A_eq[row, index_P(i, k)] -= 1  # Negative sign for P_i
-        b_eq[row] = 0
-        row += 1
-
-    # Load at Node 4: P4(k) = -Load(k)
-    A_eq[row, index_P(3, k)] = 1  # Node 4 is index 3 (0-based)
-    b_eq[row] = -yearly_load_elec_housing[k]
-    row += 1
-
-    # Voltage Angle at Node 1: V1(k) = 0
-    A_eq[row, index_V(0, k)] = 1  # Node 1 is index 0 (0-based)
-    b_eq[row] = 0
-    row += 1
-
-    # Storage Dynamics: E(k+1) = eta * E(k) + P3(k)
-    A_eq[row, index_E(k + 1)] = 1
-    A_eq[row, index_E(k)] = -eta
-    A_eq[row, index_P(2, k)] = -1  # Negative sign for P3(k)
-    b_eq[row] = 0
-    row += 1
-
-# Set E(0) = E_initial
-A_eq[row, index_E(0)] = 1
-b_eq[row] = E_initial
-row += 1
-
-# Set E(N) = E(0)
-A_eq[row, index_E(N)] = 1
-A_eq[row, index_E(0)] = -1
-b_eq[row] = 0
-row += 1
-
-# Verify that all constraints have been added correctly
-assert row == num_constraints, f"Expected {num_constraints} constraints, but got {row}."
-
-# 5. INEQUALITY CONSTRAINTS (A_ub and b_ub)
-
-# Define line flow constraints and generator bounds
-num_lines = 5  # Number of lines
-num_ineq_constraints = 2 * num_lines * N + 2 * N  # Line flows and generator bounds
-
-A_ub = lil_matrix((num_ineq_constraints, dim_x))
-b_ub = np.zeros(num_ineq_constraints)
-
-row_ub = 0
-
-# Line flow constraints
-for k in range(N):  # For each time step
-    for (i, j, Y_ij, P_max_ij) in [
-        (0, 1, Y12, P_max_12),
-        (0, 2, Y13, P_max_13),
-        (0, 3, Y14, P_max_14),
-        (1, 3, Y24, P_max_24),
-        (2, 3, Y34, P_max_34),
-    ]:
-        # Line flow: Y_ij * (V_i - V_j) <= P_max
-        A_ub[row_ub, index_V(i, k)] = Y_ij
-        A_ub[row_ub, index_V(j, k)] = -Y_ij
-        b_ub[row_ub] = P_max_ij
-        row_ub += 1
-
-        # Line flow: -Y_ij * (V_i - V_j) <= P_max
-        A_ub[row_ub, index_V(i, k)] = -Y_ij
-        A_ub[row_ub, index_V(j, k)] = Y_ij
-        b_ub[row_ub] = P_max_ij
-        row_ub += 1
-
-# Generator bounds constraints: P1 <= G1_max and P2 <= G2_max
-for k in range(N):
-    # P1 (Generator 1)
-    A_ub[row_ub, index_P(0, k)] = 1  # P1 <= G1_max
-    b_ub[row_ub] = G1_max
-    row_ub += 1
-
-    # P2 (Generator 2)
-    A_ub[row_ub, index_P(1, k)] = 1  # P2 <= G2_max
-    b_ub[row_ub] = G2_max
-    row_ub += 1
-
-# Verify that all inequality constraints have been added correctly
-assert row_ub == num_ineq_constraints, f"Expected {num_ineq_constraints} inequality constraints, but got {row_ub}."
-
-# Convert A_ub to CSR format for efficiency
-A_ub = A_ub.tocsr()
-
-# 6. BOUNDS
-
-# Reset bounds to (-inf, inf) since bounds are now handled via A_ub
-bounds = [(None, None) for _ in range(dim_x)]
-
-# Alternatively, you can set specific bounds where appropriate
-# For example, P1 and P2 should be non-negative
-for node in range(M):
-    if node == 0:  # P1 (Generator 1)
-        for k in range(N):
-            bounds[index_P(node, k)] = (0, None)  # P1 >= 0
-    elif node == 1:  # P2 (Generator 2)
-        for k in range(N):
-            bounds[index_P(node, k)] = (0, None)  # P2 >= 0
-    elif node == 2:  # P3 (Storage)
-        for k in range(N):
-            bounds[index_P(node, k)] = (-np.inf, np.inf)  # P3 can charge or discharge
-    elif node == 3:  # P4 (Load)
-        for k in range(N):
-            bounds[index_P(node, k)] = (-np.inf, np.inf)  # P4 is fixed via equality constraints
-
-# Voltage angles: V1 is fixed at 0, others are free
-for node in range(M):
-    if node == 0:  # V1 (Reference node)
-        for k in range(N):
-            bounds[index_V(node, k)] = (0, 0)  # V1 fixed at 0
-    else:
-        for k in range(N):
-            bounds[index_V(node, k)] = (None, None)  # V2, V3, V4 are free
-
-# Storage Energy: 0 <= E(k) <= E_max
-for k in range(N + 1):
-    bounds[index_E(k)] = (0, E_max)
-
-# 7. SOLVE THE OPTIMIZATION
-
-# Combine all constraints and bounds in linprog
-result = linprog(
-    c=f,
-    A_ub=A_ub,
-    b_ub=b_ub,
-    A_eq=A_eq,
-    b_eq=b_eq,
-    bounds=bounds,
-    method='highs',
-    options={'disp': True}
-)
-
-if result.success:
-    print("Optimization was successful.")
-else:
-    print("Optimization failed.")
-    print(result.message)
-
-# 8. EXTRACT RESULTS
-
-# Initialize arrays
-P1 = np.zeros(N)
-P2 = np.zeros(N)
-P3 = np.zeros(N)
-P4 = np.zeros(N)
-V1 = np.zeros(N)
-V2 = np.zeros(N)
-V3 = np.zeros(N)
-V4 = np.zeros(N)
-E = np.zeros(N + 1)  # Storage energy from E(0) to E(N)
-
-for k in range(N):
-    P1[k] = result.x[index_P(0, k)]
-    P2[k] = result.x[index_P(1, k)]
-    P3[k] = result.x[index_P(2, k)]
-    P4[k] = result.x[index_P(3, k)]
-    
-    V1[k] = result.x[index_V(0, k)]
-    V2[k] = result.x[index_V(1, k)]
-    V3[k] = result.x[index_V(2, k)]
-    V4[k] = result.x[index_V(3, k)]
-    
-    E[k] = result.x[index_E(k)]
-E[N] = result.x[index_E(N)]
-
-# 9. VERIFY LOAD IS MET
-
-# Calculate total generation for each hour
-total_generation = P1 + P2 + P3  # Sum of Generators and Storage
-
-# Calculate residuals (generation - load)
-residual = total_generation - yearly_load_elec_housing
-
-# Print residuals for each hour
-print("\nHour | P1       | P2       | P3        | P4      | Total Generation | Load   | Residual")
-print("-------------------------------------------------------------------------------------------")
-for k in range(N):
-    print(f"{k:>4} | {P1[k]:>8.4f} | {P2[k]:>8.4f} | {P3[k]:>9.4f} | {P4[k]:>7.3f} | {total_generation[k]:>17.4f} | {yearly_load_elec_housing[k]:>6.2f} | {residual[k]:>8.4f}")
-
-# Calculate Maximum and Average Residuals
-max_residual = np.max(np.abs(residual))
-avg_residual = np.mean(np.abs(residual))
-
-print(f"\nMaximum Residual: {max_residual:.6f}")
-print(f"Average Residual: {avg_residual:.6f}")
-
-# Plot Total Generation and Load Over Time
-plt.figure(figsize=(12, 6))
-hours = range(N)
-
-plt.plot(hours, total_generation, label='Total Generation (P1 + P2 + P3)', marker='o')
-plt.plot(hours, yearly_load_elec_housing, label='Load', marker='x')
-
-plt.xlabel('Hour')
-plt.ylabel('Power (Units)')
-plt.title('Total Generation vs. Load Over 24 Hours')
-plt.legend()
-plt.grid(True)
-plt.xticks(hours)  # Show all hours on the x-axis for clarity
-plt.tight_layout()
-plt.show()
+# Working directory
+datadir = "/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/processed/"
 
 # %%
+# 2. Data
+# ===========================
+
+# Load demand data
+demand_data = pd.read_csv(
+    '/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/raw/data-load-becc.csv',
+    delimiter=';',
+    names=['time', 'load'],
+    parse_dates=['time'],
+    dayfirst=True,
+    header=0
+)
+
+demand_data['load'] = pd.to_numeric(demand_data['load']) * 100
+
+# Load wind data
+wind_data = pd.read_csv(
+    '/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/wind-sion-2023.csv',
+    skiprows=3,
+    parse_dates=['time'],
+    delimiter=','
+)
+
+# Create generator time series DataFrame
+wind_gen = pd.DataFrame({
+    'time': wind_data['time'],
+    'id': 1,
+    'bus': 1,
+    'pmax': wind_data['electricity'],
+    'pmin': 0,
+    'gencost': 5
+})
+
+solar_gen = pd.DataFrame({
+    'time': wind_data['time'],
+    'id': 2,
+    'bus': 2,
+    'pmax': 250,
+    'pmin': 0,
+    'gencost': 9
+})
+
+# Combine wind and solar generator data
+gen_time_series = pd.concat([wind_gen, solar_gen], ignore_index=True)
+
+# Create demand time series DataFrame
+demand_time_series = pd.DataFrame({
+    'time': demand_data['time'],
+    'bus': 3,
+    'pd': demand_data['load'],
+})
+
+# Ensure 'time' columns are datetime
+gen_time_series['time'] = pd.to_datetime(gen_time_series['time'])
+demand_time_series['time'] = pd.to_datetime(demand_time_series['time'])
+
+# Load branch and bus data
+branch = pd.read_csv(datadir + "branch.csv")
+bus = pd.read_csv(datadir + "bus.csv")
+
+# Rename all columns to lowercase
+for df in [branch, bus]:
+    df.columns = df.columns.str.lower()
+
+# Create generator and line IDs
+branch['id'] = np.arange(1, len(branch) + 1)
+
+# Susceptance of each line
+branch['sus'] = 1 / branch['x']
+
+# %%
+# 2.1 Add Storage
+# ===========================
+
+# Storage parameters
+storage_id = 3  # Next available generator ID
+storage_bus = 3  # Bus where storage is connected
+Pmax_storage = 100  # Maximum charging/discharging power (MW)
+E_max = 500  # Maximum energy capacity (MWh)
+eta = 0.95  # Storage efficiency (95%)
+storage_cost = 0  # Operational cost (adjust as needed)
+
+# Create storage generator DataFrame
+storage_gen = pd.DataFrame({
+    'time': pd.to_datetime(wind_data['time']),
+    'id': storage_id,
+    'bus': storage_bus,
+    'pmax': Pmax_storage,
+    'pmin': -Pmax_storage,
+    'gencost': storage_cost
+})
+
+# Add storage to gen_time_series
+gen_time_series = pd.concat([gen_time_series, storage_gen], ignore_index=True)
+
+# %%
+# 3. Function
+# ===========================
+
+def dcopf_multi_period(gen_time_series, branch, bus, demand_time_series):
+    # Create the optimization model
+    DCOPF = pulp.LpProblem("DCOPF_Multi_Period", pulp.LpMinimize)
+    
+    # Define sets
+    time_steps = sorted(gen_time_series['time'].unique())
+    G = gen_time_series['id'].unique()  # Set of all generators
+    N = bus['bus_i'].values             # Set of all buses
+
+    # Decision variables
+    GEN = {}
+    THETA = {}
+    FLOW = {}
+    E = {}
+    for t in time_steps:
+        for g in G:
+            pmin = gen_time_series.loc[
+                (gen_time_series['id'] == g) & (gen_time_series['time'] == t),
+                'pmin'].values[0]
+            pmax = gen_time_series.loc[
+                (gen_time_series['id'] == g) & (gen_time_series['time'] == t),
+                'pmax'].values[0]
+            GEN[g, t] = pulp.LpVariable(f"GEN_{g}_{t}",
+                                        lowBound=pmin,
+                                        upBound=pmax)
+        for i in N:
+            THETA[i, t] = pulp.LpVariable(f"THETA_{i}_{t}", lowBound=None)
+        for idx, row in branch.iterrows():
+            i = row['fbus']
+            j = row['tbus']
+            FLOW[i, j, t] = pulp.LpVariable(f"FLOW_{i}_{j}_{t}",
+                                            lowBound=None)
+        # Storage SoC variable
+        E[t] = pulp.LpVariable(f"E_{t}", lowBound=0, upBound=E_max)
+    
+    # Initial SoC (can be set as a parameter)
+    E_init = 0.5 * E_max
+    DCOPF += E[time_steps[0]] == E_init, "Initial_SoC"
+
+    # Objective function: Minimize generation costs
+    DCOPF += pulp.lpSum(
+        gen_time_series.loc[
+            (gen_time_series['id'] == g) & (gen_time_series['time'] == t),
+            'gencost'].values[0] * GEN[g, t]
+        for t in time_steps for g in G
+    ), "Total Generation Cost"
+
+    # Constraints
+    for t in time_steps:
+        # Slack bus angle
+        DCOPF += THETA[1, t] == 0, f"Slack_Bus_Angle_Time_{t}"
+        
+        # Power balance at each bus
+        for i in N:
+            gen_sum = pulp.lpSum(
+                GEN[g, t]
+                for g in gen_time_series[
+                    (gen_time_series['bus'] == i) &
+                    (gen_time_series['time'] == t)
+                ]['id'].unique()
+            )
+            demand = demand_time_series.loc[
+                (demand_time_series['bus'] == i) &
+                (demand_time_series['time'] == t), 'pd']
+            demand_value = demand.values[0] if not demand.empty else 0
+
+            flow_out = pulp.lpSum(
+                FLOW[i, j, t]
+                for (i_, j, t_) in FLOW if i_ == i and t_ == t
+            )
+            flow_in = pulp.lpSum(
+                FLOW[j, i, t]
+                for (j, i_, t_) in FLOW if i_ == i and t_ == t
+            )
+
+            DCOPF += (
+                gen_sum - demand_value + flow_in - flow_out == 0
+            ), f"Power_Balance_at_Bus_{i}_Time_{t}"
+
+        # DC power flow equations
+        for idx, row in branch.iterrows():
+            i = row['fbus']
+            j = row['tbus']
+            DCOPF += (
+                FLOW[i, j, t] == row['sus'] * (THETA[i, t] - THETA[j, t])
+            ), f"Flow_Constraint_{i}_{j}_Time_{t}"
+
+        # Flow limits
+        for idx, row in branch.iterrows():
+            i = row['fbus']
+            j = row['tbus']
+            rate_a = row['ratea']
+            DCOPF += (
+                FLOW[i, j, t] <= rate_a
+            ), f"Flow_Limit_{i}_{j}_Upper_Time_{t}"
+            DCOPF += (
+                FLOW[i, j, t] >= -rate_a
+            ), f"Flow_Limit_{i}_{j}_Lower_Time_{t}"
+
+    # Storage dynamics and constraints
+    for idx, t in enumerate(time_steps[:-1]):
+        next_t = time_steps[idx + 1]
+        DCOPF += (
+            E[next_t] == eta * E[t] + GEN[storage_id, t]
+        ), f"Storage_Dynamics_Time_{t}"
+    
+    # Cyclic condition
+    DCOPF += E[time_steps[0]] == E[time_steps[-1]], "Cyclic_Condition"
+
+    # Solve the optimization problem
+    DCOPF.solve(pulp.GLPK(msg=True))
+
+    # Check solver status
+    status = pulp.LpStatus[DCOPF.status]
+    if status != 'Optimal':
+        print(f"Solver Status: {status}")
+        return None
+
+    # Extract results
+    generation = []
+    flows = []
+    storage_soc = []
+    for t in time_steps:
+        gen_t = pd.DataFrame({
+            'time': t,
+            'id': [g for g in G],
+            'gen': [pulp.value(GEN[g, t]) for g in G]
+        })
+        generation.append(gen_t)
+
+        flows_t = pd.DataFrame({
+            'time': t,
+            'from_bus': [i for (i, j, t_) in FLOW if t_ == t],
+            'to_bus': [j for (i, j, t_) in FLOW if t_ == t],
+            'flow': [pulp.value(FLOW[i, j, t]) for (i, j, t_) in FLOW if t_ == t]
+        })
+        flows.append(flows_t)
+
+        storage_soc.append({'time': t, 'E': pulp.value(E[t])})
+
+    # Combine results
+    generation = pd.concat(generation, ignore_index=True)
+    flows = pd.concat(flows, ignore_index=True)
+    storage_soc = pd.DataFrame(storage_soc)
+
+    # Return the solution
+    return {
+        'generation': generation,
+        'flows': flows,
+        'storage_soc': storage_soc,
+        'cost': pulp.value(DCOPF.objective),
+        'status': status
+    }
+
+# %%
+# 4. Solve
+# ===========================
+
+# Define the time steps to consider (e.g., a single day)
+selected_day = '2023-01-01'
+gen_time_series_day = gen_time_series[
+    gen_time_series['time'].dt.date == pd.to_datetime(selected_day).date()
+]
+demand_time_series_day = demand_time_series[
+    demand_time_series['time'].dt.date == pd.to_datetime(selected_day).date()
+]
+
+# Run the multi-period DCOPF
+result = dcopf_multi_period(
+    gen_time_series_day,
+    branch,
+    bus,
+    demand_time_series_day
+)
+
+# Check if result is not None
+if result is not None:
+    generation = result['generation']
+    flows = result['flows']
+    storage_soc = result['storage_soc']
+    total_cost = result['cost']
+
+    # Display results
+    print(f"Total Generation Cost: {total_cost}")
+    print("\nGeneration:")
+    print(generation)
+    print("\nStorage State of Charge:")
+    print(storage_soc)
+else:
+    print("Optimization did not find an optimal solution.")
+
+# %%
+# 5. Visualization
+# ===========================
+
+# Plot Storage State of Charge over time
+plt.figure(figsize=(12, 6))
+plt.plot(storage_soc['time'], storage_soc['E'], marker='o')
+plt.xlabel('Time')
+plt.ylabel('Energy Stored (MWh)')
+plt.title('Storage State of Charge Over Time')
+plt.grid(True)
+plt.show()
+
+# Plot Generation Mix Over Time
+# Merge generation data with generator types
+gen_info = pd.DataFrame({
+    'id': [1, 2, 3],
+    'type': ['Wind', 'Solar', 'Storage']
+})
+
+# Merge with generation data
+generation_with_types = pd.merge(generation, gen_info, on='id')
+
+# Pivot the DataFrame
+generation_pivot = generation_with_types.pivot_table(
+    index='time',
+    columns='type',
+    values='gen',
+    aggfunc='sum'
+).reset_index()
+
+generation_pivot.fillna(0, inplace=True)
+
+# Plot stacked area chart
+plt.figure(figsize=(12, 6))
+plt.stackplot(
+    generation_pivot['time'],
+    [generation_pivot['Wind'], generation_pivot['Solar'], generation_pivot['Storage']],
+    labels=['Wind', 'Solar', 'Storage']
+)
+plt.xlabel('Time')
+plt.ylabel('Generation (MW)')
+plt.title('Generation Mix Over Time')
+plt.legend(loc='upper left')
+plt.grid(True)
+plt.show()
+
+# Plot Line Flows Over Time with Limits
+flows_with_limits = pd.merge(
+    flows,
+    branch[['fbus', 'tbus', 'ratea']],
+    left_on=['from_bus', 'to_bus'],
+    right_on=['fbus', 'tbus'],
+    how='left'
+)
+
+unique_lines = flows_with_limits[['from_bus', 'to_bus']].drop_duplicates()
+
+plt.figure(figsize=(12, 6))
+
+for idx, row in unique_lines.iterrows():
+    line_flows = flows_with_limits[
+        (flows_with_limits['from_bus'] == row['from_bus']) &
+        (flows_with_limits['to_bus'] == row['to_bus'])
+    ]
+    plt.plot(
+        line_flows['time'],
+        line_flows['flow'],
+        label=f"Line {row['from_bus']}->{row['to_bus']}"
+    )
+
+# Assuming the line limit is the same for all lines
+line_limit = branch['ratea'].iloc[0]
+
+# Plot horizontal lines for the upper and lower limits
+plt.axhline(y=line_limit, color='red', linestyle='--', label='Line Limit')
+plt.axhline(y=-line_limit, color='red', linestyle='--')
+
+plt.xlabel('Time')
+plt.ylabel('Flow (MW)')
+plt.title('Line Flows Over Time with Limits')
+plt.legend()
+plt.grid(True)
+plt.show()

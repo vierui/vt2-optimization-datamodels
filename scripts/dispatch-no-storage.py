@@ -8,7 +8,7 @@ from scipy.sparse import lil_matrix
 # 1. PARAMETERS
 
 # Load the data
-load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/data/raw/data-load-becc.csv',
+load_data = pd.read_csv('/Users/ruivieira/Documents/Ecole/6_ZHAW/VT1/vt1-energy-investment-model/data/raw/data-load-becc.csv',
                         sep=';', decimal=',')
 load_data['time'] = pd.to_datetime(load_data['time'], format='%d.%m.%y %H:%M')
 load_data['load'] = pd.to_numeric(load_data['load'].str.replace(',', '.'))
@@ -234,6 +234,8 @@ result = linprog(
     c=f,
     A_eq=A_eq,
     b_eq=b_eq,
+    A_ub=A_ub,
+    b_ub=b_ub,
     bounds=bounds,
     method='highs',
     options={'disp': True}
@@ -313,7 +315,7 @@ plt.show()
 # Plot storage energy over time
 plt.figure(figsize=(12, 6))
 plt.plot(data['Hour'], data['E'], label='Storage Energy Start (E)')
-plt.plot(data['Hour'], data['E_next'], label='Storage Energy End (E_next)')
+# plt.plot(data['Hour'], data['E_next'], label='Storage Energy End (E_next)')
 plt.xlabel('Hour')
 plt.ylabel('Energy Stored')
 plt.title('Storage State of Charge Over Time')

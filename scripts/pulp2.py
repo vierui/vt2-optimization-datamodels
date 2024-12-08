@@ -44,9 +44,24 @@ solar_gen = pd.DataFrame({
     'pmin': 0,
     'gencost': 9  # Cost coefficient for solar generator
 })
+# Define storage parameters
+storage_id = 3  # Next available ID
+storage_bus = 3  # Bus where storage is connected
+Pmax_storage = 100  # Maximum charging/discharging power in MW
+storage_cost = 0  # Cost coefficient (adjust as needed)
+
+# Create storage generator DataFrame
+storage_gen = pd.DataFrame({
+    'time': pd.to_datetime(wind_data['time']),
+    'id': storage_id,
+    'bus': storage_bus,
+    'pmax': Pmax_storage,
+    'pmin': -Pmax_storage,
+    'gencost': storage_cost
+})
 
 # Combine wind and solar generator data
-gen_time_series = pd.concat([wind_gen, solar_gen], ignore_index=True)
+gen_time_series = pd.concat([wind_gen, solar_gen, storage_gen], ignore_index=True)
 
 # Create a DataFrame for time-varying demand at bus 3
 demand_time_series = pd.DataFrame({
@@ -60,7 +75,6 @@ demand_time_series['time'] = pd.to_datetime(demand_time_series['time'])
 
 # Load branch and bus data
 branch = pd.read_csv(datadir + "branch.csv")
-print(branch)
 bus = pd.read_csv(datadir + "bus.csv")
 
 # Rename all columns to lowercase
@@ -83,94 +97,123 @@ branch['sus'] = 1 / branch['x']
 # 3. Function
 # ===========================
 
-# Optimal Power Flow Problem
-def dcopf(gen_t, branch, bus, demand_t):
+def dcopf_multi_period(gen_time_series, branch, bus, demand_time_series, time_steps, storage_id, E_max, eta):
     # Create the optimization model
-    DCOPF = pulp.LpProblem("DCOPF_Problem", pulp.LpMinimize)
-    
-     # Define sets
-    G = gen_t['id'].unique()  # Set of generators at time t
-    N = bus['bus_i'].values   # Set of buses
+    DCOPF = pulp.LpProblem("DCOPF_Multi_Period", pulp.LpMinimize)
 
-    # Define base MVA for power flow calculations (assuming first value for all)
-    baseMVA = 1
+    # Define sets
+    G = gen_time_series['id'].unique()  # Set of all generators
+    N = bus['bus_i'].values             # Set of all buses
 
     # Decision variables
-    GEN = {g: pulp.LpVariable(f"GEN_{g}",
-                              lowBound=gen_t.loc[gen_t['id'] == g, 'pmin'].values[0],
-                              upBound=gen_t.loc[gen_t['id'] == g, 'pmax'].values[0])
-           for g in G}
-    THETA = {i: pulp.LpVariable(f"THETA_{i}", lowBound=None) for i in N}
+    GEN = {}
+    THETA = {}
     FLOW = {}
-    for idx, row in branch.iterrows():
-        i = row['fbus']
-        j = row['tbus']
-        FLOW[i, j] = pulp.LpVariable(f"FLOW_{i}_{j}", lowBound=None)
-    
-    # Set slack bus with reference angle = 0 (assuming bus 1 is the slack bus)
-    DCOPF += THETA[1] == 0
+    E = {}
 
-    # Objective function: Minimize generation costs
-    DCOPF += pulp.lpSum(gen_t.loc[gen_t['id'] == g, 'gencost'].values[0] * GEN[g] for g in G), "Total Generation Cost"
-    
-    # Power balance constraints at each bus
-    for i in N:
-        # Sum of generation at bus i
-        gen_sum = pulp.lpSum(GEN[g] for g in gen_t[gen_t['bus'] == i]['id'])
-        
-        # Demand at bus i from demand_t
-        demand = demand_t.loc[demand_t['bus'] == i, 'pd']
-        demand_value = demand.values[0] if not demand.empty else 0
+    for t in time_steps:
+        for g in G:
+            pmin = gen_time_series.loc[
+                (gen_time_series['id'] == g) & (gen_time_series['time'] == t), 'pmin'
+            ].values[0]
+            pmax = gen_time_series.loc[
+                (gen_time_series['id'] == g) & (gen_time_series['time'] == t), 'pmax'
+            ].values[0]
+            GEN[g, t] = pulp.LpVariable(f"GEN_{g}_{t}", lowBound=pmin, upBound=pmax)
 
-        # Net flow out of bus i
-        flow_out = pulp.lpSum(FLOW[i, j] for (i_, j) in FLOW if i_ == i)
-        flow_in = pulp.lpSum(FLOW[j, i] for (j, i_) in FLOW if i_ == i)
-        
-        # Power balance constraint
-        DCOPF += gen_sum - demand_value + flow_in - flow_out == 0, f"Power_Balance_at_Bus_{i}"
-    
-    # DC power flow equations
-    for idx, row in branch.iterrows():
-        i = row['fbus']
-        j = row['tbus']
-        DCOPF += FLOW[i, j] == row['sus'] * (THETA[i] - THETA[j]), f"Flow_Constraint_{i}_{j}"
-    
-    # Flow limits
-    for idx, row in branch.iterrows():
-        i = row['fbus']
-        j = row['tbus']
-        rate_a = row['ratea']
-        DCOPF += FLOW[i, j] <= rate_a, f"Flow_Limit_{i}_{j}_Upper"
-        DCOPF += FLOW[i, j] >= -rate_a, f"Flow_Limit_{i}_{j}_Lower"
-    
-    # Solve the optimization problem using GLPK
+        for i in N:
+            THETA[i, t] = pulp.LpVariable(f"THETA_{i}_{t}", lowBound=None)
+
+        for idx, row in branch.iterrows():
+            i_ = row['fbus']
+            j_ = row['tbus']
+            FLOW[i_, j_, t] = pulp.LpVariable(f"FLOW_{i_}_{j_}_{t}", lowBound=None)
+
+        # Storage SoC variable
+        E[t] = pulp.LpVariable(f"E_{t}", lowBound=0, upBound=E_max)
+
+    # Objective function
+    DCOPF += pulp.lpSum(
+        gen_time_series.loc[
+            (gen_time_series['id'] == g) & (gen_time_series['time'] == t), 'gencost'
+        ].values[0] * GEN[g, t]
+        for t in time_steps for g in G
+    ), "Total Generation Cost"
+
+    # Constraints
+    try:
+        # Storage Dynamics
+        for idx, t in enumerate(time_steps[:-1]):
+            next_t = time_steps[idx + 1]
+            DCOPF += E[next_t] == eta * E[t] + GEN[storage_id, t], f"Storage_Dynamics_{t}"
+
+        # Cyclic condition
+        DCOPF += E[time_steps[0]] == E[time_steps[-1]], "Cyclic_Condition"
+
+        # Slack bus angle
+        for t in time_steps:
+            DCOPF += THETA[1, t] == 0, f"Slack_Bus_Angle_Time_{t}"
+
+        # Power balance constraints
+        for t in time_steps:
+            for i in N:
+                gen_ids = gen_time_series[
+                    (gen_time_series['bus'] == i) & (gen_time_series['time'] == t)
+                ]['id']
+                gen_sum = pulp.lpSum(GEN[g, t] for g in gen_ids)
+
+                demand = demand_time_series.loc[
+                    (demand_time_series['bus'] == i) & (demand_time_series['time'] == t), 'pd'
+                ]
+                demand_value = demand.values[0] if not demand.empty else 0
+
+                flow_in = pulp.lpSum(
+                    FLOW[k, i, t] for (k, i_, t_) in FLOW.keys() if i_ == i and t_ == t
+                )
+                flow_out = pulp.lpSum(
+                    FLOW[i, k, t] for (i_, k, t_) in FLOW.keys() if i_ == i and t_ == t
+                )
+
+                DCOPF += (
+                    gen_sum - demand_value + flow_in - flow_out == 0,
+                    f"Power_Balance_at_Bus_{i}_Time_{t}"
+                )
+
+        # DC power flow equations
+        for t in time_steps:
+            for idx, row in branch.iterrows():
+                i_ = row['fbus']
+                j_ = row['tbus']
+                DCOPF += FLOW[i_, j_, t] == row['sus'] * (THETA[i_, t] - THETA[j_, t]), f"Flow_Constraint_{i_}_{j_}_Time_{t}"
+
+        # Flow limits
+        for t in time_steps:
+            for idx, row in branch.iterrows():
+                i_ = row['fbus']
+                j_ = row['tbus']
+                rate_a = row['ratea']
+                DCOPF += FLOW[i_, j_, t] <= rate_a, f"Flow_Limit_{i_}_{j_}_Upper_Time_{t}"
+                DCOPF += FLOW[i_, j_, t] >= -rate_a, f"Flow_Limit_{i_}_{j_}_Lower_Time_{t}"
+
+    except Exception as e:
+        print(f"Error adding constraints: {e}")
+        return None
+
+    # Solve the optimization problem
     DCOPF.solve(pulp.GLPK(msg=True))
 
-    # Extracting output variables after solving
-    generation = pd.DataFrame({
-        'id': gen_t['id'].values,
-        'node': gen_t['bus'].values,
-        'gen': [pulp.value(GEN[g]) for g in G]
-    })
+    # Check if the problem was solved optimally
+    if pulp.LpStatus[DCOPF.status] != 'Optimal':
+        print(f"Optimization failed: {pulp.LpStatus[DCOPF.status]}")
+        return None
 
-    angles = {i: pulp.value(THETA[i]) for i in N}
-    
-    # Extract flows after solving and store them in a dictionnary
-    flows = {(i, j): pulp.value(FLOW[i, j]) for (i, j) in FLOW}
-    
-    # Extract nodal prices (shadow prices)
-    # prices = {}
-    # for i in N:
-    #     constraint_name = f"Power_Balance_at_Bus_{i}"
-    #     dual = DCOPF.constraints[constraint_name].pi  # Dual value (shadow price)
-    #     prices[i] = dual
-    
-    # Return the solution and objective as a dictionary
+    # Extract results
+    # ... (as before)
+
     return {
         'generation': generation,
-        'angles': angles,
+        'storage_soc': storage_soc,
         'flows': flows,
-        # 'prices': prices_df,
         'cost': pulp.value(DCOPF.objective),
         'status': pulp.LpStatus[DCOPF.status]
     }
@@ -178,6 +221,29 @@ def dcopf(gen_t, branch, bus, demand_t):
 # %%
 # 4. Solve
 # ===========================
+
+# Set storage parameters
+E_max = 500  # Maximum storage capacity in MWh (adjust as needed)
+eta = 1.0    # Storage efficiency (assuming perfect efficiency for simplicity)
+
+# Get the unique time steps sorted in chronological order
+selected_day = '2023-01-01'  # Example date
+gen_time_series = gen_time_series[gen_time_series['time'].dt.date == pd.to_datetime(selected_day).date()]
+demand_time_series = demand_time_series[demand_time_series['time'].dt.date == pd.to_datetime(selected_day).date()]
+time_steps = sorted(gen_time_series['time'].unique())
+
+# Run the DCOPF multi-period function
+result = dcopf_multi_period(gen_time_series, branch, bus, demand_time_series, time_steps, storage_id, E_max, eta)
+
+# Check optimization status
+if result is not None and result['status'] == 'Optimal':
+    generation_over_time = result['generation']
+    storage_soc_over_time = result['storage_soc']
+    flows_over_time = result['flows']
+    total_cost = result['cost']
+else:
+    print("Optimization failed or no optimal solution found.")
+
 selected_day = '2023-01-01'  # Example date
 gen_time_series = gen_time_series[gen_time_series['time'].dt.date == pd.to_datetime(selected_day).date()]
 
@@ -224,11 +290,8 @@ generation_over_time = pd.concat(generation_results, ignore_index=True)
 flows_over_time = pd.concat(flow_results, ignore_index=True)
 costs_over_time = pd.DataFrame(cost_results)
 
-# Display the flow results
-# print("\nFlows:")
-# for (i, j), flow_value in result['flows'].items():
-#     print(f"Flow from {i} to {j}: {flow_value}")
-
+# Generated LP File
+DCOPF.writeLP("DCOPF_Multi_Period.lp")
 
 # %%
 # 5. Visualisation
@@ -269,6 +332,75 @@ plt.show()
 
 
 # %%
+# Map generator IDs to names
+gen_info = pd.DataFrame({
+    'id': [1, 2, 3],
+    'type': ['Wind Generator', 'Solar Generator', 'Storage']
+})
+
+# Merge generation data with generator types
+generation_with_types = pd.merge(generation_over_time, gen_info, on='id')
+
+# Pivot the DataFrame to get generation per type over time
+gen_pivot = generation_with_types.pivot_table(index='time', columns='type', values='gen', aggfunc='sum').reset_index()
+gen_pivot = gen_pivot.sort_values('time')
+
+# Prepare the Total Demand Series
+total_demand = demand_time_series.set_index('time')['pd'].reindex(gen_pivot['time'])
+
+# Plot the Stacked Area Chart
+fig, ax = plt.subplots(figsize=(12, 6))
+
+# Plot stacked generation
+ax.stackplot(gen_pivot['time'], [gen_pivot[col] for col in gen_info['type']], labels=gen_info['type'], alpha=0.8)
+
+# Plot total demand
+ax.plot(total_demand.index, total_demand.values, label='Total Demand', color='black', linewidth=2)
+
+# Customize the plot
+ax.set_xlabel('Time')
+ax.set_ylabel('Power (MW)')
+ax.set_title('Generation Distribution Over Time vs. Demand')
+ax.legend(loc='upper left', title='Generators')
+ax.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# %%
+# Plot Storage SoC over time
+plt.figure(figsize=(12, 6))
+plt.plot(storage_soc_over_time['time'], storage_soc_over_time['E'], marker='o')
+plt.xlabel('Time')
+plt.ylabel('Energy Stored (MWh)')
+plt.title('Storage State of Charge Over Time')
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# %%
+# Plot Storage SoC over time
+plt.figure(figsize=(12, 6))
+plt.plot(storage_soc_over_time['time'], storage_soc_over_time['E'], marker='o')
+plt.xlabel('Time')
+plt.ylabel('Energy Stored (MWh)')
+plt.title('Storage State of Charge Over Time')
+plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
+
+# %%
+# Merge flows with branch data to get line limits
+flows_with_limits = pd.merge(
+    flows_over_time,
+    branch[['fbus', 'tbus', 'ratea']],
+    left_on=['from_bus', 'to_bus'],
+    right_on=['fbus', 'tbus'],
+    how='left'
+)
+
 # Plot flows over time for each line
 unique_lines = flows_with_limits[['from_bus', 'to_bus']].drop_duplicates()
 
@@ -290,6 +422,7 @@ for idx, row in unique_lines.iterrows():
 
 # Assuming the line limit is the same for all lines
 line_limit = branch['ratea'].iloc[0]  # Get the limit from the first line
+
 # Plot horizontal lines for the upper and lower limits
 plt.axhline(y=line_limit, color='red', linestyle='--', label='Line Limit')
 plt.axhline(y=-line_limit, color='red', linestyle='--')
@@ -300,21 +433,11 @@ plt.ylabel('Flow (MW)')
 plt.title('Line Flows Over Time with Limits')
 plt.legend()
 plt.grid(True)
+plt.xticks(rotation=45)
+plt.tight_layout()
 plt.show()
 
-
 # %%
-# Create a graph
-G = nx.DiGraph()
-
-# Add nodes
-for idx, row in bus.iterrows():
-    G.add_node(row['bus_i'])
-
-# Add edges with attributes
-for idx, row in branch.iterrows():
-    G.add_edge(row['fbus'], row['tbus'], capacity=row['ratea'])
-
 # Choose a specific time to visualize
 time_to_visualize = time_steps[0]  # Change as needed
 
@@ -322,14 +445,10 @@ time_to_visualize = time_steps[0]  # Change as needed
 flows_at_time = flows_over_time[flows_over_time['time'] == time_to_visualize]
 
 # Add flow data to edges
-flow_dict = {}
 for idx, row in flows_at_time.iterrows():
     G[row['from_bus']][row['to_bus']]['flow'] = row['flow']
 
-# Get positions for the nodes (you might need to define these)
-pos = nx.spring_layout(G)  # Or define your own positions
-
-# Get edge colors and widths based on flow
+# Get edge widths based on flow
 edge_flows = [abs(G[u][v]['flow']) for u, v in G.edges()]
 max_flow = max(edge_flows) if edge_flows else 1
 edge_widths = [5 * flow / max_flow for flow in edge_flows]  # Scale widths
