@@ -1,21 +1,22 @@
 [tool.poetry]
-name = "vt_energy_opti"
+name = "vt1-energy-investment-model"
 version = "0.1.0"
 description = "Optimization model for energy investment decisions"
-authors = ["Your Name <you@example.com>"]
+authors = ["Rui Vieira <ruivieira.pro@gmail.com>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
-python = "^3.12"
-numpy = "^2.1.3"
-scipy = "^1.14.1"
-matplotlib = "^3.9.2"
+python = "^3.10"
 pandas = "^2.2.3"
-sympy = "^1.13.3"
-ipykernel = "^6.29.5"
+numpy = "^2.1.3"
+pulp = "^2.9.0"
+matplotlib = "^3.9.3"
+networkx = "^3.4.2"
+cplex = { path = "/Applications/CPLEX_Studio2211/cplex/python/3.10/arm64_osx/" }
 
-[tool.poetry.dev-dependencies]
-pytest = "^7.0"
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
 
 [build-system]
 requires = ["poetry-core"]
