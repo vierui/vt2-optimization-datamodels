@@ -4,7 +4,7 @@ import numpy as np
 from pandas.tseries.offsets import DateOffset
 import os
 
-from dcopf import dcopf  # Assuming dcopf is defined in dcopf_module.py
+from dcopf import dcopf
 
 scenario_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/scenarios/base_scenario/"
 

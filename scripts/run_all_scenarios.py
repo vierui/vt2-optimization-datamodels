@@ -20,3 +20,9 @@ print(f"Estimated winter Cost: {winter_cost * 13}")
 print(f"Estimated summer Cost: {summer_cost * 13}")
 print(f"Estimated annual Cost: {annual_cost}")
 # %%
+'''
+python run_scenario.py --scenario ../data/scenarios/winter > winter_result.txt
+python run_scenario.py --scenario ../data/scenarios/summer > summer_result.txt
+python run_scenario.py --scenario ../data/scenarios/autumn_spring > autumn_spring_result.txt
+
+'''
