@@ -1,0 +1,31 @@
+Welcome to the CBC MILP Solver 
+Version: 2.10.3 
+Build Date: Dec 15 2019 
+
+command line - /Users/rvieira/Library/Caches/pypoetry/virtualenvs/vt1-energy-investment-model-XXwssDO0-py3.10/lib/python3.10/site-packages/pulp/solverdir/cbc/osx/64/cbc /var/folders/1m/qt1qgmf14_gb0hy_4g7323hc0000gn/T/47862f6b72b043b281d376d2386153c6-pulp.mps -timeMode elapsed -branch -printingOptions all -solution /var/folders/1m/qt1qgmf14_gb0hy_4g7323hc0000gn/T/47862f6b72b043b281d376d2386153c6-pulp.sol (default strategy 1)
+At line 2 NAME          MODEL
+At line 3 ROWS
+At line 5553 COLUMNS
+At line 17486 RHS
+At line 23035 BOUNDS
+At line 27070 ENDATA
+Problem MODEL has 5548 rows, 4034 columns and 11596 elements
+Coin0008I MODEL read with 0 errors
+Option for timeMode changed from cpu to elapsed
+Presolve 776 (-4772) rows, 850 (-3184) columns and 2004 (-9592) elements
+Perturbing problem by 0.001% of 7 - largest nonzero change 1.7423289e-06 ( 4.5429606e-05%) - largest zero change 1.7373447e-06
+0  Obj 18744.462 Primal inf 37102.909 (378)
+90  Obj 18744.464 Primal inf 57373.329 (380)
+180  Obj 18744.465 Primal inf 26302.462 (353)
+270  Obj 18744.465 Primal inf 17774.445 (251)
+360  Obj 18744.465 Primal inf 5616.6105 (112)
+450  Obj 32998.427 Primal inf 174.98259 (8)
+458  Obj 33523.375
+Optimal - objective value 33523.368
+After Postsolve, objective 33523.368, infeasibilities - dual 0 (0), primal 0 (0)
+Optimal objective 33523.3683 - 458 iterations time 0.012, Presolve 0.00
+Option for printingOptions changed from normal to all
+Total time (CPU seconds):       0.02   (Wallclock seconds):       0.02
+
+Optimization was successful for scenario: ../data/scenarios/autumn_spring
+Total Weekly Cost: 33523.368299999995

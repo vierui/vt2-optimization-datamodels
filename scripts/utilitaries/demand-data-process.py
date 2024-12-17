@@ -133,3 +133,28 @@ for ax in axs:
 plt.tight_layout()
 plt.show()
 # %%
+import pandas as pd
+
+# File paths
+load2_winter_path = '/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/processed/load2-autumn_spring.csv'
+utility_path = '/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/raw/utility.csv'
+output_path = '/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/processed/load2-autumn_spring.csv'
+
+# Read the load2-winter.csv
+load2_df = pd.read_csv(load2_winter_path, sep=';', dtype={'time': str, 'value': float})
+
+# Read the utility.csv and ensure proper format
+utility_df = pd.read_csv(utility_path, sep=';', dtype={'time': str, 'value': str})
+
+# Convert scientific notation in 'value' to float (removing scientific notation)
+utility_df['value'] = utility_df['value'].apply(lambda x: float(x))
+
+# Replace the 'value' column in load2_df with the 'value' column from utility_df
+load2_df['value'] = utility_df['value'].values
+
+# Save the updated DataFrame to a new CSV file
+load2_df.to_csv(output_path, sep=';', index=False, float_format='%.3f')
+
+print(f"Updated file saved to: {output_path}")
+
+# %%
