@@ -1,0 +1,2 @@
+scenario_name,gen_positions,storage_units,load_factor
+scenario_1,"{1:'nuclear',4:'solar'}","{}",1.0 
