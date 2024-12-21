@@ -181,10 +181,16 @@ def dcopf(gen_time_series, branch, bus, demand_time_series, delta_t=1):
     #
     # 10. Solve
     #
-    DCOPF.solve(pulp.PULP_CBC_CMD(msg=True))
+    solver_result = DCOPF.solve(pulp.PULP_CBC_CMD(msg=True))
 
-    status_str = pulp.LpStatus[DCOPF.status]
-    if status_str != 'Optimal':
+    # Option A: Compare the solver status code numerically
+    status_code = DCOPF.status       # Typically 1 for optimal, 0 for not solved, -1 or other for infeasible
+    status_str = pulp.LpStatus[status_code]
+
+    print(f"[DCOPF] Solver returned status code = {status_code}, interpreted as '{status_str}'.")
+
+    # If code != 1, the solution isn't recognized as optimal.
+    if status_code != 1:
         print(f"[DCOPF] Not optimal. Status = {status_str}")
         return None
 
