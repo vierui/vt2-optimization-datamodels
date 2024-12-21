@@ -16,9 +16,9 @@ summer_cost = run_and_get_cost("../data/scenarios/summer")
 autumn_spring_cost = run_and_get_cost("../data/scenarios/autumn_spring")
 
 annual_cost = (winter_cost * 13) + (summer_cost * 13) + (autumn_spring_cost * 26)
-print(f"Estimated winter Cost: {winter_cost * 13}")
-print(f"Estimated summer Cost: {summer_cost * 13}")
-print(f"Estimated annual Cost: {annual_cost}")
+print(f"Estimated winter weeks cost: {winter_cost * 13}")
+print(f"Estimated summer weeks cost: {summer_cost * 13}")
+print(f"Estimated annual cost: {annual_cost}")
 # %%
 '''
 python run_scenario.py --scenario ../data/scenarios/winter > winter_result.txt
