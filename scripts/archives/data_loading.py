@@ -163,3 +163,22 @@ print(demand_time_series)
 # demand_time_series.to_csv(datadir + 'scenarios/autumn_spring/demand.csv', index=False)
 gen_time_series.to_csv(datadir + 'scenarios/winter/gen.csv', index=False)
 # %%
+import pandas as pd
+
+# Path to the input file
+input_file = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/processed/wind-2023.csv"
+# Path to the output file
+output_file = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/processed/wind-2023.csv"
+
+# Read the CSV file
+data = pd.read_csv(input_file)
+
+# Scale the 'value' column by 100
+data['value'] = data['value'] * 10
+
+# Save the updated data to a new CSV file
+data.to_csv(output_file, index=False)
+
+print(f"Scaled data has been saved to {output_file}")
+
+# %%

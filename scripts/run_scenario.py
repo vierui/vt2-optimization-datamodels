@@ -11,7 +11,7 @@ Example script to demonstrate how to:
   4) Run dcopf
   5) Print results
 """
-
+# %%
 import pandas as pd
 import numpy as np
 import ast  # for safely evaluating dictionary strings

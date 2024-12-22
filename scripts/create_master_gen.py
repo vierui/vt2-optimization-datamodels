@@ -14,10 +14,10 @@ import os
 import pandas as pd
 
 # Adjust paths as needed
-processed_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/processed"
-wind_file     = os.path.join(processed_dir, "wind-2023.csv")
-solar_file    = os.path.join(processed_dir, "solar-2023.csv")
-output_file   = os.path.join(processed_dir, "master_gen.csv")
+processed_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data"
+wind_file     = os.path.join(processed_dir, "processed/wind-2023.csv")
+solar_file    = os.path.join(processed_dir, "processed/solar-2023.csv")
+output_file   = os.path.join(processed_dir, "working/master_gen.csv")
 
 # Define seasonal date ranges
 season_info = {
@@ -122,7 +122,7 @@ def main():
             season_name=season_name,
             start_str=start_time,
             end_str=end_time,
-            pmax=300.0,
+            pmax=800.0,
             pmin=0.0,
             gencost=3.0,
             emax=0.0,

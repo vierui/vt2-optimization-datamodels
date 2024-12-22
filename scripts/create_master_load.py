@@ -23,9 +23,9 @@ import os
 import pandas as pd
 
 # Path setup
-processed_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/processed"
-load_file     = os.path.join(processed_dir, "load-2023.csv")
-output_file   = os.path.join(processed_dir, "master_load.csv")
+processed_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data"
+load_file     = os.path.join(processed_dir, "processed/load-2023.csv")
+output_file   = os.path.join(processed_dir, "working/master_load.csv")
 
 # Define seasonal date ranges (same as in master_gen)
 season_info = {
