@@ -14,7 +14,7 @@ import pandas as pd
 import numpy as np
 import ast
 import os
-from dcopf import dcopf  # Make sure this is your updated DCOPF code
+from dcopf import dcopf
 
 # Adjust these to your directories
 working_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/working"
