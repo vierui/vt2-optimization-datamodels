@@ -71,14 +71,12 @@ def build_demand_time_series(master_load, load_factor, season_key):
     return scenario_load
 
 # %%
-def plot_scenario_results(results, demand_time_series, branch, bus, scenario_folder, season_key, id_to_type, id_to_gencost):
+def plot_scenario_results(results, demand_time_series, branch, bus, scenario_folder, season_key, id_to_type, id_to_gencost, id_to_pmax):
     """
     Generate and save plots:
     - Generation vs. Demand
-    - Histogram of Total Generation per Asset
+    - Histogram of Total Generation per Asset with Remaining Capacity
     - Histogram of Total Generation Cost per Asset
-    - Line Flows Over Time
-    - Network Flow Diagram
     """
     generation_over_time = results['generation'].copy()
     flows_over_time = results['flows'].copy()
@@ -95,7 +93,7 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     # Prepare the Total Demand Series
     demand_ts = demand_time_series.groupby('time')['pd'].sum().reindex(gen_pivot.index, fill_value=0)
 
-    # Map generator IDs to types dynamically
+    # Map generator IDs to types
     gen_pivot.rename(columns=id_to_type, inplace=True, errors="ignore")
 
     # Plot Generation vs. Demand
@@ -112,32 +110,55 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     plt.close()
     print(f"Saved Generation vs Demand plot => gen_vs_demand_{season_key}.png")
 
-    # Histogram of Total Generation per Asset
+    # Histogram of Total Generation per Asset with Remaining Capacity
     total_gen_per_asset = gen_pivot.sum().sort_values(ascending=False)
+    
+    # Calculate remaining capacity based on pmax and season weights
+    remaining_capacity = {}
+    for asset, gen in total_gen_per_asset.items():
+        # Find gen_id based on type
+        gen_ids = [id for id, typ in id_to_type.items() if typ == asset]
+        if gen_ids:
+            gen_id = gen_ids[0]  # Assuming unique type
+            total_pmax = id_to_pmax.get(gen_id, 0) * season_weights[season_key]
+            remaining = total_pmax - gen
+            remaining_capacity[asset] = remaining if remaining > 0 else 0
+        else:
+            remaining_capacity[asset] = 0
+    
+    remaining_capacity_series = pd.Series(remaining_capacity)
+    
+    # Plot stacked histogram
     plt.figure(figsize=(10, 6))
-    total_gen_per_asset.plot(kind='bar', color='skyblue')
+    plt.bar(total_gen_per_asset.index, total_gen_per_asset, color='skyblue', label='Total Generation (MW)')
+    plt.bar(remaining_capacity_series.index, remaining_capacity_series, bottom=total_gen_per_asset, color='lightgray', label='Remaining Capacity (MW)')
     plt.xlabel('Asset')
-    plt.ylabel('Total Generation (MW)')
-    plt.title(f'Total Generation per Asset ({season_key.capitalize()})')
+    plt.ylabel('Power (MW)')
+    plt.title(f'Total Generation and Remaining Capacity per Asset ({season_key.capitalize()})')
+    plt.legend()
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.savefig(os.path.join(scenario_folder, f"hist_total_gen_{season_key}.png"))
+    plt.savefig(os.path.join(scenario_folder, f"hist_total_gen_with_capacity_{season_key}.png"))
     plt.close()
-    print(f"Saved Total Generation histogram => hist_total_gen_{season_key}.png")
+    print(f"Saved Generation with Capacity histogram => hist_total_gen_with_capacity_{season_key}.png")
 
     # Histogram of Total Generation Cost per Asset
     total_gen_cost_per_asset = {}
     for asset, gen in total_gen_per_asset.items():
         # Find the corresponding ID
-        gen_id = next((id for id, typ in id_to_type.items() if typ == asset), None)
-        if gen_id and gen_id in id_to_gencost:
-            total_gen_cost_per_asset[asset] = gen * id_to_gencost[gen_id]
+        gen_ids = [id for id, typ in id_to_type.items() if typ == asset]
+        if gen_ids:
+            gen_id = gen_ids[0]  # Assuming unique type
+            if gen_id in id_to_gencost:
+                total_gen_cost_per_asset[asset] = gen * id_to_gencost[gen_id]
+            else:
+                total_gen_cost_per_asset[asset] = 0.0  # Handle missing gencost
         else:
-            total_gen_cost_per_asset[asset] = 0.0  # Handle missing gencost if necessary
-
+            total_gen_cost_per_asset[asset] = 0.0  # Handle missing asset
+    
     total_gen_cost_series = pd.Series(total_gen_cost_per_asset)
     plt.figure(figsize=(10, 6))
-    total_gen_cost_series.plot(kind='bar', color='salmon')
+    plt.bar(total_gen_cost_series.index, total_gen_cost_series, color='salmon')
     plt.xlabel('Asset')
     plt.ylabel('Total Generation Cost')
     plt.title(f'Total Generation Cost per Asset ({season_key.capitalize()})')
@@ -145,7 +166,7 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     plt.tight_layout()
     plt.savefig(os.path.join(scenario_folder, f"hist_total_gen_cost_{season_key}.png"))
     plt.close()
-    print(f"Saved Total Generation Cost histogram => hist_total_gen_cost_{season_key}.png")
+    print(f"Saved Generation Cost histogram => hist_total_gen_cost_{season_key}.png")
 
     # Check Flow Limits
     flows_with_limits = flows_over_time.merge(
@@ -163,19 +184,19 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     else:
         print(f"All line flows are within limits for {season_key}.")
 
-    # Plot Line Flows Over Time
-    plt.figure(figsize=(12,6))
-    for (fbus, tbus), group in flows_with_limits.groupby(['from_bus', 'to_bus']):
-        plt.plot(group['time'], group['flow'], label=f"{fbus}->{tbus}")
-    plt.xlabel('Time')
-    plt.ylabel('Flow (MW)')
-    plt.title(f'Line Flows Over Time ({season_key.capitalize()})')
-    plt.legend()
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(os.path.join(scenario_folder, f"line_flows_{season_key}.png"))
-    plt.close()
-    print(f"Saved Line Flows plot => line_flows_{season_key}.png")
+    # Commented out: Plot Line Flows Over Time
+    # plt.figure(figsize=(12,6))
+    # for (fbus, tbus), group in flows_with_limits.groupby(['from_bus', 'to_bus']):
+    #     plt.plot(group['time'], group['flow'], label=f"{fbus}->{tbus}")
+    # plt.xlabel('Time')
+    # plt.ylabel('Flow (MW)')
+    # plt.title(f'Line Flows Over Time ({season_key.capitalize()})')
+    # plt.legend()
+    # plt.xticks(rotation=45)
+    # plt.tight_layout()
+    # plt.savefig(os.path.join(scenario_folder, f"line_flows_{season_key}.png"))
+    # plt.close()
+    # print(f"Saved Line Flows plot => line_flows_{season_key}.png")
 
 # %%
 def main():
@@ -191,7 +212,9 @@ def main():
 
     # Create mappings from master_gen.csv
     id_to_type = master_gen.drop_duplicates(subset=['id'])[['id', 'type']].set_index('id')['type'].to_dict()
+    type_to_id = master_gen.drop_duplicates(subset=['type'])[['type', 'id']].set_index('type')['id'].to_dict()
     id_to_gencost = master_gen.drop_duplicates(subset=['id'])[['id', 'gencost']].set_index('id')['gencost'].to_dict()
+    id_to_pmax = master_gen.drop_duplicates(subset=['id'])[['id', 'pmax']].set_index('id')['pmax'].to_dict()
 
     # Load Scenarios
     scenarios_df = pd.read_csv(scenarios_params_file)
@@ -204,8 +227,17 @@ def main():
         load_factor = float(row["load_factor"])
 
         # Map types to IDs
-        gen_positions = {bus: type_to_id[gen_type] for bus, gen_type in gen_pos_raw.items()}
-        storage_positions = {bus: type_to_id[gen_type] for bus, gen_type in storage_pos_raw.items()}
+        try:
+            gen_positions = {bus: type_to_id[gen_type] for bus, gen_type in gen_pos_raw.items()}
+        except KeyError as e:
+            print(f"Error: Generator type '{e.args[0]}' not found in type_to_id mapping.")
+            continue
+
+        try:
+            storage_positions = {bus: type_to_id[gen_type] for bus, gen_type in storage_pos_raw.items()}
+        except KeyError as e:
+            print(f"Error: Storage type '{e.args[0]}' not found in type_to_id mapping.")
+            continue
 
         print(f"\nProcessing {scenario_name} with Generators: {gen_pos_raw} and Storage: {storage_pos_raw}")
 
@@ -238,7 +270,17 @@ def main():
                 demand_ts_plot = build_demand_time_series(master_load, load_factor, season)
                 plot_results = dcopf(gen_ts_plot, branch, bus, demand_ts_plot, delta_t=1)
                 if plot_results and plot_results.get("status") == "Optimal":
-                    plot_scenario_results(plot_results, demand_ts_plot, branch, bus, scenario_folder, season, id_to_type, id_to_gencost)
+                    plot_scenario_results(
+                        plot_results, 
+                        demand_ts_plot, 
+                        branch, 
+                        bus, 
+                        scenario_folder, 
+                        season, 
+                        id_to_type, 
+                        id_to_gencost, 
+                        id_to_pmax
+                    )
 
             scenario_results.append({
                 "scenario_name": scenario_name,
@@ -256,7 +298,7 @@ def main():
     results_df = pd.DataFrame(scenario_results)
     results_df.to_csv(os.path.join(results_root, "scenario_results.csv"), index=False)
     print("All scenarios processed.")
-
+    
 # %%
 if __name__ == "__main__":
     main()

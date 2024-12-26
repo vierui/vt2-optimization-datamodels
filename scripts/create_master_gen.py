@@ -7,14 +7,6 @@ Reads wind-2023.csv and solar-2023.csv (each containing [time, value] for the fu
 filters three defined seasonal windows, and concatenates them into a single CSV:
 master_gen.csv with columns:
     time, id, type, pmax, pmin, gencost, emax, einitial, eta, season
-
-Now includes numeric IDs for each generator type:
-    nuclear -> 1,
-    gas -> 2,
-    wind -> 3,
-    solar -> 4,
-    battery1 -> 101,
-    battery2 -> 102
 """
 # %%
 import os
