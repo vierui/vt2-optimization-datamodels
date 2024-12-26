@@ -1,2 +1,3 @@
 scenario_name,gen_positions,storage_units,load_factor
-scenario_1,"{1:'nuclear',4:'solar'}","{}",1.0 
+scenario_1,"{1:'nuclear',4:'solar'}","{}",1.0
+scenario_2,"{3:'nuclear',4:'solar'}","{2:'battery1'}",1.0
