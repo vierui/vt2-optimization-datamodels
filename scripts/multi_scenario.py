@@ -16,6 +16,8 @@ import os
 import matplotlib.pyplot as plt
 import networkx as nx
 from dcopf import dcopf  # Ensure this imports your updated DCOPF code
+from dotenv import load_dotenv
+from scenario_critic import ScenarioCritic
 
 # Paths
 working_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/working"
@@ -43,6 +45,27 @@ season_weights = {
 #     "battery1": 101,
 #     "battery2": 102
 # }
+
+# Load environment variables
+load_dotenv('../.env.local')
+api_key = os.getenv('OPENAPI_KEY')
+
+if not api_key:
+    raise ValueError("OpenAI API key not found in .env.local file")
+
+# Initialize critic
+critic = ScenarioCritic(api_key)
+
+# %%
+def ask_user_confirmation(message: str) -> bool:
+    """Ask user for confirmation before proceeding"""
+    while True:
+        response = input(f"\n{message} (y/n): ").lower().strip()
+        if response in ['y', 'yes']:
+            return True
+        elif response in ['n', 'no']:
+            return False
+        print("Please answer with 'y' or 'n'")
 
 # %%
 def build_gen_time_series(master_gen, gen_positions_dict, storage_positions_dict, season_key):
@@ -78,6 +101,13 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     - Histogram of Total Generation per Asset with Remaining Capacity
     - Histogram of Total Generation Cost per Asset
     """
+    # Create default scenario folder if none provided
+    if scenario_folder is None:
+        scenario_folder = os.path.join(results_root, "temp_plots")
+    
+    # Ensure the directory exists
+    os.makedirs(scenario_folder, exist_ok=True)
+
     generation_over_time = results['generation'].copy()
     flows_over_time = results['flows'].copy()
 
@@ -120,14 +150,14 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
         gen_ids = [id for id, typ in id_to_type.items() if typ == asset]
         if gen_ids:
             gen_id = gen_ids[0]  # Assuming unique type
-            total_pmax = id_to_pmax.get(gen_id, 0) * season_weights[season_key]
+            total_pmax = id_to_pmax.get(gen_id, 0)  # Total available generation from pmax
             remaining = total_pmax - gen
             remaining_capacity[asset] = remaining if remaining > 0 else 0
         else:
             remaining_capacity[asset] = 0
-    
+
     remaining_capacity_series = pd.Series(remaining_capacity)
-    
+
     # Plot stacked histogram
     plt.figure(figsize=(10, 6))
     plt.bar(total_gen_per_asset.index, total_gen_per_asset, color='skyblue', label='Total Generation (MW)')
@@ -155,7 +185,7 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
                 total_gen_cost_per_asset[asset] = 0.0  # Handle missing gencost
         else:
             total_gen_cost_per_asset[asset] = 0.0  # Handle missing asset
-    
+
     total_gen_cost_series = pd.Series(total_gen_cost_per_asset)
     plt.figure(figsize=(10, 6))
     plt.bar(total_gen_cost_series.index, total_gen_cost_series, color='salmon')
@@ -197,6 +227,23 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     # plt.savefig(os.path.join(scenario_folder, f"line_flows_{season_key}.png"))
     # plt.close()
     # print(f"Saved Line Flows plot => line_flows_{season_key}.png")
+
+    # Convert Series to dict if needed, otherwise return the dict directly
+    total_gen_per_asset_dict = (total_gen_per_asset.to_dict() 
+                               if hasattr(total_gen_per_asset, 'to_dict') 
+                               else total_gen_per_asset)
+    
+    total_gen_cost_per_asset_dict = (total_gen_cost_per_asset.to_dict() 
+                                    if hasattr(total_gen_cost_per_asset, 'to_dict') 
+                                    else total_gen_cost_per_asset)
+    
+    remaining_capacity_dict = (remaining_capacity_series.to_dict() 
+                             if hasattr(remaining_capacity_series, 'to_dict') 
+                             else remaining_capacity_series)
+
+    return (total_gen_per_asset_dict, 
+            total_gen_cost_per_asset_dict, 
+            remaining_capacity_dict)
 
 # %%
 def main():
@@ -244,6 +291,15 @@ def main():
         season_costs = {}
         all_ok = True
 
+        # Initialize accumulators for metrics
+        total_gen_year = {}
+        total_gen_cost_year = {}
+        total_avail_gen_year = {}
+
+        # Create scenario folder early
+        scenario_folder = os.path.join(results_root, scenario_name)
+        os.makedirs(scenario_folder, exist_ok=True)
+
         for season in ["winter", "summer", "autumn_spring"]:
             print(f"  Running {season}...")
             gen_ts = build_gen_time_series(master_gen, gen_positions, storage_positions, season)
@@ -258,11 +314,33 @@ def main():
                 all_ok = False
                 break
 
+            # Plotting and metric extraction
+            if all_ok:
+                # Plotting and metric extraction
+                plot_gen, plot_gen_cost, plot_avail = plot_scenario_results(
+                    results, 
+                    demand_ts, 
+                    branch, 
+                    bus, 
+                    scenario_folder=scenario_folder,  # Now always providing a valid path
+                    season_key=season, 
+                    id_to_type=id_to_type, 
+                    id_to_gencost=id_to_gencost, 
+                    id_to_pmax=id_to_pmax
+                )
+
+                # Accumulate metrics weighted by season
+                weight = season_weights[season]
+                for asset, gen in plot_gen.items():
+                    total_gen_year[asset] = total_gen_year.get(asset, 0) + gen * weight
+                for asset, cost in plot_gen_cost.items():
+                    total_gen_cost_year[asset] = total_gen_cost_year.get(asset, 0) + cost * weight
+                for asset, avail in plot_avail.items():
+                    total_avail_gen_year[asset] = total_avail_gen_year.get(asset, 0) + avail * weight
+
         if all_ok:
             # Calculate Annual Cost
             annual_cost = sum(season_costs[season] * season_weights[season] for season in season_costs)
-            scenario_folder = os.path.join(results_root, scenario_name)
-            os.makedirs(scenario_folder, exist_ok=True)
 
             for season in ["winter", "summer", "autumn_spring"]:
                 print(f"  Plotting {season}...")
@@ -270,7 +348,8 @@ def main():
                 demand_ts_plot = build_demand_time_series(master_load, load_factor, season)
                 plot_results = dcopf(gen_ts_plot, branch, bus, demand_ts_plot, delta_t=1)
                 if plot_results and plot_results.get("status") == "Optimal":
-                    plot_scenario_results(
+                    # Save plots and obtain metrics again
+                    plot_gen, plot_gen_cost, plot_avail = plot_scenario_results(
                         plot_results, 
                         demand_ts_plot, 
                         branch, 
@@ -282,10 +361,36 @@ def main():
                         id_to_pmax
                     )
 
-            scenario_results.append({
+            # Prepare result entry with new metrics
+            result_entry = {
                 "scenario_name": scenario_name,
                 "annual_cost": round(annual_cost, 1)
-            })
+            }
+
+            # Add Total Generation per Asset
+            for asset, gen in total_gen_year.items():
+                result_entry[f"gen_{asset}"] = round(gen, 1)
+
+            # Add Total Generation Cost per Asset
+            for asset, cost in total_gen_cost_year.items():
+                result_entry[f"gen_cost_{asset}"] = round(cost, 1)
+
+            # Add Total Available Generation per Asset
+            for asset, avail in total_avail_gen_year.items():
+                result_entry[f"avail_gen_{asset}"] = round(avail, 1)
+
+            # Optional: Add Capacity Factor per Asset
+            capacity_factor_year = {}
+            for asset, gen in total_gen_year.items():
+                avail = total_avail_gen_year.get(asset, 0)
+                if avail > 0:
+                    capacity_factor_year[asset] = round(gen / avail, 2)  # Rounded to 2 decimal places
+                else:
+                    capacity_factor_year[asset] = 0.0
+            for asset, cf in capacity_factor_year.items():
+                result_entry[f"capacity_factor_{asset}"] = cf
+
+            scenario_results.append(result_entry)
             print(f"  Annual Cost: {round(annual_cost, 1)}")
         else:
             scenario_results.append({
@@ -296,8 +401,26 @@ def main():
 
     # Save Results
     results_df = pd.DataFrame(scenario_results)
+
+    # Ask user before generating critiques
+    if ask_user_confirmation("Do you want to generate AI critiques and markdown reports?"):
+        print("\nGenerating AI critiques and markdown reports...")
+        for _, row in results_df.iterrows():
+            if row['annual_cost'] is not None:  # Only analyze valid scenarios
+                critic.analyze_scenario(row.to_dict(), results_root)
+        
+        # Generate global comparison report
+        if ask_user_confirmation("Do you want to generate a global comparison report?"):
+            print("\nGenerating global comparison report...")
+            critic.create_global_comparison_report(results_df, results_root)
+        
+        print("All scenarios processed and analyzed.")
+    else:
+        print("\nSkipping AI critiques generation.")
+
+    # Save the CSV as before
     results_df.to_csv(os.path.join(results_root, "scenario_results.csv"), index=False)
-    print("All scenarios processed.")
+    print("Results saved to CSV.")
     
 # %%
 if __name__ == "__main__":

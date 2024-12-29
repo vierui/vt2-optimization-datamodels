@@ -139,9 +139,9 @@ def main():
             season_name=season_name,
             start_str=start_time,
             end_str=end_time,
-            pmax=800.0,   # e.g. 800 MW
+            pmax=500.0,   # [MW]
             pmin=0.0,
-            gencost=3.0,
+            gencost=5.0,
             emax=0.0,
             einitial=0.0,
             eta=1.0
@@ -154,9 +154,9 @@ def main():
             season_name=season_name,
             start_str=start_time,
             end_str=end_time,
-            pmax=250.0,
+            pmax=250.0, # [MW]
             pmin=0.0,
-            gencost=8.0,
+            gencost=8,
             emax=0.0,
             einitial=0.0,
             eta=1.0
@@ -169,10 +169,10 @@ def main():
             season_name=season_name,
             start_str=start_time,
             end_str=end_time,
-            pmax=40.0,
-            pmin=-40.0,
+            pmax=30.0,
+            pmin=-30.0,
             gencost=0.0,
-            emax=100.0,       # MWh capacity
+            emax=60.0,       # MWh capacity
             einitial=0.0,     # start empty
             eta=0.99
         )
@@ -184,12 +184,12 @@ def main():
             season_name=season_name,
             start_str=start_time,
             end_str=end_time,
-            pmax=50.0,
-            pmin=-50.0,
+            pmax=55.0,
+            pmin=-55.0,
             gencost=0.0,
-            emax=200.0,
+            emax=110.0,
             einitial=0.0,
-            eta=0.95
+            eta=0.99
         )
         master_list.append(battery2_df)
         
