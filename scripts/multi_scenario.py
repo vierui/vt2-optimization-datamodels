@@ -18,6 +18,7 @@ import networkx as nx
 from dcopf import dcopf  # Ensure this imports your updated DCOPF code
 from dotenv import load_dotenv
 from scenario_critic import ScenarioCritic
+from update_readme import update_readme_with_scenarios
 
 # Paths
 working_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/working"
@@ -35,16 +36,6 @@ season_weights = {
     "summer": 13,
     "autumn_spring": 26
 }
-
-# Type to ID mapping
-# type_to_id = {
-#     "nuclear": 1,
-#     "gas": 2,
-#     "wind": 3,
-#     "solar": 4,
-#     "battery1": 101,
-#     "battery2": 102
-# }
 
 # Load environment variables
 load_dotenv('../.env.local')
@@ -422,6 +413,10 @@ def main():
     results_df.to_csv(os.path.join(results_root, "scenario_results.csv"), index=False)
     print("Results saved to CSV.")
     
+    # Update README with scenario links
+    update_readme_with_scenarios()
+    print("README.md updated with scenario links.")
+
 # %%
 if __name__ == "__main__":
     main()
