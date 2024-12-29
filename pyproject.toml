@@ -14,6 +14,8 @@ pulp = "^2.9.0"
 matplotlib = "^3.9.3"
 networkx = "^3.4.2"
 cplex = { path = "/Applications/CPLEX_Studio2211/cplex/python/3.10/arm64_osx/" }
+python-dotenv = "^1.0.1"
+openai = "^1.58.1"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
