@@ -1,51 +1,41 @@
 import os
 
 def update_readme_with_scenarios():
-    # Get the project root directory (2 levels up from this script)
-    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    """Update README.md with links to all scenario reports"""
     
-    # Define paths relative to project root
-    readme_path = os.path.join(project_root, 'README.md')
-    results_dir = os.path.join(project_root, 'data', 'results')
+    # Read the current README content
+    with open('../README.md', 'r') as f:
+        content = f.read()
     
-    # Check if README exists, if not create it from template
-    if not os.path.exists(readme_path):
-        print("README.md not found. Creating from template...")
-        create_readme_template(readme_path)
+    # Find all scenario reports in the results directory
+    results_dir = '../data/results'
+    scenario_reports = []
     
-    # Read the template
-    with open(readme_path, 'r') as f:
-        template = f.read()
+    for item in os.listdir(results_dir):
+        scenario_dir = os.path.join(results_dir, item)
+        if os.path.isdir(scenario_dir) and item.startswith('scenario_'):
+            report_path = os.path.join(scenario_dir, f'{item}_analysis.md')
+            if os.path.exists(report_path):
+                scenario_reports.append(item)
     
-    # Get list of scenario folders
-    scenario_folders = [f for f in os.listdir(results_dir) 
-                       if os.path.isdir(os.path.join(results_dir, f)) 
-                       and not f.startswith('.')]
+    # Sort scenarios numerically
+    scenario_reports.sort(key=lambda x: int(x.split('_')[1]))
     
-    # Generate markdown links for each scenario using relative paths
-    scenario_links = []
-    for folder in sorted(scenario_folders):
-        analysis_file = f"{folder}_analysis.md"
-        if os.path.exists(os.path.join(results_dir, folder, analysis_file)):
-            # Use relative path from repository root
-            scenario_links.append(f"- [{folder}](/data/results/{folder}/{analysis_file})")
+    # Create the new scenario links section
+    scenario_links = "\n### Individual Scenario Reports\n"
+    for scenario in scenario_reports:
+        scenario_links += f"- [{scenario}](data/results/{scenario}/{scenario}_analysis.md)\n"
     
-    # Add global comparison report if it exists
-    global_report = os.path.join(results_dir, "global_comparison_report.md")
-    if os.path.exists(global_report):
-        global_analysis = "- [Global Comparison Report](/data/results/global_comparison_report.md)"
-    else:
-        global_analysis = "- Global Comparison Report (not generated yet)"
+    # Replace the existing scenario links section
+    import re
+    pattern = r"### Individual Scenario Reports\n(?:- \[.*?\]\(.*?\)\n)*"
+    updated_content = re.sub(pattern, scenario_links, content)
     
-    # Replace placeholders with generated links
-    readme_content = template.replace("${scenario_links}", "\n".join(scenario_links))
-    readme_content = readme_content.replace("${global_analysis}", global_analysis)
+    # Write the updated content back to README.md
+    with open('README.md', 'w') as f:
+        f.write(updated_content)
     
-    # Write updated README
-    with open(readme_path, 'w') as f:
-        f.write(readme_content)
-    
-    print(f"README.md updated at {readme_path}")
+    print("README.md updated with current scenario links")
 
 def create_readme_template(readme_path):
     """Create a new README.md file with the template content"""
