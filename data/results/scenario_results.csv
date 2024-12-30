@@ -1,3 +1,5 @@
-scenario_name,annual_cost,gen_nuclear,gen_solar,gen_cost_nuclear,gen_cost_solar,avail_gen_nuclear,avail_gen_solar,capacity_factor_nuclear,capacity_factor_solar,gen_battery1,gen_cost_battery1,avail_gen_battery1,capacity_factor_battery1
-scenario_1,3195547.3,639109.5,128315.6,3195547.3,0.0,0.0,0.0,0.0,0.0,,,,
-scenario_2,3195590.2,639118.0,128315.6,3195590.2,0.0,0.0,0.0,0.0,0.0,-8.6,0.0,1568.6,-0.01
+scenario_name,annual_cost,gen_nuclear,gen_solar,gen_cost_nuclear,gen_cost_solar,avail_gen_nuclear,avail_gen_solar,capacity_factor_nuclear,capacity_factor_solar,gen_battery1,gen_cost_battery1,avail_gen_battery1,capacity_factor_battery1,gen_wind,gen_cost_wind,avail_gen_wind,capacity_factor_wind,gen_battery2,gen_cost_battery2,avail_gen_battery2,capacity_factor_battery2
+scenario_1,3195547.3,639109.5,128315.6,3195547.3,0.0,0.0,0.0,0.0,0.0,,,,,,,,,,,,
+scenario_2,3195590.2,639118.0,128315.6,3195590.2,0.0,0.0,0.0,0.0,0.0,-8.6,0.0,1568.6,-0.01,,,,,,,,
+scenario_3,2769095.3,553819.1,127441.6,2769095.3,0.0,0.0,0.0,0.0,0.0,-18.4,0.0,1578.4,-0.01,86182.9,0.0,0.0,0.0,,,,
+scenario_4,3406250.8,681250.2,,3406250.8,,0.0,,0.0,,-7.9,0.0,1567.9,-0.01,86182.9,0.0,0.0,0.0,0.0,0.0,2860.0,0.0

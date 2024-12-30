@@ -19,6 +19,8 @@ from dcopf import dcopf  # Ensure this imports your updated DCOPF code
 from dotenv import load_dotenv
 from scenario_critic import ScenarioCritic
 from update_readme import update_readme_with_scenarios
+from create_master_invest import InvestmentAnalysis
+from typing import Dict, Any
 
 # Paths
 working_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/working"
@@ -237,6 +239,49 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
             remaining_capacity_dict)
 
 # %%
+def create_annual_summary_plots(scenario_data: Dict[str, Any], results_root: str) -> None:
+    """Create annual generation and cost mix plots"""
+    scenario_name = scenario_data.get('scenario_name', 'Unknown')
+    scenario_folder = os.path.join(results_root, scenario_name)
+
+    # Prepare generation data
+    gen_data = {k.replace('gen_', ''): v for k, v in scenario_data.items() 
+                if k.startswith('gen_') and not k.startswith('gen_cost_')}
+    avail_data = {k.replace('avail_gen_', ''): v for k, v in scenario_data.items() 
+                  if k.startswith('avail_gen_')}
+    cost_data = {k.replace('gen_cost_', ''): v for k, v in scenario_data.items() 
+                 if k.startswith('gen_cost_')}
+
+    # Create generation mix plot
+    plt.figure(figsize=(10, 6))
+    x = np.arange(len(gen_data))
+    width = 0.35
+
+    plt.bar(x, list(gen_data.values()), width, label='Actual Generation', color='skyblue')
+    plt.bar(x, list(avail_data.values()), width, label='Available Capacity', 
+            color='lightgray', alpha=0.5)
+
+    plt.xlabel('Generation Type')
+    plt.ylabel('Annual Generation (MW)')
+    plt.title(f'Annual Generation Mix - {scenario_name}')
+    plt.xticks(x, list(gen_data.keys()), rotation=45)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(scenario_folder, 'annual_generation_mix.png'))
+    plt.close()
+
+    # Create cost mix plot
+    plt.figure(figsize=(10, 6))
+    plt.bar(list(cost_data.keys()), list(cost_data.values()), color='salmon')
+    plt.xlabel('Generation Type')
+    plt.ylabel('Annual Cost')
+    plt.title(f'Annual Generation Costs - {scenario_name}')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(os.path.join(scenario_folder, 'annual_cost_mix.png'))
+    plt.close()
+
+# %%
 def main():
     # Load Data
     bus = pd.read_csv(bus_file)
@@ -390,14 +435,58 @@ def main():
             })
             print(f"  {scenario_name} marked as NOT Optimal.")
 
-    # Save Results
+    # Save Results to CSV first
     results_df = pd.DataFrame(scenario_results)
+    results_df.to_csv(os.path.join(results_root, "scenario_results.csv"), index=False)
+    print("Initial results saved to CSV.")
+
+    # Then perform investment analysis
+    print("\nPerforming investment analysis...")
+    analysis = InvestmentAnalysis()
+    investment_results = analysis.analyze_scenario(
+        os.path.join(results_root, "scenario_results.csv"),
+        master_gen_file
+    )
+    
+    # Ensure we have the right column names from investment analysis
+    print("Investment analysis columns:", investment_results.columns.tolist())
+    
+    # Merge investment results with scenario results using scenario name
+    results_df = results_df.merge(
+        investment_results,
+        left_on='scenario_name',
+        right_index=True,
+        how='left'
+    )
+    
+    # Ensure we have the expected columns
+    expected_columns = ['npv', 'annuity', 'initial_investment']
+    actual_columns = results_df.columns.tolist()
+    print("\nAvailable columns after merge:", actual_columns)
+    
+    # Rename columns if necessary
+    column_mapping = {
+        'NPV': 'npv',
+        'Annuity': 'annuity',
+        'Initial Investment': 'initial_investment',
+        # Add any other necessary mappings based on actual columns
+    }
+    
+    results_df = results_df.rename(columns=column_mapping)
+    
+    # Sort by NPV for ranking
+    if 'npv' in results_df.columns:
+        results_df = results_df.sort_values('npv', ascending=False)
+    else:
+        print("Warning: NPV column not found in results")
 
     # Ask user before generating critiques
     if ask_user_confirmation("Do you want to generate AI critiques and markdown reports?"):
         print("\nGenerating AI critiques and markdown reports...")
         for _, row in results_df.iterrows():
-            if row['annual_cost'] is not None:  # Only analyze valid scenarios
+            if row['annual_cost'] is not None:
+                # Create annual summary plots
+                create_annual_summary_plots(row.to_dict(), results_root)
                 critic.analyze_scenario(row.to_dict(), results_root)
         
         # Generate global comparison report
@@ -409,9 +498,9 @@ def main():
     else:
         print("\nSkipping AI critiques generation.")
 
-    # Save the CSV as before
-    results_df.to_csv(os.path.join(results_root, "scenario_results.csv"), index=False)
-    print("Results saved to CSV.")
+    # Save the final results CSV with investment analysis
+    results_df.to_csv(os.path.join(results_root, "scenario_results_with_investment.csv"), index=False)
+    print("Final results saved with investment analysis.")
     
     # Update README with scenario links
     update_readme_with_scenarios()

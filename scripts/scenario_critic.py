@@ -80,7 +80,19 @@ Based on these results, provide a brief (200 words max) critical analysis addres
         markdown = f"""# Scenario Analysis Report: {scenario_name}
 Generated on: {now}
 
-## Generation vs Demand
+## Investment Analysis
+- Net Present Value (NPV): {scenario_data.get('npv', 'N/A'):,.2f}
+- Annuity: {scenario_data.get('annuity', 'N/A'):,.2f}
+- Initial Investment: {scenario_data.get('initial_investment', 'N/A'):,.2f}
+- Annual Operating Cost: {scenario_data.get('annual_cost', 'N/A'):,.2f}
+
+## Annual Generation Overview
+![Annual Generation Mix](annual_generation_mix.png)
+
+## Annual Cost Overview
+![Annual Cost Mix](annual_cost_mix.png)
+
+## Seasonal Generation Patterns
 ![Winter Generation vs Demand](gen_vs_demand_winter.png)
 
 ## Generation Statistics
@@ -99,9 +111,6 @@ Generated on: {now}
 ```
 {self._format_dict({k: v for k, v in scenario_data.items() if k.startswith('capacity_factor_')})}
 ```
-
-## Economic Analysis
-Annual Cost: {scenario_data.get('annual_cost', 'N/A')}
 
 ## AI Critical Analysis
 {critique}
@@ -184,6 +193,23 @@ Scenarios ranked by annual cost:
                     else:
                         value_str = "N/A"
                     line += value_str.ljust(15)
+                markdown += line + "\n"
+        markdown += "```\n\n"
+
+        # Add investment comparison
+        markdown += "## Investment Comparison\n\n"
+        investment_comparison = all_scenarios_data[['scenario_name', 'npv', 'annuity', 'initial_investment', 'annual_cost']].sort_values('npv', ascending=False)
+        markdown += "```\n"
+        markdown += "Scenario".ljust(30) + "NPV".ljust(15) + "Annuity".ljust(15) + "Initial Inv.".ljust(15) + "Annual Cost".ljust(15) + "\n"
+        markdown += "-" * 90 + "\n"
+        
+        for _, row in investment_comparison.iterrows():
+            if pd.notna(row['npv']):
+                line = (f"{row['scenario_name']}".ljust(30) +
+                       f"{row['npv']:,.0f}".ljust(15) +
+                       f"{row['annuity']:,.0f}".ljust(15) +
+                       f"{row['initial_investment']:,.0f}".ljust(15) +
+                       f"{row['annual_cost']:,.0f}".ljust(15))
                 markdown += line + "\n"
         markdown += "```\n\n"
 

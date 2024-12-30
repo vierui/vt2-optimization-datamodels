@@ -41,7 +41,8 @@ python scripts/multi_scenario.py
 - [Global Comparison Report](data/results/global_comparison_report.md)
 
 ### Individual Scenario Reports
-${scenario_links}
+- [scenario_1](data/results/scenario_1/scenario_1_analysis.md)
+- [scenario_2](data/results/scenario_2/scenario_2_analysis.md)
 
 ## Visualization Examples
 Each scenario analysis includes:
