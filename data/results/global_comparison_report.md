@@ -1,118 +1,58 @@
 # Global Scenarios Comparison Report
-Generated on: 2024-12-30 01:27
+Generated on: 2024-12-30 20:19
 
-## Overview
-Total Scenarios Analyzed: 4
-Valid Scenarios: 4
-
-## Economic Comparison
-Scenarios ranked by annual cost:
+## Investment Analysis
 
 ```
-scenario_3: 2,769,095.30
-scenario_1: 3,195,547.30
-scenario_2: 3,195,590.20
-scenario_4: 3,406,250.80
+Scenario                      Initial Inv.        Annual Cost         10y NPV             20y NPV             30y NPV             Annuity             
+--------------------------------------------------------------------------------------------------------------------------------------------
+scenario_3                    $22,290,920         $2,769,095          $-45,104,618        $-61,071,748        $-66,478,925        $5,905,152          
+scenario_1                    $22,290,920         $3,195,547          $-47,966,145        $-65,258,716        $-71,279,829        $6,331,604          
+scenario_2                    $22,290,920         $3,195,590          $-47,966,433        $-65,259,137        $-71,280,312        $6,331,647          
+scenario_4                    $22,290,920         $3,406,251          $-49,379,983        $-67,327,434        $-73,651,883        $6,542,308          
 ```
 
-## Generation Mix Comparison
+## Annual Cost Comparison
 
-### scenario_4
-```
-nuclear: 681,250.20 MW
-solar: nan MW
-cost_nuclear: 3,406,250.80 MW
-cost_solar: nan MW
-battery1: -7.90 MW
-cost_battery1: 0.00 MW
-wind: 86,182.90 MW
-cost_wind: 0.00 MW
-battery2: 0.00 MW
-cost_battery2: 0.00 MW
-```
+![Annual Cost Comparison](/data/results/annual_cost_comparison.png)
 
-### scenario_2
-```
-nuclear: 639,118.00 MW
-solar: 128,315.60 MW
-cost_nuclear: 3,195,590.20 MW
-cost_solar: 0.00 MW
-battery1: -8.60 MW
-cost_battery1: 0.00 MW
-wind: nan MW
-cost_wind: nan MW
-battery2: nan MW
-cost_battery2: nan MW
-```
-
-### scenario_1
-```
-nuclear: 639,109.50 MW
-solar: 128,315.60 MW
-cost_nuclear: 3,195,547.30 MW
-cost_solar: 0.00 MW
-battery1: nan MW
-cost_battery1: nan MW
-wind: nan MW
-cost_wind: nan MW
-battery2: nan MW
-cost_battery2: nan MW
-```
-
-### scenario_3
-```
-nuclear: 553,819.10 MW
-solar: 127,441.60 MW
-cost_nuclear: 2,769,095.30 MW
-cost_solar: 0.00 MW
-battery1: -18.40 MW
-cost_battery1: 0.00 MW
-wind: 86,182.90 MW
-cost_wind: 0.00 MW
-battery2: nan MW
-cost_battery2: nan MW
-```
-
-## Capacity Factors Comparison
-
-```
-Scenario                      nuclear        solar          battery1       wind           battery2       
----------------------------------------------------------------------------------------------------------
-scenario_4                    0.00           N/A            -0.01          0.00           0.00           
-scenario_2                    0.00           0.00           -0.01          N/A            N/A            
-scenario_1                    0.00           0.00           N/A            N/A            N/A            
-scenario_3                    0.00           0.00           -0.01          0.00           N/A            
-```
-
-## Investment Comparison
-
-```
-Scenario                      NPV            Annuity        Initial Inv.   Annual Cost    
-------------------------------------------------------------------------------------------
-scenario_4                    12,264,288     1,432,831      22,290,920     3,406,251      
-scenario_2                    10,461,143     1,222,171      22,290,920     3,195,590      
-scenario_1                    10,460,776     1,222,128      22,290,920     3,195,547      
-scenario_3                    6,810,569      795,676        22,290,920     2,769,095      
-```
-
-## AI Comparative Analysis
+## AI Comparative Analysis of Energy Scenarios
 
 Below is an analysis of the key trends and patterns observed across all scenarios:
 
 # Comparative Analysis of Energy Scenarios
 
 ## Overall Trends in Cost Effectiveness
-The data indicates that **Scenario 3** presents the most cost-effective approach, with an annual cost of **$2,769,095.3**. This is significantly lower compared to **Scenario 1** and **Scenario 2**, which are almost identical at around **$3,195,590**. **Scenario 4** is the least cost-effective at **$3,406,250.8**. The reduction in costs from scenarios 1 to 3 suggests that optimizing the generation mix can yield substantial savings.
+Across the four scenarios analyzed, scenario_3 demonstrates the lowest annual cost despite a similar initial investment of approximately $22.29 million for all scenarios. With an annual operational cost of about $2.77 million, it offers the best cost-efficiency profile, followed closely by scenario_1 and scenario_2, which have marginally higher costs. Scenario_4 incurs the highest annual costs at approximately $3.41 million, indicating a need to assess its component cost structures.
 
 ## Trade-offs Between Different Generation Mixes
-The apparent discrepancy in costs among scenarios likely stems from the mix of energy sources used. Scenarios utilizing a higher percentage of **renewable resources** (like wind and solar) often exhibit lower operational costs due to zero fuel expenses. Conversely, scenarios with heavier reliance on **gas and nuclear** plants may have higher costs due to fuel and maintenance. A shift from fossil fuels to renewables, while having substantial initial investment considerations, seems beneficial in the long run.
+Each scenario presents unique generation mixes impacting overall performance and economics:
+
+1. **Scenario_1 (Nuclear, Solar)**:
+   - **Strengths**: High load factor resulting in consistent generation, capitalizing on nuclear's baseload capabilities.
+   - **Weaknesses**: Lacks energy storage, limiting flexibility in meeting demand fluctuations.
+
+2. **Scenario_2 (Nuclear, Solar, Battery)**:
+   - **Strengths**: Incorporating battery storage allows for demand-response capabilities, enhancing system resiliency.
+   - **Weaknesses**: Slightly increased operational costs due to storage maintenance and operational complexities.
+
+3. **Scenario_3 (Wind, Solar, Nuclear)**:
+   - **Strengths**: Diverse generation mix, which may increase overall efficiency; benefits from wind's renewable nature.
+   - **Weaknesses**: Potentially vulnerable to weather conditions affecting wind and solar output without sufficient backup.
+
+4. **Scenario_4 (Nuclear, Wind, Battery)**:
+   - **Strengths**: Balances nuclear's reliability with wind's renewability and augmented by battery storage.
+   - **Weaknesses**: Highest annual costs may be attributed to the dual storage requirement, demanding careful financial management.
 
 ## Key Success Factors in Better Performing Scenarios
-Scenario 3’s success can likely be attributed to an optimized balance of renewable sources and efficient operational management. High capacity factors in wind and solar, along with strategic battery storage usage, may contribute to minimized operational costs. The adaptability of generation assets in line with demand patterns tends to enhance overall economic performance.
+- **Diversification** in generation mixes enhances overall system effectiveness by combining baseload and variable resources.
+- **Incorporating storage** solutions in scenarios (like batteries) improves demand responsiveness and energy management.
+  
+Scenario_3 stands out for balancing renewable innovation with nuclear reliability, achieving both economic efficiency and technical feasibility.
 
 ## Recommendations for Future Scenario Design
-1. **Emphasize Renewable Sources**: Increase the proportion of wind and solar in mixes to capitalize on low fuel costs and sustainability.
-2. **Incorporate Energy Storage**: Utilize battery storage to manage intermittencies and ensure a stable power supply, enhancing overall efficiency.
-3. **Conduct Sensitivity Analyses**: Evaluate how fluctuations in energy prices and technology costs affect overall economic performance to design resilient scenarios. 
+1. **Optimize Storage Technologies**: Focus on enhancing energy storage capacities and technologies to capture excess generation and mitigate fluctuations.
+2. **Conduct Sensitivity Analyses**: Assess how varying load factors or economic conditions affect different scenarios to enhance resilience.
+3. **Explore Hybrid Solutions**: Consider integrating additional renewable resources or alternative storage methods to further optimize the energy mix.
 
-By focusing on these areas, future energy scenarios can enhance their economic viability while promoting sustainable practices.
+In conclusion, a focused approach towards optimization and strategic diversification can significantly enhance cost efficiency and reliability in energy system designs.

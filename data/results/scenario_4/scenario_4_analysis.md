@@ -1,71 +1,52 @@
 # Scenario Analysis Report: scenario_4
-Generated on: 2024-12-30 01:27
+Generated on: 2024-12-30 20:19:50
 
-## Investment Analysis
-- Net Present Value (NPV): 12,264,287.78
-- Annuity: 1,432,831.16
-- Initial Investment: 22,290,920.00
-- Annual Operating Cost: 3,406,250.80
-
-## Annual Generation Overview
-![Annual Generation Mix](annual_generation_mix.png)
-
-## Annual Cost Overview
-![Annual Cost Mix](annual_cost_mix.png)
+## Overview
+![Annual Summary](figure/annual_summary.png)
 
 ## Seasonal Generation Patterns
-![Winter Generation vs Demand](gen_vs_demand_winter.png)
+![Seasonal Comparison](figure/seasonal_comparison.png)
 
-## Generation Statistics
+## Financial Analysis
+| Metric | Value |
+|--------|--------|
+| Initial Investment | €22,290,920.00 |
+| Annual Operating Cost | €3,406,250.80 |
+| NPV (10 years) | €-49,379,982.95 |
+| NPV (20 years) | €-67,327,434.15 |
+| NPV (30 years) | €-73,651,883.12 |
 
-### Generation per Asset
-```
-nuclear: 681250.2
-solar: nan
-cost_nuclear: 3406250.8
-cost_solar: nan
-battery1: -7.9
-cost_battery1: 0.0
-wind: 86182.9
-cost_wind: 0.0
-battery2: 0.0
-cost_battery2: 0.0
-```
+## Generation Analysis
 
-### Generation Costs per Asset
-```
-cost_nuclear: 3406250.8
-cost_solar: nan
-cost_battery1: 0.0
-cost_wind: 0.0
-cost_battery2: 0.0
-```
+### Annual Generation by Asset Type
+| Asset Type | Generation (MWh) |
+|------------|-----------------|
+| nuclear | 681,250.20 |
+| battery1 | -7.90 |
+| wind | 86,182.90 |
+
+### Generation Costs
+| Asset Type | Cost (€) |
+|------------|----------|
+| nuclear | 3,406,250.80 |
 
 ### Capacity Factors
-```
-nuclear: 0.0
-solar: nan
-battery1: -0.01
-wind: 0.0
-battery2: 0.0
-```
+| Asset Type | Capacity Factor |
+|------------|----------------|
+| battery1 | -1.00% |
 
 ## AI Critical Analysis
-# Scenario Analysis for Scenario 4
+## Critical Analysis of Scenario 4
 
-## Economic Efficiency of the Generation Mix
-The annual cost of $3,406,250.8 indicates a significant investment primarily in nuclear energy. However, the generation per asset reveals that the mix is heavily reliant on nuclear, with a substantial contribution of 681,250.2 MW. This presents a concern for economic efficiency, particularly considering the absence of output from renewable sources such as solar and wind, which typically have lower operational costs.
+### Economic Efficiency of the Generation Mix
+Scenario 4 shows an annual operational cost of approximately $3.41 million, predominantly driven by nuclear energy, which produces 681,250.2 MW. However, the absence of generated MW from solar and wind, coupled with negative generation from battery systems, raises concerns about economic efficiency. The cost per megawatt from nuclear appears high due to underutilization of renewable resources.
 
-## System Composition Strengths/Weaknesses
-**Strengths:**
-- The dominant nuclear generation provides a consistent base load, which is valuable for grid stability.
+### System Composition Strengths/Weaknesses
+The reliance on nuclear energy indicates potential strengths in base-load capacity; however, the lack of contribution from solar and windy assets undermines system resilience and environmental sustainability. The underperformance of battery systems, particularly with negative generation values, suggests critical weaknesses in energy storage capabilities. 
 
-**Weaknesses:**
-- Solar and wind generation are not contributing, resulting in underutilization of potential low-cost renewables. Additionally, the negative output for battery systems suggests that energy storage strategies are poorly integrated or mismanaged.
-
-## Key Recommendations for Improvement
-1. **Diversify Generation Sources:** Aim to incorporate functional solar and wind systems to capitalize on renewable energy potential and decrease reliance on nuclear.
-2. **Optimize Battery Utilization:** Address the issues causing negative generation for battery systems to enhance reliability and support grid applications.
-3. **Explore Operational Enhancements:** Investigate the economic feasibility of hybridizing energy generation with renewables to improve overall cost-effectiveness and reduce carbon emissions.
+### Key Recommendations for Improvement
+1. **Diversify Generation Sources**: Invest in solar and wind technologies to enhance the renewables mix, aiming for a lower environmental impact and improved reliability.
+2. **Optimize Battery Systems**: Evaluate and upgrade the battery storage systems to ensure they can provide effective discharge when necessary, improving overall system flexibility.
+3. **Enhance Capacity Factors**: Focus on improving the capacity factors of all technologies to maximize output relative to installed capacity, thus increasing the system’s overall economic efficiency.
 
 ---
