@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Dict, Any
 from datetime import datetime
 import os
+import matplotlib.pyplot as plt
 
 class ScenarioCritic:
     def __init__(self, api_key: str):
@@ -80,17 +81,15 @@ Based on these results, provide a brief (200 words max) critical analysis addres
         markdown = f"""# Scenario Analysis Report: {scenario_name}
 Generated on: {now}
 
+## Scenario Overview
+![Scenario Comparison](scenario_comparison.png)
+
 ## Investment Analysis
-- Net Present Value (NPV): {scenario_data.get('npv', 'N/A'):,.2f}
-- Annuity: {scenario_data.get('annuity', 'N/A'):,.2f}
+- 10-year NPV: {scenario_data.get('npv_10y', 'N/A'):,.2f}
+- 20-year NPV: {scenario_data.get('npv_20y', 'N/A'):,.2f}
+- 30-year NPV: {scenario_data.get('npv_30y', 'N/A'):,.2f}
 - Initial Investment: {scenario_data.get('initial_investment', 'N/A'):,.2f}
 - Annual Operating Cost: {scenario_data.get('annual_cost', 'N/A'):,.2f}
-
-## Annual Generation Overview
-![Annual Generation Mix](annual_generation_mix.png)
-
-## Annual Cost Overview
-![Annual Cost Mix](annual_cost_mix.png)
 
 ## Seasonal Generation Patterns
 ![Winter Generation vs Demand](gen_vs_demand_winter.png)
@@ -140,90 +139,78 @@ Generated on: {now}
 
     def create_global_comparison_report(self, all_scenarios_data: pd.DataFrame, results_root: str) -> None:
         """Create a markdown report comparing all scenarios"""
-        
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
         
-        # Start with header
         markdown = f"""# Global Scenarios Comparison Report
 Generated on: {now}
 
-## Overview
-Total Scenarios Analyzed: {len(all_scenarios_data)}
-Valid Scenarios: {len(all_scenarios_data[all_scenarios_data['annual_cost'].notna()])}
+## Investment Analysis
 
-## Economic Comparison
-Scenarios ranked by annual cost:
-
+```
 """
+        # Ensure numeric columns
+        numeric_cols = ['npv_10y', 'npv_20y', 'npv_30y', 'annuity_30y', 
+                       'initial_investment', 'annual_cost', 'annual_costs']
+        for col in numeric_cols:
+            if col in all_scenarios_data.columns:
+                all_scenarios_data[col] = pd.to_numeric(all_scenarios_data[col], errors='coerce')
         
-        # Add economic comparison
-        economic_comparison = all_scenarios_data[['scenario_name', 'annual_cost']].sort_values('annual_cost')
-        markdown += "```\n"
-        for _, row in economic_comparison.iterrows():
-            if pd.notna(row['annual_cost']):
-                markdown += f"{row['scenario_name']}: {row['annual_cost']:,.2f}\n"
+        # Sort by 30-year NPV
+        sorted_scenarios = all_scenarios_data.sort_values('npv_30y', ascending=False)
+        
+        # Add header for full comparison table
+        markdown += "Scenario".ljust(30)
+        headers = ["Initial Inv.", "Annual Cost", "10y NPV", "20y NPV", "30y NPV", "Annuity"]
+        for header in headers:
+            markdown += header.ljust(20)
+        markdown += "\n" + "-" * 140 + "\n"
+        
+        # Add data rows
+        for _, row in sorted_scenarios.iterrows():
+            try:
+                markdown += (f"{row['scenario_name']}".ljust(30) +
+                           f"${row.get('initial_investment', 0):,.0f}".ljust(20) +
+                           f"${row.get('annual_cost', 0):,.0f}".ljust(20) +
+                           f"${row.get('npv_10y', 0):,.0f}".ljust(20) +
+                           f"${row.get('npv_20y', 0):,.0f}".ljust(20) +
+                           f"${row.get('npv_30y', 0):,.0f}".ljust(20) +
+                           f"${row.get('annuity_30y', 0):,.0f}".ljust(20) + "\n")
+            except (ValueError, TypeError):
+                print(f"Warning: Invalid values for scenario {row['scenario_name']}")
+                continue
+        
         markdown += "```\n\n"
 
-        # Add generation mix comparison
-        markdown += "## Generation Mix Comparison\n\n"
-        gen_columns = [col for col in all_scenarios_data.columns if col.startswith('gen_')]
+        # Add annual cost comparison plot
+        markdown += "## Annual Cost Comparison\n\n"
         
-        for _, row in all_scenarios_data.iterrows():
-            if pd.notna(row['annual_cost']):
-                markdown += f"### {row['scenario_name']}\n```\n"
-                for col in gen_columns:
-                    tech_name = col.replace('gen_', '')
-                    markdown += f"{tech_name}: {row[col]:,.2f} MW\n"
-                markdown += "```\n\n"
-
-        # Add capacity factors comparison
-        markdown += "## Capacity Factors Comparison\n\n"
-        cf_columns = [col for col in all_scenarios_data.columns if col.startswith('capacity_factor_')]
+        plt.figure(figsize=(12, 6))
+        valid_data = all_scenarios_data.dropna(subset=['annual_cost'])
+        scenarios = valid_data['scenario_name']
+        costs = valid_data['annual_cost']
         
-        markdown += "```\n"
-        markdown += "Scenario".ljust(30) + "".join([col.replace('capacity_factor_', '').ljust(15) for col in cf_columns]) + "\n"
-        markdown += "-" * (30 + 15 * len(cf_columns)) + "\n"
+        plt.bar(scenarios, costs)
+        plt.xticks(rotation=45, ha='right')
+        plt.ylabel('Annual Cost ($)')
+        plt.title('Annual Cost Comparison Across Scenarios')
+        plt.tight_layout()
         
-        for _, row in all_scenarios_data.iterrows():
-            if pd.notna(row['annual_cost']):
-                line = str(row['scenario_name']).ljust(30)  # Convert to string and justify
-                for col in cf_columns:
-                    if pd.notna(row[col]):
-                        value_str = f"{row[col]:.2f}"
-                    else:
-                        value_str = "N/A"
-                    line += value_str.ljust(15)
-                markdown += line + "\n"
-        markdown += "```\n\n"
-
-        # Add investment comparison
-        markdown += "## Investment Comparison\n\n"
-        investment_comparison = all_scenarios_data[['scenario_name', 'npv', 'annuity', 'initial_investment', 'annual_cost']].sort_values('npv', ascending=False)
-        markdown += "```\n"
-        markdown += "Scenario".ljust(30) + "NPV".ljust(15) + "Annuity".ljust(15) + "Initial Inv.".ljust(15) + "Annual Cost".ljust(15) + "\n"
-        markdown += "-" * 90 + "\n"
+        cost_plot_path = os.path.join(results_root, 'annual_cost_comparison.png')
+        plt.savefig(cost_plot_path)
+        plt.close()
         
-        for _, row in investment_comparison.iterrows():
-            if pd.notna(row['npv']):
-                line = (f"{row['scenario_name']}".ljust(30) +
-                       f"{row['npv']:,.0f}".ljust(15) +
-                       f"{row['annuity']:,.0f}".ljust(15) +
-                       f"{row['initial_investment']:,.0f}".ljust(15) +
-                       f"{row['annual_cost']:,.0f}".ljust(15))
-                markdown += line + "\n"
-        markdown += "```\n\n"
+        markdown += f"![Annual Cost Comparison](/data/results/annual_cost_comparison.png)\n\n"
 
         # Add AI comparative analysis
-        markdown += """## AI Comparative Analysis
+        markdown += """## AI Comparative Analysis of Energy Scenarios
 
 Below is an analysis of the key trends and patterns observed across all scenarios:
 
 """
-        
         comparative_prompt = f"""Analyze the following scenarios data and provide a comparative analysis:
 
 Economic Comparison:
-{economic_comparison.to_string()}
+{sorted_scenarios[['scenario_name', 'initial_investment', 'annual_cost', 'npv_30y']].to_string()}
 
 Key points to address:
 1. Overall trends in cost effectiveness
@@ -244,7 +231,7 @@ Limit the analysis to 300 words."""
         
         markdown += response.choices[0].message.content
 
-        # Save the global comparison report
+        # Save the report
         report_path = os.path.join(results_root, "global_comparison_report.md")
         with open(report_path, 'w') as f:
             f.write(markdown)

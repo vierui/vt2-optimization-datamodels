@@ -13,13 +13,17 @@ class InvestmentAnalysis:
         
         # Financial parameters
         self.discount_rate = 0.08  # 8%
+        self.time_horizons = [10, 20, 30]  # Years to calculate NPV for
+        
+        # Technical lifetime of assets
         self.lifetime = {
             'wind': 25,
             'solar': 25,
             'battery1': 15,
             'battery2': 15,
         }
-        self.annual_opex_percent = {  # Annual operation & maintenance costs as % of CAPEX
+        
+        self.annual_opex_percent = {
             'wind': 0.02,
             'solar': 0.02,
             'battery1': 0.03,
@@ -46,18 +50,29 @@ class InvestmentAnalysis:
         
         return annual_cost
 
-    def calculate_npv(self, initial_investment, annual_costs, lifetime):
-        """Calculate NPV"""
+    def calculate_npv(self, initial_investment, annual_costs, years):
+        """Calculate NPV for a specific time horizon"""
         npv = -initial_investment
-        for year in range(lifetime):
-            npv += annual_costs / (1 + self.discount_rate)**(year + 1)
+        for year in range(years):
+            # Add replacement costs if asset lifetime is exceeded
+            replacement_cost = 0
+            if year > 0:  # Check for replacements
+                for tech, lifetime in self.lifetime.items():
+                    if year % lifetime == 0:  # Time to replace
+                        capacity = self.installed_capacity.get(tech, 0)
+                        replacement_cost += capacity * self.capex[tech]
+            
+            yearly_cashflow = -annual_costs - replacement_cost
+            npv += yearly_cashflow / (1 + self.discount_rate)**(year + 1)
         return npv
 
-    def calculate_annuity(self, npv, lifetime):
-        """Calculate annuity payment"""
-        annuity_factor = (self.discount_rate * (1 + self.discount_rate)**lifetime) / \
-                        ((1 + self.discount_rate)**lifetime - 1)
-        return npv * annuity_factor
+    def calculate_annuity(self, npv, years):
+        """Calculate annuity payment for a specific time horizon"""
+        if npv >= 0:  # For positive NPV, return 0 (no payments needed)
+            return 0
+        annuity_factor = (self.discount_rate * (1 + self.discount_rate)**years) / \
+                        ((1 + self.discount_rate)**years - 1)
+        return -npv * annuity_factor  # Negative NPV becomes positive annuity
 
     def analyze_scenario(self, scenario_results_path, master_gen_path):
         """Main analysis function"""
@@ -84,6 +99,9 @@ class InvestmentAnalysis:
         for scenario in scenario_results['scenario_name'].unique():
             scenario_data = scenario_results[scenario_results['scenario_name'] == scenario]
             
+            # Store installed capacity for replacement calculations
+            self.installed_capacity = installed_capacity
+            
             # Calculate initial investment
             initial_inv = self.calculate_initial_investment(installed_capacity)
             
@@ -93,21 +111,23 @@ class InvestmentAnalysis:
                 installed_capacity
             )
             
-            # Calculate overall NPV and annuity
-            total_npv = self.calculate_npv(
-                initial_inv,
-                annual_costs,
-                min(self.lifetime.values())  # Using minimum lifetime for conservative estimate
-            )
+            # Calculate NPV and annuity for different time horizons
+            npv_results = {}
+            annuity_results = {}
             
-            total_annuity = self.calculate_annuity(total_npv, min(self.lifetime.values()))
+            for years in self.time_horizons:
+                npv = self.calculate_npv(initial_inv, annual_costs, years)
+                annuity = self.calculate_annuity(npv, years)
+                
+                npv_results[f'npv_{years}y'] = npv
+                annuity_results[f'annuity_{years}y'] = annuity
             
             results[scenario] = {
                 'installed_capacity': installed_capacity,
                 'initial_investment': initial_inv,
                 'annual_costs': annual_costs,
-                'npv': total_npv,
-                'annuity': total_annuity
+                **npv_results,
+                **annuity_results
             }
             
         return pd.DataFrame(results).T
@@ -124,7 +144,11 @@ if __name__ == "__main__":
     display_df = results.copy()
     
     # Format monetary values
-    for col in ['initial_investment', 'annual_costs', 'npv', 'annuity']:
+    monetary_columns = ['initial_investment', 'annual_costs'] + \
+                      [f'npv_{y}y' for y in analysis.time_horizons] + \
+                      [f'annuity_{y}y' for y in analysis.time_horizons]
+    
+    for col in monetary_columns:
         display_df[col] = display_df[col].map('${:,.2f}'.format)
     
     # Format installed capacity
@@ -132,10 +156,10 @@ if __name__ == "__main__":
         lambda x: '\n'.join([f"{k}: {v:.2f} MW" for k, v in x.items()])
     )
     
-    # Sort by NPV and get top 10
-    top_10 = display_df.sort_values('npv', ascending=True).head(10)
+    # Sort by 30-year NPV and get top 10
+    top_10 = display_df.sort_values('npv_30y', ascending=True).head(10)
     
-    print("\n=== Top 10 Scenarios by NPV ===")
+    print("\n=== Top 10 Scenarios by 30-year NPV ===")
     print("\nDetailed Results:")
     for idx, row in top_10.iterrows():
         print(f"\nScenario: {idx}")
@@ -143,8 +167,10 @@ if __name__ == "__main__":
         print(row['installed_capacity'])
         print(f"Initial Investment: {row['initial_investment']}")
         print(f"Annual Costs: {row['annual_costs']}")
-        print(f"NPV: {row['npv']}")
-        print(f"Annuity: {row['annuity']}")
+        print("\nNPV Analysis:")
+        for years in analysis.time_horizons:
+            print(f"{years}-year NPV: {row[f'npv_{years}y']}")
+            print(f"{years}-year Annuity: {row[f'annuity_{years}y']}")
         print("-" * 50)
     
     # Alternative: Create an Excel file with formatted results

@@ -88,140 +88,59 @@ def build_demand_time_series(master_load, load_factor, season_key):
 
 # %%
 def plot_scenario_results(results, demand_time_series, branch, bus, scenario_folder, season_key, id_to_type, id_to_gencost, id_to_pmax):
-    """
-    Generate and save plots:
-    - Generation vs. Demand
-    - Histogram of Total Generation per Asset with Remaining Capacity
-    - Histogram of Total Generation Cost per Asset
-    """
-    # Create default scenario folder if none provided
-    if scenario_folder is None:
-        scenario_folder = os.path.join(results_root, "temp_plots")
+    """Plot and analyze scenario results"""
+    # Get unique time points
+    time_points = sorted(demand_time_series['time'].unique())
     
-    # Ensure the directory exists
+    # Create scenario folder
     os.makedirs(scenario_folder, exist_ok=True)
-
-    generation_over_time = results['generation'].copy()
-    flows_over_time = results['flows'].copy()
-
-    # Pivot the Generation Data
-    gen_pivot = generation_over_time.groupby(['time', 'id']).sum().reset_index()
-    gen_pivot = gen_pivot.pivot(index='time', columns='id', values='gen')
-
-    if gen_pivot.index.duplicated().any():
-        gen_pivot = gen_pivot.groupby(level=0).sum()
-
-    gen_pivot.sort_index(inplace=True)
-
-    # Prepare the Total Demand Series
-    demand_ts = demand_time_series.groupby('time')['pd'].sum().reindex(gen_pivot.index, fill_value=0)
-
-    # Map generator IDs to types
-    gen_pivot.rename(columns=id_to_type, inplace=True, errors="ignore")
-
-    # Plot Generation vs. Demand
-    plt.figure(figsize=(12, 6))
-    plt.stackplot(gen_pivot.index, gen_pivot.T, labels=gen_pivot.columns, alpha=0.8)
-    plt.plot(demand_ts.index, demand_ts.values, label='Total Demand', color='black', linewidth=2)
-    plt.xlabel('Time')
-    plt.ylabel('Power (MW)')
-    plt.title(f'Generation vs Demand ({season_key.capitalize()})')
-    plt.legend(loc='upper left')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(os.path.join(scenario_folder, f"gen_vs_demand_{season_key}.png"))
-    plt.close()
-    print(f"Saved Generation vs Demand plot => gen_vs_demand_{season_key}.png")
-
-    # Histogram of Total Generation per Asset with Remaining Capacity
-    total_gen_per_asset = gen_pivot.sum().sort_values(ascending=False)
     
-    # Calculate remaining capacity based on pmax and season weights
-    remaining_capacity = {}
-    for asset, gen in total_gen_per_asset.items():
-        # Find gen_id based on type
-        gen_ids = [id for id, typ in id_to_type.items() if typ == asset]
-        if gen_ids:
-            gen_id = gen_ids[0]  # Assuming unique type
-            total_pmax = id_to_pmax.get(gen_id, 0)  # Total available generation from pmax
-            remaining = total_pmax - gen
-            remaining_capacity[asset] = remaining if remaining > 0 else 0
-        else:
-            remaining_capacity[asset] = 0
-
-    remaining_capacity_series = pd.Series(remaining_capacity)
-
-    # Plot stacked histogram
-    plt.figure(figsize=(10, 6))
-    plt.bar(total_gen_per_asset.index, total_gen_per_asset, color='skyblue', label='Total Generation (MW)')
-    plt.bar(remaining_capacity_series.index, remaining_capacity_series, bottom=total_gen_per_asset, color='lightgray', label='Remaining Capacity (MW)')
-    plt.xlabel('Asset')
-    plt.ylabel('Power (MW)')
-    plt.title(f'Total Generation and Remaining Capacity per Asset ({season_key.capitalize()})')
-    plt.legend()
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(os.path.join(scenario_folder, f"hist_total_gen_with_capacity_{season_key}.png"))
-    plt.close()
-    print(f"Saved Generation with Capacity histogram => hist_total_gen_with_capacity_{season_key}.png")
-
-    # Histogram of Total Generation Cost per Asset
+    # Initialize data structures
+    gen_by_type = [{} for _ in time_points]
+    total_demand = np.zeros(len(time_points))
+    total_gen_per_asset = {}
     total_gen_cost_per_asset = {}
-    for asset, gen in total_gen_per_asset.items():
-        # Find the corresponding ID
-        gen_ids = [id for id, typ in id_to_type.items() if typ == asset]
-        if gen_ids:
-            gen_id = gen_ids[0]  # Assuming unique type
-            if gen_id in id_to_gencost:
-                total_gen_cost_per_asset[asset] = gen * id_to_gencost[gen_id]
-            else:
-                total_gen_cost_per_asset[asset] = 0.0  # Handle missing gencost
-        else:
-            total_gen_cost_per_asset[asset] = 0.0  # Handle missing asset
+    remaining_capacity_series = {}
+    
+    # Process generation and demand data
+    for t, time in enumerate(time_points):
+        # Get demand for this time point
+        demand = demand_time_series[demand_time_series['time'] == time]['pd'].sum()
+        total_demand[t] = demand
+        
+        # Get generation for this time point
+        gen_at_t = results['generation'][results['generation']['time'] == time]
+        
+        # Aggregate generation by type
+        for _, gen_row in gen_at_t.iterrows():
+            gen_type = id_to_type.get(gen_row['id'])
+            if gen_type:
+                gen_by_type[t][gen_type] = gen_by_type[t].get(gen_type, 0) + gen_row['gen']
+                total_gen_per_asset[gen_type] = total_gen_per_asset.get(gen_type, 0) + gen_row['gen']
+                
+                # Calculate generation cost
+                if gen_row['id'] in id_to_gencost:
+                    cost = gen_row['gen'] * id_to_gencost[gen_row['id']]
+                    total_gen_cost_per_asset[gen_type] = total_gen_cost_per_asset.get(gen_type, 0) + cost
+        
+        # Calculate remaining capacity
+        for gen_type in set(id_to_type.values()):
+            gen_ids = [id for id, typ in id_to_type.items() if typ == gen_type]
+            total_pmax = sum(id_to_pmax.get(id, 0) for id in gen_ids)
+            used_capacity = total_gen_per_asset.get(gen_type, 0)
+            remaining = total_pmax - used_capacity if total_pmax > used_capacity else 0
+            remaining_capacity_series[gen_type] = remaining
 
-    total_gen_cost_series = pd.Series(total_gen_cost_per_asset)
-    plt.figure(figsize=(10, 6))
-    plt.bar(total_gen_cost_series.index, total_gen_cost_series, color='salmon')
-    plt.xlabel('Asset')
-    plt.ylabel('Total Generation Cost')
-    plt.title(f'Total Generation Cost per Asset ({season_key.capitalize()})')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(os.path.join(scenario_folder, f"hist_total_gen_cost_{season_key}.png"))
-    plt.close()
-    print(f"Saved Generation Cost histogram => hist_total_gen_cost_{season_key}.png")
-
-    # Check Flow Limits
-    flows_with_limits = flows_over_time.merge(
-        branch[['fbus', 'tbus', 'ratea']],
-        left_on=['from_bus', 'to_bus'],
-        right_on=['fbus', 'tbus'],
-        how='left'
-    )
-    flows_with_limits['abs_flow'] = flows_with_limits['flow'].abs()
-    flows_with_limits['within_limits'] = flows_with_limits['abs_flow'] <= flows_with_limits['ratea']
-    exceeding = flows_with_limits[~flows_with_limits['within_limits']]
-    if not exceeding.empty:
-        exceeding.to_csv(os.path.join(scenario_folder, f"flows_exceeding_{season_key}.csv"), index=False)
-        print(f"Flows exceeding limits saved => flows_exceeding_{season_key}.csv")
-    else:
-        print(f"All line flows are within limits for {season_key}.")
-
-    # Commented out: Plot Line Flows Over Time
-    # plt.figure(figsize=(12,6))
-    # for (fbus, tbus), group in flows_with_limits.groupby(['from_bus', 'to_bus']):
-    #     plt.plot(group['time'], group['flow'], label=f"{fbus}->{tbus}")
-    # plt.xlabel('Time')
-    # plt.ylabel('Flow (MW)')
-    # plt.title(f'Line Flows Over Time ({season_key.capitalize()})')
-    # plt.legend()
-    # plt.xticks(rotation=45)
-    # plt.tight_layout()
-    # plt.savefig(os.path.join(scenario_folder, f"line_flows_{season_key}.png"))
-    # plt.close()
-    # print(f"Saved Line Flows plot => line_flows_{season_key}.png")
-
-    # Convert Series to dict if needed, otherwise return the dict directly
+    # Store generation vs demand data for comparison plot
+    gen_vs_demand_data = {}
+    for t in range(len(time_points)):
+        gen_vs_demand_data[t] = {
+            gen_type: gen_by_type[t].get(gen_type, 0) 
+            for gen_type in set(id_to_type.values())
+        }
+        gen_vs_demand_data[t]['demand'] = total_demand[t]
+    
+    # Convert Series to dict if needed
     total_gen_per_asset_dict = (total_gen_per_asset.to_dict() 
                                if hasattr(total_gen_per_asset, 'to_dict') 
                                else total_gen_per_asset)
@@ -233,16 +152,18 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     remaining_capacity_dict = (remaining_capacity_series.to_dict() 
                              if hasattr(remaining_capacity_series, 'to_dict') 
                              else remaining_capacity_series)
-
+    
     return (total_gen_per_asset_dict, 
-            total_gen_cost_per_asset_dict, 
-            remaining_capacity_dict)
+            total_gen_cost_per_asset_dict,
+            remaining_capacity_dict,
+            gen_vs_demand_data)
 
 # %%
 def create_annual_summary_plots(scenario_data: Dict[str, Any], results_root: str) -> None:
     """Create annual generation and cost mix plots"""
     scenario_name = scenario_data.get('scenario_name', 'Unknown')
-    scenario_folder = os.path.join(results_root, scenario_name)
+    scenario_folder = os.path.join(results_root, scenario_name)+"/figure/"
+    os.makedirs(scenario_folder, exist_ok=True)
 
     # Prepare generation data
     gen_data = {k.replace('gen_', ''): v for k, v in scenario_data.items() 
@@ -252,33 +173,170 @@ def create_annual_summary_plots(scenario_data: Dict[str, Any], results_root: str
     cost_data = {k.replace('gen_cost_', ''): v for k, v in scenario_data.items() 
                  if k.startswith('gen_cost_')}
 
+    # Filter out NaN values
+    gen_data = {k: v for k, v in gen_data.items() if not pd.isna(v)}
+    avail_data = {k: v for k, v in avail_data.items() if not pd.isna(v)}
+    cost_data = {k: v for k, v in cost_data.items() if not pd.isna(v)}
+
     # Create generation mix plot
     plt.figure(figsize=(10, 6))
-    x = np.arange(len(gen_data))
+    
+    # Ensure we use the same set of generation types for both datasets
+    gen_types = sorted(set(gen_data.keys()))
+    x = np.arange(len(gen_types))
     width = 0.35
 
-    plt.bar(x, list(gen_data.values()), width, label='Actual Generation', color='skyblue')
-    plt.bar(x, list(avail_data.values()), width, label='Available Capacity', 
-            color='lightgray', alpha=0.5)
+    # Plot actual generation
+    plt.bar(x, [gen_data.get(k, 0) for k in gen_types], 
+            width, label='Actual Generation', color='skyblue')
+    
+    # Plot available capacity for the same generation types
+    plt.bar(x, [avail_data.get(k, 0) for k in gen_types], 
+            width, label='Available Capacity', color='lightgray', alpha=0.5)
 
     plt.xlabel('Generation Type')
     plt.ylabel('Annual Generation (MW)')
     plt.title(f'Annual Generation Mix - {scenario_name}')
-    plt.xticks(x, list(gen_data.keys()), rotation=45)
+    plt.xticks(x, gen_types, rotation=45)
     plt.legend()
+    plt.grid(True, linestyle='--', alpha=0.7)
     plt.tight_layout()
     plt.savefig(os.path.join(scenario_folder, 'annual_generation_mix.png'))
     plt.close()
 
     # Create cost mix plot
-    plt.figure(figsize=(10, 6))
-    plt.bar(list(cost_data.keys()), list(cost_data.values()), color='salmon')
-    plt.xlabel('Generation Type')
-    plt.ylabel('Annual Cost')
-    plt.title(f'Annual Generation Costs - {scenario_name}')
-    plt.xticks(rotation=45)
+    if cost_data:  # Only create if we have cost data
+        plt.figure(figsize=(10, 6))
+        cost_types = sorted(cost_data.keys())
+        plt.bar(cost_types, [cost_data[k] for k in cost_types], color='salmon')
+        plt.xlabel('Generation Type')
+        plt.ylabel('Annual Cost ($)')
+        plt.title(f'Annual Generation Costs - {scenario_name}')
+        plt.xticks(rotation=45)
+        plt.grid(True, linestyle='--', alpha=0.7)
+        plt.tight_layout()
+        plt.savefig(os.path.join(scenario_folder, 'annual_cost_mix.png'))
+        plt.close()
+
+# %%
+def create_scenario_comparison_plot(scenario_data: Dict[str, Any], results_root: str) -> None:
+    """Create a three-panel comparison plot for a scenario"""
+    scenario_name = scenario_data.get('scenario_name', 'Unknown')
+    scenario_folder = os.path.join(results_root, scenario_name)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
+    
+    # 1. Costs Distribution Plot
+    cost_data = {k.replace('gen_cost_', ''): v for k, v in scenario_data.items() 
+                if k.startswith('gen_cost_')}
+    # Filter out zero or NaN values
+    cost_data = {k: v for k, v in cost_data.items() if v and not pd.isna(v)}
+    
+    if cost_data:  # Only create pie chart if we have valid data
+        costs = list(cost_data.values())
+        labels = list(cost_data.keys())
+        ax1.pie(costs, labels=labels, autopct='%1.1f%%')
+    ax1.set_title('Cost Distribution')
+
+    # 2. Annual Generation Mix
+    gen_data = {k.replace('gen_', ''): v for k, v in scenario_data.items() 
+                if k.startswith('gen_') and not k.startswith('gen_cost_')}
+    avail_data = {k.replace('avail_gen_', ''): v for k, v in scenario_data.items() 
+                  if k.startswith('avail_gen_')}
+    
+    # Filter out NaN values
+    gen_data = {k: v for k, v in gen_data.items() if not pd.isna(v)}
+    avail_data = {k: v for k, v in avail_data.items() if not pd.isna(v)}
+    
+    if gen_data:  # Only create bar chart if we have valid data
+        x = np.arange(len(gen_data))
+        width = 0.35
+        ax2.bar(x, list(gen_data.values()), width, label='Actual Generation', color='skyblue')
+        if avail_data:
+            ax2.bar(x, [avail_data.get(k, 0) for k in gen_data.keys()], width, 
+                   label='Available Capacity', color='lightgray', alpha=0.5)
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(list(gen_data.keys()), rotation=45)
+        ax2.legend()
+    ax2.set_title('Annual Generation Mix')
+    ax2.set_ylabel('Generation (MW)')
+
+    # 3. Winter vs Summer Generation Mix as % of Demand
+    winter_data = {k.replace('gen_winter_', ''): v 
+                  for k, v in scenario_data.items() 
+                  if k.startswith('gen_winter_')}
+    summer_data = {k.replace('gen_summer_', ''): v 
+                  for k, v in scenario_data.items() 
+                  if k.startswith('gen_summer_')}
+    
+    winter_demand = scenario_data.get('demand_winter', 0)
+    summer_demand = scenario_data.get('demand_summer', 0)
+    
+    if winter_data and summer_data and winter_demand and summer_demand:
+        # Get common set of generation types
+        gen_types = sorted(set(winter_data.keys()) | set(summer_data.keys()))
+        
+        # Calculate percentages
+        winter_percentages = {
+            gen_type: (winter_data.get(gen_type, 0) / winter_demand) * 100 
+            for gen_type in gen_types
+        }
+        summer_percentages = {
+            gen_type: (summer_data.get(gen_type, 0) / summer_demand) * 100 
+            for gen_type in gen_types
+        }
+        
+        # Prepare data for plotting
+        x = np.arange(len(gen_types))
+        width = 0.35
+        
+        # Plot bars
+        ax3.bar(x - width/2, [winter_percentages[gen] for gen in gen_types],
+                width, label='Winter', color='lightblue')
+        ax3.bar(x + width/2, [summer_percentages[gen] for gen in gen_types],
+                width, label='Summer', color='orange')
+        
+        # Customize plot
+        ax3.set_ylabel('% of Total Demand')
+        ax3.set_title('Seasonal Generation Mix')
+        ax3.set_xticks(x)
+        ax3.set_xticklabels(gen_types, rotation=45)
+        
+        # Add percentage labels on bars
+        def add_labels(rects):
+            for rect in rects:
+                height = rect.get_height()
+                ax3.annotate(f'{height:.1f}%',
+                            xy=(rect.get_x() + rect.get_width()/2, height),
+                            xytext=(0, 3),  # 3 points vertical offset
+                            textcoords="offset points",
+                            ha='center', va='bottom', rotation=0)
+        
+        # Add labels to both sets of bars
+        add_labels(ax3.patches[:len(gen_types)])  # Winter bars
+        add_labels(ax3.patches[len(gen_types):])  # Summer bars
+        
+        # Add legend
+        ax3.legend()
+        
+        # Add grid for better readability
+        ax3.grid(True, axis='y', linestyle='--', alpha=0.7)
+        
+        # Set y-axis to reasonable range (0-150% to account for potential overgeneration)
+        ax3.set_ylim(0, max(
+            max(winter_percentages.values()),
+            max(summer_percentages.values())
+        ) * 1.2)  # Add 20% margin
+        
+        # Add 100% line
+        ax3.axhline(y=100, color='red', linestyle='--', alpha=0.5, 
+                   label='100% Demand')
+
+    # Add overall title and adjust layout
+    fig.suptitle(f'Scenario Analysis: {scenario_name}', fontsize=16, y=1.05)
     plt.tight_layout()
-    plt.savefig(os.path.join(scenario_folder, 'annual_cost_mix.png'))
+    plt.savefig(os.path.join(scenario_folder, 'scenario_comparison.png'), 
+                bbox_inches='tight', dpi=300)
     plt.close()
 
 # %%
@@ -305,21 +363,29 @@ def main():
 
     for _, row in scenarios_df.iterrows():
         scenario_name = row["scenario_name"]
-        gen_pos_raw = ast.literal_eval(row["gen_positions"])       # e.g., {1:'nuclear', 4:'solar'}
-        storage_pos_raw = ast.literal_eval(row["storage_units"])   # e.g., {2:'battery1'}
+        gen_pos_raw = ast.literal_eval(row["gen_positions"])
+        storage_pos_raw = ast.literal_eval(row["storage_units"])
         load_factor = float(row["load_factor"])
+
+        # Initialize result entry at the start of each scenario
+        result_entry = {
+            "scenario_name": scenario_name,
+            "annual_cost": None  # Will be updated if scenario is optimal
+        }
 
         # Map types to IDs
         try:
             gen_positions = {bus: type_to_id[gen_type] for bus, gen_type in gen_pos_raw.items()}
         except KeyError as e:
             print(f"Error: Generator type '{e.args[0]}' not found in type_to_id mapping.")
+            scenario_results.append(result_entry)
             continue
 
         try:
             storage_positions = {bus: type_to_id[gen_type] for bus, gen_type in storage_pos_raw.items()}
         except KeyError as e:
             print(f"Error: Storage type '{e.args[0]}' not found in type_to_id mapping.")
+            scenario_results.append(result_entry)
             continue
 
         print(f"\nProcessing {scenario_name} with Generators: {gen_pos_raw} and Storage: {storage_pos_raw}")
@@ -353,7 +419,7 @@ def main():
             # Plotting and metric extraction
             if all_ok:
                 # Plotting and metric extraction
-                plot_gen, plot_gen_cost, plot_avail = plot_scenario_results(
+                plot_gen, plot_gen_cost, plot_avail, gen_vs_demand = plot_scenario_results(
                     results, 
                     demand_ts, 
                     branch, 
@@ -377,31 +443,7 @@ def main():
         if all_ok:
             # Calculate Annual Cost
             annual_cost = sum(season_costs[season] * season_weights[season] for season in season_costs)
-
-            for season in ["winter", "summer", "autumn_spring"]:
-                print(f"  Plotting {season}...")
-                gen_ts_plot = build_gen_time_series(master_gen, gen_positions, storage_positions, season)
-                demand_ts_plot = build_demand_time_series(master_load, load_factor, season)
-                plot_results = dcopf(gen_ts_plot, branch, bus, demand_ts_plot, delta_t=1)
-                if plot_results and plot_results.get("status") == "Optimal":
-                    # Save plots and obtain metrics again
-                    plot_gen, plot_gen_cost, plot_avail = plot_scenario_results(
-                        plot_results, 
-                        demand_ts_plot, 
-                        branch, 
-                        bus, 
-                        scenario_folder, 
-                        season, 
-                        id_to_type, 
-                        id_to_gencost, 
-                        id_to_pmax
-                    )
-
-            # Prepare result entry with new metrics
-            result_entry = {
-                "scenario_name": scenario_name,
-                "annual_cost": round(annual_cost, 1)
-            }
+            result_entry["annual_cost"] = round(annual_cost, 1)
 
             # Add Total Generation per Asset
             for asset, gen in total_gen_year.items():
@@ -420,20 +462,15 @@ def main():
             for asset, gen in total_gen_year.items():
                 avail = total_avail_gen_year.get(asset, 0)
                 if avail > 0:
-                    capacity_factor_year[asset] = round(gen / avail, 2)  # Rounded to 2 decimal places
+                    capacity_factor_year[asset] = round(gen / avail, 2)
                 else:
                     capacity_factor_year[asset] = 0.0
             for asset, cf in capacity_factor_year.items():
                 result_entry[f"capacity_factor_{asset}"] = cf
 
-            scenario_results.append(result_entry)
             print(f"  Annual Cost: {round(annual_cost, 1)}")
-        else:
-            scenario_results.append({
-                "scenario_name": scenario_name,
-                "annual_cost": None
-            })
-            print(f"  {scenario_name} marked as NOT Optimal.")
+
+        scenario_results.append(result_entry)
 
     # Save Results to CSV first
     results_df = pd.DataFrame(scenario_results)
@@ -466,37 +503,64 @@ def main():
     
     # Rename columns if necessary
     column_mapping = {
-        'NPV': 'npv',
-        'Annuity': 'annuity',
+        'NPV': 'npv_30y',
+        'Annuity': 'annuity_30y',
         'Initial Investment': 'initial_investment',
-        # Add any other necessary mappings based on actual columns
+        'annual_costs': 'annual_costs'
     }
     
     results_df = results_df.rename(columns=column_mapping)
     
-    # Sort by NPV for ranking
-    if 'npv' in results_df.columns:
-        results_df = results_df.sort_values('npv', ascending=False)
+    # Convert NPV and cost columns to numeric
+    numeric_columns = [
+        'npv_10y', 'npv_20y', 'npv_30y',
+        'annuity_10y', 'annuity_20y', 'annuity_30y',
+        'initial_investment', 'annual_cost', 'annual_costs'
+    ]
+    
+    for col in numeric_columns:
+        if col in results_df.columns:
+            results_df[col] = pd.to_numeric(results_df[col], errors='coerce')
+    
+    # Sort by 30-year NPV for ranking
+    if 'npv_30y' in results_df.columns:
+        results_df = results_df.sort_values('npv_30y', ascending=False)
     else:
         print("Warning: NPV column not found in results")
 
-    # Ask user before generating critiques
-    if ask_user_confirmation("Do you want to generate AI critiques and markdown reports?"):
-        print("\nGenerating AI critiques and markdown reports...")
+    # Ask user for generation preferences
+    generate_plots = ask_user_confirmation("Do you want to generate plots?")
+    generate_individual = ask_user_confirmation("Do you want to generate individual scenario reports?")
+    generate_global = ask_user_confirmation("Do you want to generate a global comparison report?")
+
+    if generate_plots:
+        print("\nGenerating plots...")
         for _, row in results_df.iterrows():
             if row['annual_cost'] is not None:
-                # Create annual summary plots
                 create_annual_summary_plots(row.to_dict(), results_root)
-                critic.analyze_scenario(row.to_dict(), results_root)
+                create_scenario_comparison_plot(row.to_dict(), results_root)
+        print("Plot generation completed.")
+
+    if generate_individual or generate_global:
+        print("\nGenerating requested reports...")
         
-        # Generate global comparison report
-        if ask_user_confirmation("Do you want to generate a global comparison report?"):
+        # Generate individual reports if requested
+        if generate_individual:
+            print("\nGenerating individual scenario reports...")
+            for _, row in results_df.iterrows():
+                if row['annual_cost'] is not None:
+                    critic.analyze_scenario(row.to_dict(), results_root)
+            print("Individual reports completed.")
+        
+        # Generate global report if requested
+        if generate_global:
             print("\nGenerating global comparison report...")
             critic.create_global_comparison_report(results_df, results_root)
+            print("Global report completed.")
         
-        print("All scenarios processed and analyzed.")
+        print("All requested reports generated.")
     else:
-        print("\nSkipping AI critiques generation.")
+        print("\nSkipping report generation.")
 
     # Save the final results CSV with investment analysis
     results_df.to_csv(os.path.join(results_root, "scenario_results_with_investment.csv"), index=False)
