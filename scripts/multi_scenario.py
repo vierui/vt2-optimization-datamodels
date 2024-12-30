@@ -153,6 +153,36 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
                              if hasattr(remaining_capacity_series, 'to_dict') 
                              else remaining_capacity_series)
     
+    # Convert to pandas Series for easier plotting
+    total_gen_per_asset_series = pd.Series(total_gen_per_asset)
+    remaining_capacity_series = pd.Series(remaining_capacity_dict)
+    
+    # Ensure both series have the same index
+    all_types = sorted(set(total_gen_per_asset_series.index) | set(remaining_capacity_series.index))
+    total_gen_per_asset_series = total_gen_per_asset_series.reindex(all_types, fill_value=0)
+    remaining_capacity_series = remaining_capacity_series.reindex(all_types, fill_value=0)
+
+    # Create figure directory if it doesn't exist
+    figure_dir = os.path.join(scenario_folder, "figure")
+    os.makedirs(figure_dir, exist_ok=True)
+
+    # Plot stacked histogram
+    plt.figure(figsize=(10, 6))
+    plt.bar(total_gen_per_asset_series.index, total_gen_per_asset_series, 
+            color='skyblue', label='Total Generation (MW)')
+    plt.bar(remaining_capacity_series.index, remaining_capacity_series, 
+            bottom=total_gen_per_asset_series, color='lightgray', 
+            label='Remaining Capacity (MW)')
+    plt.xlabel('Asset')
+    plt.ylabel('Power (MW)')
+    plt.title(f'Total Generation and Remaining Capacity per Asset ({season_key.capitalize()})')
+    plt.legend()
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(os.path.join(figure_dir, f"hist_total_gen_with_capacity_{season_key}.png"))
+    plt.close()
+    print(f"Saved Generation with Capacity histogram => hist_total_gen_with_capacity_{season_key}.png")
+
     return (total_gen_per_asset_dict, 
             total_gen_cost_per_asset_dict,
             remaining_capacity_dict,
@@ -161,68 +191,142 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
 # %%
 def create_annual_summary_plots(scenario_data: Dict[str, Any], results_root: str) -> None:
     """Create annual generation and cost mix plots"""
-    scenario_name = scenario_data.get('scenario_name', 'Unknown')
-    scenario_folder = os.path.join(results_root, scenario_name)+"/figure/"
-    os.makedirs(scenario_folder, exist_ok=True)
+    scenario_name = scenario_data['scenario_name']
+    
+    # Create figure directory if it doesn't exist
+    figure_dir = os.path.join(results_root, scenario_name, "figure")
+    os.makedirs(figure_dir, exist_ok=True)
 
-    # Prepare generation data
-    gen_data = {k.replace('gen_', ''): v for k, v in scenario_data.items() 
-                if k.startswith('gen_') and not k.startswith('gen_cost_')}
-    avail_data = {k.replace('avail_gen_', ''): v for k, v in scenario_data.items() 
-                  if k.startswith('avail_gen_')}
-    cost_data = {k.replace('gen_cost_', ''): v for k, v in scenario_data.items() 
-                 if k.startswith('gen_cost_')}
+    # Create a figure with 3 subplots in a row
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
+    
+    # Plot 1: Annual Generation (Pie Chart)
+    generation_data = {k.replace('gen_', ''): v for k, v in scenario_data.items() 
+                      if k.startswith('gen_') and not k.startswith('gen_cost_')}
+    if generation_data:
+        # Filter out zero/negative values and take absolute values
+        generation_data = {k: abs(v) for k, v in generation_data.items() 
+                         if v and not pd.isna(v)}
+        
+        if generation_data:  # Check if we still have data after filtering
+            # Calculate total generation for percentage calculation
+            total_gen = sum(generation_data.values())
+            # Create pie chart
+            wedges, texts, autotexts = ax1.pie(
+                list(generation_data.values()),
+                labels=list(generation_data.keys()),
+                autopct=lambda pct: f'{pct:.1f}%\n({int(pct/100.*total_gen):,} MWh)',
+                textprops={'fontsize': 8}
+            )
+            # Ensure text doesn't overlap
+            plt.setp(autotexts, size=7, weight="bold")
+            plt.setp(texts, size=8)
+        else:
+            ax1.text(0.5, 0.5, 'No valid generation data', 
+                    ha='center', va='center')
+        ax1.set_title('Annual Generation Mix')
 
+    # Plot 2: Winter vs Summer Generation
+    winter_data = {k.replace('winter_gen_', ''): v for k, v in scenario_data.items() 
+                  if k.startswith('winter_gen_')}
+    summer_data = {k.replace('summer_gen_', ''): v for k, v in scenario_data.items() 
+                  if k.startswith('summer_gen_')}
+    
+    # Get all unique assets
+    all_assets = sorted(set(winter_data.keys()) | set(summer_data.keys()))
+    
+    if all_assets:
+        x = np.arange(len(all_assets))
+        width = 0.35  # Width of the bars
+        
+        # Create bars
+        winter_values = [winter_data.get(asset, 0) for asset in all_assets]
+        summer_values = [summer_data.get(asset, 0) for asset in all_assets]
+        
+        # Plot bars
+        ax2.bar(x - width/2, winter_values, width, label='Winter', color='lightblue')
+        ax2.bar(x + width/2, summer_values, width, label='Summer', color='orange')
+        
+        # Customize plot
+        ax2.set_ylabel('Generation (MWh)')
+        ax2.set_title('Winter vs Summer Generation')
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(all_assets, rotation=45)
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Add value labels on top of bars
+        for i, v in enumerate(winter_values):
+            if v != 0:
+                ax2.text(i - width/2, v, f'{v:,.0f}', 
+                        ha='center', va='bottom', fontsize=8)
+        for i, v in enumerate(summer_values):
+            if v != 0:
+                ax2.text(i + width/2, v, f'{v:,.0f}', 
+                        ha='center', va='bottom', fontsize=8)
+    else:
+        ax2.text(0.5, 0.5, 'No seasonal generation data', 
+                ha='center', va='center')
+
+    # Plot 3: NPV Comparison
+    npv_data = {
+        '10y': scenario_data.get('npv_10y', 0),
+        '20y': scenario_data.get('npv_20y', 0),
+        '30y': scenario_data.get('npv_30y', 0)
+    }
+    
     # Filter out NaN values
-    gen_data = {k: v for k, v in gen_data.items() if not pd.isna(v)}
-    avail_data = {k: v for k, v in avail_data.items() if not pd.isna(v)}
-    cost_data = {k: v for k, v in cost_data.items() if not pd.isna(v)}
-
-    # Create generation mix plot
-    plt.figure(figsize=(10, 6))
+    npv_data = {k: v for k, v in npv_data.items() 
+                if not pd.isna(v)}
     
-    # Ensure we use the same set of generation types for both datasets
-    gen_types = sorted(set(gen_data.keys()))
-    x = np.arange(len(gen_types))
-    width = 0.35
+    if npv_data:
+        # Create bars with colors based on NPV values (red for negative, green for positive)
+        bars = ax3.bar(npv_data.keys(), npv_data.values(), 
+                      color=['red' if v < 0 else 'lightgreen' for v in npv_data.values()])
+        ax3.set_title('Net Present Value (NPV) Comparison')
+        ax3.set_ylabel('NPV (€)')
+        ax3.grid(True, alpha=0.3)
+        
+        # Add zero line for NPV reference
+        ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+        
+        # Add value labels on top/bottom of bars
+        for bar in bars:
+            height = bar.get_height()
+            # Position labels above bar for positive values, below for negative
+            va = 'bottom' if height >= 0 else 'top'
+            ax3.text(
+                bar.get_x() + bar.get_width()/2.,
+                height,
+                f'€{height:,.0f}',
+                ha='center',
+                va=va,
+                rotation=0,
+                fontsize=8
+            )
+    else:
+        ax3.text(0.5, 0.5, 'No valid NPV data', 
+                ha='center', va='center')
 
-    # Plot actual generation
-    plt.bar(x, [gen_data.get(k, 0) for k in gen_types], 
-            width, label='Actual Generation', color='skyblue')
+    # Add overall title
+    plt.suptitle(f'Annual Summary - {scenario_name}', fontsize=16, y=1.05)
     
-    # Plot available capacity for the same generation types
-    plt.bar(x, [avail_data.get(k, 0) for k in gen_types], 
-            width, label='Available Capacity', color='lightgray', alpha=0.5)
-
-    plt.xlabel('Generation Type')
-    plt.ylabel('Annual Generation (MW)')
-    plt.title(f'Annual Generation Mix - {scenario_name}')
-    plt.xticks(x, gen_types, rotation=45)
-    plt.legend()
-    plt.grid(True, linestyle='--', alpha=0.7)
+    # Adjust layout to prevent overlap
     plt.tight_layout()
-    plt.savefig(os.path.join(scenario_folder, 'annual_generation_mix.png'))
+    
+    # Save the plot
+    plot_path = os.path.join(figure_dir, "annual_summary.png")
+    plt.savefig(plot_path, bbox_inches='tight', dpi=300)
     plt.close()
-
-    # Create cost mix plot
-    if cost_data:  # Only create if we have cost data
-        plt.figure(figsize=(10, 6))
-        cost_types = sorted(cost_data.keys())
-        plt.bar(cost_types, [cost_data[k] for k in cost_types], color='salmon')
-        plt.xlabel('Generation Type')
-        plt.ylabel('Annual Cost ($)')
-        plt.title(f'Annual Generation Costs - {scenario_name}')
-        plt.xticks(rotation=45)
-        plt.grid(True, linestyle='--', alpha=0.7)
-        plt.tight_layout()
-        plt.savefig(os.path.join(scenario_folder, 'annual_cost_mix.png'))
-        plt.close()
+    
+    print(f"Saved annual summary plots => {plot_path}")
 
 # %%
 def create_scenario_comparison_plot(scenario_data: Dict[str, Any], results_root: str) -> None:
     """Create a three-panel comparison plot for a scenario"""
     scenario_name = scenario_data.get('scenario_name', 'Unknown')
-    scenario_folder = os.path.join(results_root, scenario_name)
+    scenario_folder = os.path.join(results_root, scenario_name, "figure")
+    os.makedirs(scenario_folder, exist_ok=True)
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
     
@@ -261,76 +365,38 @@ def create_scenario_comparison_plot(scenario_data: Dict[str, Any], results_root:
     ax2.set_title('Annual Generation Mix')
     ax2.set_ylabel('Generation (MW)')
 
-    # 3. Winter vs Summer Generation Mix as % of Demand
-    winter_data = {k.replace('gen_winter_', ''): v 
-                  for k, v in scenario_data.items() 
-                  if k.startswith('gen_winter_')}
-    summer_data = {k.replace('gen_summer_', ''): v 
-                  for k, v in scenario_data.items() 
-                  if k.startswith('gen_summer_')}
+    # 3. Summer-Winter Generation Difference
+    summer_gen = {k.replace('summer_gen_', ''): v 
+                 for k, v in scenario_data.items() 
+                 if k.startswith('summer_gen_')}
+    winter_gen = {k.replace('winter_gen_', ''): v 
+                 for k, v in scenario_data.items() 
+                 if k.startswith('winter_gen_')}
     
-    winter_demand = scenario_data.get('demand_winter', 0)
-    summer_demand = scenario_data.get('demand_summer', 0)
+    # Filter out NaN values and calculate differences
+    gen_diff = {}
+    for k in set(summer_gen.keys()) | set(winter_gen.keys()):
+        if not pd.isna(summer_gen.get(k, 0)) and not pd.isna(winter_gen.get(k, 0)):
+            gen_diff[k] = summer_gen.get(k, 0) - winter_gen.get(k, 0)
     
-    if winter_data and summer_data and winter_demand and summer_demand:
-        # Get common set of generation types
-        gen_types = sorted(set(winter_data.keys()) | set(summer_data.keys()))
+    if gen_diff:
+        x = np.arange(len(gen_diff))
+        colors = ['red' if v >= 0 else 'blue' for v in gen_diff.values()]
         
-        # Calculate percentages
-        winter_percentages = {
-            gen_type: (winter_data.get(gen_type, 0) / winter_demand) * 100 
-            for gen_type in gen_types
-        }
-        summer_percentages = {
-            gen_type: (summer_data.get(gen_type, 0) / summer_demand) * 100 
-            for gen_type in gen_types
-        }
-        
-        # Prepare data for plotting
-        x = np.arange(len(gen_types))
-        width = 0.35
-        
-        # Plot bars
-        ax3.bar(x - width/2, [winter_percentages[gen] for gen in gen_types],
-                width, label='Winter', color='lightblue')
-        ax3.bar(x + width/2, [summer_percentages[gen] for gen in gen_types],
-                width, label='Summer', color='orange')
-        
-        # Customize plot
-        ax3.set_ylabel('% of Total Demand')
-        ax3.set_title('Seasonal Generation Mix')
+        bars = ax3.bar(x, list(gen_diff.values()), color=colors)
         ax3.set_xticks(x)
-        ax3.set_xticklabels(gen_types, rotation=45)
+        ax3.set_xticklabels(list(gen_diff.keys()), rotation=45)
+        ax3.set_title('Summer-Winter Generation Difference')
+        ax3.set_ylabel('Generation Difference (MW)\n(Summer - Winter)')
+        ax3.grid(True, linestyle='--', alpha=0.7)
         
-        # Add percentage labels on bars
-        def add_labels(rects):
-            for rect in rects:
-                height = rect.get_height()
-                ax3.annotate(f'{height:.1f}%',
-                            xy=(rect.get_x() + rect.get_width()/2, height),
-                            xytext=(0, 3),  # 3 points vertical offset
-                            textcoords="offset points",
-                            ha='center', va='bottom', rotation=0)
+        # Add zero line
+        ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
         
-        # Add labels to both sets of bars
-        add_labels(ax3.patches[:len(gen_types)])  # Winter bars
-        add_labels(ax3.patches[len(gen_types):])  # Summer bars
-        
-        # Add legend
-        ax3.legend()
-        
-        # Add grid for better readability
-        ax3.grid(True, axis='y', linestyle='--', alpha=0.7)
-        
-        # Set y-axis to reasonable range (0-150% to account for potential overgeneration)
-        ax3.set_ylim(0, max(
-            max(winter_percentages.values()),
-            max(summer_percentages.values())
-        ) * 1.2)  # Add 20% margin
-        
-        # Add 100% line
-        ax3.axhline(y=100, color='red', linestyle='--', alpha=0.5, 
-                   label='100% Demand')
+        # Add value labels on top of bars
+        for i, v in enumerate(gen_diff.values()):
+            va = 'bottom' if v >= 0 else 'top'
+            ax3.text(i, v, f'{v:,.0f}', ha='center', va=va)
 
     # Add overall title and adjust layout
     fig.suptitle(f'Scenario Analysis: {scenario_name}', fontsize=16, y=1.05)

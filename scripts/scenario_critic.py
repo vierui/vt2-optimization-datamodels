@@ -132,10 +132,109 @@ Generated on: {now}
         return '\n'.join([f"{k.replace('gen_', '').replace('gen_cost_', '').replace('capacity_factor_', '')}: {v}"
                          for k, v in d.items()])
 
+    def _create_seasonal_comparison(self, scenario_name: str, results_root: str) -> None:
+        """Create a side-by-side comparison of seasonal generation plots"""
+        scenario_folder = os.path.join(results_root, scenario_name, "figure")
+        
+        # Create figure with three subplots side by side
+        fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(24, 6))
+        
+        # Load and plot each seasonal image
+        for ax, season in zip([ax1, ax2, ax3], ['winter', 'summer', 'autumn_spring']):
+            img_path = os.path.join(scenario_folder, f'hist_total_gen_with_capacity_{season}.png')
+            if os.path.exists(img_path):
+                img = plt.imread(img_path)
+                ax.imshow(img)
+                ax.axis('off')
+                ax.set_title(season.replace('_', '/').title())
+            else:
+                ax.text(0.5, 0.5, f'No data for {season}', 
+                       ha='center', va='center')
+                ax.set_title(f'Missing: {season}')
+        
+        # Add overall title
+        plt.suptitle(f'Seasonal Generation Comparison - {scenario_name}', 
+                     fontsize=16, y=1.02)
+        
+        # Save combined plot
+        plt.savefig(os.path.join(scenario_folder, 'seasonal_comparison.png'), 
+                    bbox_inches='tight', dpi=300)
+        plt.close()
+
     def analyze_scenario(self, scenario_data: Dict[str, Any], results_root: str) -> None:
-        """Analyze a single scenario and create markdown report"""
+        """Analyze a single scenario and generate a report"""
+        scenario_name = scenario_data['scenario_name']
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Create seasonal comparison plot
+        self._create_seasonal_comparison(scenario_name, results_root)
+        
+        # Format generation data
+        generation_data = {k.replace('gen_', ''): v for k, v in scenario_data.items() 
+                          if k.startswith('gen_') and not k.startswith('gen_cost_')}
+        cost_data = {k.replace('gen_cost_', ''): v for k, v in scenario_data.items() 
+                     if k.startswith('gen_cost_')}
+        capacity_data = {k.replace('capacity_factor_', ''): v for k, v in scenario_data.items() 
+                        if k.startswith('capacity_factor_')}
+
+        # Generate critique using existing method
         critique = self.generate_critique(scenario_data)
-        self.create_markdown_report(scenario_data, critique, results_root)
+
+        markdown = f"""# Scenario Analysis Report: {scenario_name}
+Generated on: {now}
+
+## Overview
+![Annual Summary](figure/annual_summary.png)
+
+## Seasonal Generation Patterns
+![Seasonal Comparison](figure/seasonal_comparison.png)
+
+## Financial Analysis
+| Metric | Value |
+|--------|--------|
+| Initial Investment | €{scenario_data.get('initial_investment', 0):,.2f} |
+| Annual Operating Cost | €{scenario_data.get('annual_cost', 0):,.2f} |
+| NPV (10 years) | €{scenario_data.get('npv_10y', 0):,.2f} |
+| NPV (20 years) | €{scenario_data.get('npv_20y', 0):,.2f} |
+| NPV (30 years) | €{scenario_data.get('npv_30y', 0):,.2f} |
+
+## Generation Analysis
+
+### Annual Generation by Asset Type
+| Asset Type | Generation (MWh) |
+|------------|-----------------|
+{self._format_dict_as_table(generation_data)}
+
+### Generation Costs
+| Asset Type | Cost (€) |
+|------------|----------|
+{self._format_dict_as_table(cost_data)}
+
+### Capacity Factors
+| Asset Type | Capacity Factor |
+|------------|----------------|
+{self._format_dict_as_table(capacity_data, "{:.2%}")}
+
+## AI Critical Analysis
+{critique}
+
+---
+"""
+        # Create scenario folder if it doesn't exist
+        scenario_folder = os.path.join(results_root, scenario_name)
+        os.makedirs(scenario_folder, exist_ok=True)
+        
+        # Save markdown report
+        report_path = os.path.join(scenario_folder, f"{scenario_name}_analysis.md")
+        with open(report_path, 'w') as f:
+            f.write(markdown)
+        
+        print(f"Analysis report saved to '{report_path}'")
+
+    def _format_dict_as_table(self, d: Dict[str, Any], format_str: str = "{:,.2f}") -> str:
+        """Helper function to format dictionary data as markdown table rows"""
+        return '\n'.join([f"| {k} | {format_str.format(v)} |"
+                         for k, v in d.items() if v and not pd.isna(v)])
 
     def create_global_comparison_report(self, all_scenarios_data: pd.DataFrame, results_root: str) -> None:
         """Create a markdown report comparing all scenarios"""
@@ -208,6 +307,8 @@ Below is an analysis of the key trends and patterns observed across all scenario
 
 """
         comparative_prompt = f"""Analyze the following scenarios data and provide a comparative analysis:
+Scenarios Parameters:
+{pd.read_csv('../data/working/scenarios_parameters.csv').to_string()}
 
 Economic Comparison:
 {sorted_scenarios[['scenario_name', 'initial_investment', 'annual_cost', 'npv_30y']].to_string()}
@@ -218,7 +319,7 @@ Key points to address:
 3. Key success factors in the better performing scenarios
 4. Recommendations for future scenario design
 
-Limit the analysis to 300 words."""
+Limit the analysis to 400 words."""
 
         response = self.client.chat.completions.create(
             messages=[
