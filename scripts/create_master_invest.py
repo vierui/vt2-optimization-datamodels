@@ -40,7 +40,7 @@ class InvestmentAnalysis:
 
     def calculate_annual_costs(self, operational_costs, installed_capacity):
         """Calculate total annual costs including O&M"""
-        annual_cost = operational_costs  # From your scenario results
+        annual_cost = operational_costs  # From scenario results
         
         # Add maintenance costs
         for tech, capacity in installed_capacity.items():
@@ -76,7 +76,7 @@ class InvestmentAnalysis:
 
     def analyze_scenario(self, scenario_results_path, master_gen_path):
         """Main analysis function"""
-        # Load your scenario results and master_gen data
+        # Load scenario results and master_gen data
         scenario_results = pd.read_csv(scenario_results_path)
         master_gen = pd.read_csv(master_gen_path)
         

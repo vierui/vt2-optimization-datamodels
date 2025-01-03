@@ -1,0 +1,79 @@
+\subsection{DC Optimal Power Flow}
+The DC Optimal Power Flow (DCOPF) is a simplified version of the AC power flow problem, making several key assumptions to linearize the problem while maintaining sufficient accuracy for investment analysis.
+
+\subsubsection{Key Assumptions}
+\begin{itemize}
+    \item Voltage magnitudes are approximately 1.0 per unit
+    \item Voltage angle differences are small ($\sin \theta \approx \theta$)
+    \item Line resistance is negligible compared to reactance (R « X)
+    \item Reactive power flow is ignored
+\end{itemize}
+
+\subsubsection{Mathematical Formulation}
+The DCOPF problem is formulated as a linear programming optimization:
+
+\begin{equation}
+    \min_{P_g, \theta} \sum_{i \in G} c_i P_{g,i}
+\end{equation}
+
+Subject to the following constraints:
+
+\textbf{Power Balance Constraints:}
+\begin{equation}
+    \sum_{i \in G} P_{g,i} - \sum_{i \in D} P_{d,i} = \sum_{(i,j) \in L} P_{ij} \quad \forall i \in N
+\end{equation}
+
+\textbf{Line Flow Constraints:}
+\begin{equation}
+    P_{ij} = \frac{\theta_i - \theta_j}{x_{ij}} \quad \forall (i,j) \in L
+\end{equation}
+
+\textbf{Generation Limits:}
+\begin{equation}
+    P_{g,i}^{min} \leq P_{g,i} \leq P_{g,i}^{max} \quad \forall i \in G
+\end{equation}
+
+\textbf{Line Capacity Limits:}
+\begin{equation}
+    -P_{ij}^{max} \leq P_{ij} \leq P_{ij}^{max} \quad \forall (i,j) \in L
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item $P_{g,i}$: Power generation at bus $i$
+    \item $P_{d,i}$: Power demand at bus $i$
+    \item $\theta_i$: Voltage angle at bus $i$
+    \item $x_{ij}$: Line reactance between buses $i$ and $j$
+    \item $P_{ij}$: Power flow on line between buses $i$ and $j$
+    \item $c_i$: Generation cost coefficient at bus $i$
+\end{itemize}
+
+\subsubsection{Additional Constraints for Investment Analysis}
+For our investment optimization, we add the following constraints:
+
+\textbf{Investment Budget Constraint:}
+\begin{equation}
+    \sum_{i \in G} I_i x_i \leq B_{max}
+\end{equation}
+
+\textbf{Capacity Factor Constraints:}
+\begin{equation}
+    \frac{1}{T} \sum_{t=1}^T \frac{P_{g,i,t}}{P_{g,i}^{max}} \geq CF_{min,i} \quad \forall i \in G
+\end{equation}
+
+Where:
+\begin{itemize}
+    \item $I_i$: Investment cost for generator $i$
+    \item $x_i$: Binary decision variable for investment in generator $i$
+    \item $B_{max}$: Maximum investment budget
+    \item $CF_{min,i}$: Minimum required capacity factor for generator $i$
+    \item $T$: Number of time periods
+\end{itemize}
+
+\subsubsection{Implementation Considerations}
+\begin{itemize}
+    \item The problem is implemented using Python with Pyomo optimization framework
+    \item Seasonal variations are handled through multiple time periods
+    \item Generator availability is modeled using capacity factors
+    \item Investment decisions are binary variables
+\end{itemize} 

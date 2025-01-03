@@ -1,0 +1,31 @@
+\contentsline {section}{\numberline {1}Introduction}{3}{}%
+\contentsline {subsection}{\numberline {1.1}Project Context}{3}{}%
+\contentsline {subsection}{\numberline {1.2}Objectives}{3}{}%
+\contentsline {section}{\numberline {2}Theoretical Background}{4}{}%
+\contentsline {subsection}{\numberline {2.1}Linear Programming in Energy Systems}{4}{}%
+\contentsline {subsection}{\numberline {2.2}DC Optimal Power Flow}{4}{}%
+\contentsline {subsubsection}{\numberline {2.2.1}Mathematical Formulation}{4}{}%
+\contentsline {subsubsection}{\numberline {2.2.2}Line Flow Calculation}{5}{}%
+\contentsline {subsection}{\numberline {2.3}Economic Analysis Framework}{5}{}%
+\contentsline {section}{\numberline {3}Platform Architecture}{5}{}%
+\contentsline {subsection}{\numberline {3.1}System Design}{5}{}%
+\contentsline {subsection}{\numberline {3.2}Key Components}{5}{}%
+\contentsline {section}{\numberline {4}Implementation}{5}{}%
+\contentsline {subsection}{\numberline {4.1}Core Optimization Module}{5}{}%
+\contentsline {subsection}{\numberline {4.2}Scenario Analysis Framework}{6}{}%
+\contentsline {subsection}{\numberline {4.3}AI Integration}{6}{}%
+\contentsline {section}{\numberline {5}Results and Validation}{6}{}%
+\contentsline {subsection}{\numberline {5.1}Test Cases}{6}{}%
+\contentsline {subsection}{\numberline {5.2}Performance Analysis}{6}{}%
+\contentsline {subsection}{\numberline {5.3}Case Studies}{6}{}%
+\contentsline {section}{\numberline {6}Discussion}{6}{}%
+\contentsline {subsection}{\numberline {6.1}Platform Capabilities}{6}{}%
+\contentsline {subsection}{\numberline {6.2}Future Improvements}{6}{}%
+\contentsline {section}{\numberline {7}Conclusion}{6}{}%
+\contentsline {section}{\numberline {A}Technical Documentation}{7}{}%
+\contentsline {subsection}{\numberline {A.1}Installation Guide}{7}{}%
+\contentsline {subsection}{\numberline {A.2}User Manual}{7}{}%
+\contentsline {subsection}{\numberline {A.3}API Reference}{7}{}%
+\contentsline {section}{\numberline {B}Mathematical Formulations}{7}{}%
+\contentsline {subsection}{\numberline {B.1}Optimization Model}{7}{}%
+\contentsline {subsection}{\numberline {B.2}Economic Calculations}{7}{}%

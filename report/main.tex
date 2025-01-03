@@ -35,13 +35,59 @@ Brief introduction to energy investment optimization and the need for automated 
     \item Create scenario analysis capabilities
     \item Provide AI-powered insights for decision support
 \end{itemize}
+\newpage
 
 \section{Theoretical Background}
 \subsection{Linear Programming in Energy Systems}
 Overview of optimization techniques in energy asset management.
 
 \subsection{DC Optimal Power Flow}
-Mathematical formulation and constraints.
+The DC Optimal Power Flow (DC-OPF) is a simplified version of the AC power flow problem, commonly used in power systems analysis and optimization. This linearized model makes the following key assumptions:
+
+\begin{itemize}
+    \item Voltage magnitudes are assumed to be 1.0 per unit (p.u.)
+    \item Line resistances are negligible compared to reactances ($R \ll X$)
+    \item Voltage angle differences between connected buses are small
+    \item Reactive power flows are ignored
+\end{itemize}
+
+\subsubsection{Mathematical Formulation}
+The DC-OPF problem can be formulated as follows:
+
+\begin{align}
+    \min_{\mathbf{P_g}, \boldsymbol{\theta}} \quad & \sum_{i \in \mathcal{G}} c_i(P_{g,i}) \label{eq:dcopt_obj} \\
+    \text{subject to:} \quad & \nonumber \\
+    & P_{g,i} - P_{d,i} = \sum_{j \in \mathcal{N}_i} B_{ij}(\theta_i - \theta_j) \quad \forall i \in \mathcal{N} \label{eq:power_balance} \\
+    & P_{g,i}^{\min} \leq P_{g,i} \leq P_{g,i}^{\max} \quad \forall i \in \mathcal{G} \label{eq:gen_limits} \\
+    & -P_{ij}^{\max} \leq B_{ij}(\theta_i - \theta_j) \leq P_{ij}^{\max} \quad \forall (i,j) \in \mathcal{L} \label{eq:flow_limits} \\
+    & \theta_{\text{ref}} = 0 \label{eq:ref_angle}
+\end{align}
+
+where:
+\begin{itemize}
+    \item $\mathcal{N}$ is the set of all buses
+    \item $\mathcal{G}$ is the set of generator buses
+    \item $\mathcal{L}$ is the set of transmission lines
+    \item $\mathcal{N}_i$ is the set of buses connected to bus $i$
+    \item $P_{g,i}$ is the active power generation at bus $i$
+    \item $P_{d,i}$ is the active power demand at bus $i$
+    \item $\theta_i$ is the voltage angle at bus $i$
+    \item $B_{ij}$ is the susceptance of the line connecting buses $i$ and $j$
+    \item $c_i(P_{g,i})$ is the cost function for generator $i$
+    \item $P_{g,i}^{\min}, P_{g,i}^{\max}$ are the generation limits
+    \item $P_{ij}^{\max}$ is the transmission line capacity
+\end{itemize}
+
+The objective function \eqref{eq:dcopt_obj} minimizes the total generation cost. Constraint \eqref{eq:power_balance} ensures power balance at each bus, \eqref{eq:gen_limits} enforces generator limits, \eqref{eq:flow_limits} ensures transmission line limits are not violated, and \eqref{eq:ref_angle} sets the reference bus angle to zero.
+
+\subsubsection{Line Flow Calculation}
+The power flow $P_{ij}$ through a transmission line connecting buses $i$ and $j$ is calculated as:
+
+\begin{equation}
+    P_{ij} = B_{ij}(\theta_i - \theta_j)
+\end{equation}
+
+This linear relationship between power flow and voltage angles is a key characteristic of the DC power flow approximation.
 
 \subsection{Economic Analysis Framework}
 NPV calculations, investment metrics, and risk assessment methods.

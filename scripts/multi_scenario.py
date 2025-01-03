@@ -18,7 +18,7 @@ import networkx as nx
 from dcopf import dcopf  # Ensure this imports your updated DCOPF code
 from dotenv import load_dotenv
 from scenario_critic import ScenarioCritic
-from update_readme import update_readme_with_scenarios
+from update_readme import update_readme_with_scenarios, create_readme_template, get_project_root
 from create_master_invest import InvestmentAnalysis
 from typing import Dict, Any
 
@@ -42,7 +42,6 @@ season_weights = {
 # Load environment variables
 load_dotenv('../.env.local')
 api_key = os.getenv('OPENAPI_KEY')
-
 if not api_key:
     raise ValueError("OpenAI API key not found in .env.local file")
 
@@ -427,16 +426,26 @@ def main():
     scenarios_df = pd.read_csv(scenarios_params_file)
     scenario_results = []
 
+    # Initialize seasonal generation data
+    seasonal_generation = {
+        'winter': {},
+        'summer': {},
+        'autumn_spring': {}
+    }
+
     for _, row in scenarios_df.iterrows():
         scenario_name = row["scenario_name"]
         gen_pos_raw = ast.literal_eval(row["gen_positions"])
         storage_pos_raw = ast.literal_eval(row["storage_units"])
         load_factor = float(row["load_factor"])
 
-        # Initialize result entry at the start of each scenario
+        # Initialize result entry with seasonal generation data
         result_entry = {
             "scenario_name": scenario_name,
-            "annual_cost": None  # Will be updated if scenario is optimal
+            "annual_cost": None,
+            "winter_gen": {},  # Initialize empty dictionaries for each season
+            "summer_gen": {},
+            "autumn_spring_gen": {}
         }
 
         # Map types to IDs
@@ -475,6 +484,15 @@ def main():
             results = dcopf(gen_ts, branch, bus, demand_ts, delta_t=1)
 
             if results and results.get("status") == "Optimal":
+                # Sum up total generation for each asset type in this season
+                season_gen = {}
+                for _, gen_row in results['generation'].iterrows():
+                    gen_type = id_to_type.get(gen_row['id'])
+                    if gen_type:
+                        season_gen[gen_type] = season_gen.get(gen_type, 0) + gen_row['gen']
+                
+                # Store the seasonal generation data directly in result_entry
+                result_entry[f"{season}_gen"] = season_gen
                 season_costs[season] = results.get("cost", 0.0)
                 print(f"    Optimal. Cost: {results['cost']}")
             else:
@@ -602,10 +620,10 @@ def main():
     if generate_plots:
         print("\nGenerating plots...")
         for _, row in results_df.iterrows():
-            if row['annual_cost'] is not None:
-                create_annual_summary_plots(row.to_dict(), results_root)
-                create_scenario_comparison_plot(row.to_dict(), results_root)
-        print("Plot generation completed.")
+            scenario_data = row.to_dict()
+            print(f"\nProcessing scenario: {scenario_data['scenario_name']}")
+            print(f"Available data keys: {list(scenario_data.keys())}")
+            create_annual_summary_plots(scenario_data, results_root)
 
     if generate_individual or generate_global:
         print("\nGenerating requested reports...")
@@ -633,8 +651,10 @@ def main():
     print("Final results saved with investment analysis.")
     
     # Update README with scenario links
-    update_readme_with_scenarios()
-    print("README.md updated with scenario links.")
+    project_root = get_project_root()
+    readme_path = os.path.join(project_root, 'README.md')
+    create_readme_template(readme_path)  # Create/update the full README
+    update_readme_with_scenarios()       # Update the scenario links
 
 # %%
 if __name__ == "__main__":

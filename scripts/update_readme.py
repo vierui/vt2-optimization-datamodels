@@ -1,16 +1,27 @@
 import os
+from pathlib import Path
+
+def get_project_root():
+    """Get the absolute path to the project root directory"""
+    return "/Users/rvieira/Documents/Master/vt1-energy-investment-model"
 
 def update_readme_with_scenarios():
     """Update README.md with links to all scenario reports"""
+    project_root = get_project_root()
+    readme_path = os.path.join(project_root, 'README.md')
+    results_dir = os.path.join(project_root, 'data', 'results')
     
-    # Read the current README content
-    with open('../README.md', 'r') as f:
-        content = f.read()
+    try:
+        with open(readme_path, 'r') as f:
+            content = f.read()
+    except FileNotFoundError:
+        # If README doesn't exist, create it first
+        create_readme_template(readme_path)
+        with open(readme_path, 'r') as f:
+            content = f.read()
     
-    # Find all scenario reports in the results directory
-    results_dir = '../data/results'
+    # Find all scenario reports
     scenario_reports = []
-    
     for item in os.listdir(results_dir):
         scenario_dir = os.path.join(results_dir, item)
         if os.path.isdir(scenario_dir) and item.startswith('scenario_'):
@@ -31,75 +42,79 @@ def update_readme_with_scenarios():
     pattern = r"### Individual Scenario Reports\n(?:- \[.*?\]\(.*?\)\n)*"
     updated_content = re.sub(pattern, scenario_links, content)
     
-    # Write the updated content back to README.md
-    with open('README.md', 'w') as f:
+    # Write the updated content
+    with open(readme_path, 'w') as f:
         f.write(updated_content)
     
-    print("README.md updated with current scenario links")
+    print(f"README.md updated with current scenario links at {readme_path}")
 
 def create_readme_template(readme_path):
     """Create a new README.md file with the template content"""
-    template_content = """# Energy System Scenario Analysis
+    template_content = """# Energy Investment Analysis Platform
 
 ## Overview
 This project analyzes different energy system scenarios using DC Optimal Power Flow (DCOPF) to evaluate various combinations of generation sources including nuclear, solar, wind, and storage systems. The analysis considers technical feasibility, economic efficiency, and system reliability across different seasonal patterns.
+
+### Base Network Structure
+The analysis is built around a base grid topology with two main load buses. This fundamental structure serves as the foundation for all scenario analyses:
+
+![Base Network Topology](figures/base_network_topography.png){width=500}
+
+*The base network defines the core infrastructure upon which different generation scenarios are evaluated.*
+
+### Scenario Analysis
+Each scenario represents a unique combination of:
+- Generation asset placement at specific buses
+- Storage unit allocation
+- Load scaling factors
+- Seasonal variations (winter, summer, autumn/spring)
+
+This modular approach allows us to evaluate various investment strategies while maintaining the core network constraints.
+
+## Results
+
+### Global Analysis
+- [Global Comparison Report](data/results/global_comparison_report.md)
+
+### Individual Scenario Reports
+${scenario_links}
 
 ## Project Structure
 ```
 ├── data/
 │   ├── working/          # Input data files
 │   └── results/          # Generated results and analysis
-├── scripts/              # Analysis scripts
-├── report/              # LaTeX report files
-└── ressources/          # Reference documents and resources
+├── scripts/
+│   ├── core/            # Core processing modules
+│   ├── visualization/   # Plotting and visualization
+│   └── utils/          # Helper utilities
+└── figures/             # Generated figures and diagrams
 ```
 
-## Setup and Installation
-
-This project uses Poetry for dependency management.
-
-1. Install Poetry if you haven't already:
-```bash
-curl -sSL https://install.python-poetry.org | python3 -
-```
-
-2. Clone the repository and install dependencies:
-```bash
-git clone <repository-url>
-cd vt1-energy-investment-model
-poetry install
-```
-
-3. Set up your OpenAI API key in `.env.local`:
-```bash
-echo "OPENAPI_KEY=your_api_key_here" > .env.local
-```
+## Key Features
+- DCOPF analysis for multiple scenarios
+- Seasonal analysis (winter, summer, autumn/spring)
+- Generation vs demand visualization
+- AI-powered scenario critique
+- Economic and technical feasibility assessment
+- Modular scenario creation around base network topology
+- Investment optimization for different time horizons
 
 ## Running the Analysis
-
-Activate the Poetry environment and run the analysis:
+1. Ensure all dependencies are installed:
 ```bash
-poetry shell
-python scripts/multi_scenario.py
+pip install -r requirements.txt
 ```
 
-## Results
+2. Set up your OpenAI API key in `.env.local`:
+```
+OPENAPI_KEY=your_api_key_here
+```
 
-### Global Analysis
-${global_analysis}
-
-### Individual Scenario Reports
-${scenario_links}
-
-## Documentation
-
-### Reference Materials
-- [Anderson Power Systems Analysis](/ressources/Modelling-Analysis-Electric-Power-Systems_Anderson_2004.pdf)
-- [Basic Power Flow Problem](/ressources/05_Basic-Power-Flow-Problem_Anderson_2004.pdf)
-- [DC Optimal Power Flow](/ressources/06_Solution-Power-Flow-Problem_Anderson_2004.pdf)
-
-### Report
-The detailed analysis and methodology can be found in the [LaTeX report](/report/main.pdf).
+3. Run the main analysis:
+```bash
+python scripts/multi_scenario.py
+```
 
 ## Visualization Examples
 Each scenario analysis includes:
@@ -108,22 +123,13 @@ Each scenario analysis includes:
 - Capacity factor comparisons
 - Economic metrics
 - AI-generated critiques
-
-## Project Dependencies
-Key dependencies include:
-- pandas: Data manipulation and analysis
-- numpy: Numerical computations
-- matplotlib: Plotting and visualization
-- openai: AI-powered scenario analysis
-- python-dotenv: Environment variable management
-
-For a complete list of dependencies, see [pyproject.toml](/pyproject.toml).
+- Network topology visualizations
 
 ## Contributing
 Feel free to open issues or submit pull requests with improvements.
 
 ## License
-[MIT License](/LICENSE)
+[MIT License](LICENSE)
 """
     
     with open(readme_path, 'w') as f:
@@ -132,4 +138,10 @@ Feel free to open issues or submit pull requests with improvements.
     print(f"Created new README.md at {readme_path}")
 
 if __name__ == "__main__":
+    project_root = get_project_root()
+    readme_path = os.path.join(project_root, 'README.md')
+    
+    # Always create/update the full template first
+    create_readme_template(readme_path)
+    # Then update the scenario links
     update_readme_with_scenarios() 

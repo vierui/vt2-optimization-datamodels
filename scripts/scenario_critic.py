@@ -17,12 +17,13 @@ class ScenarioCritic:
         - Generation per asset type
         - Generation costs per asset type
         - Capacity factors
+        - NPVs and annuity
         
         Technologies involved may include:
         - Nuclear
         - Gas
-        - Wind
-        - Solar
+        - Wind 
+        - Solar 
         - Battery storage systems
         
         The goal is to evaluate the economic efficiency and technical feasibility of different energy mix scenarios.
