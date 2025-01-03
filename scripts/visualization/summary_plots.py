@@ -145,5 +145,112 @@ def create_scenario_comparison_plot(scenario_data: dict, results_root: str) -> N
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
     
-    # [Rest of the implementation from multi_scenario.py]
-    # Would you like me to include the full implementation of this function as well? 
+    # Plot 1: Generation Mix Comparison
+    winter_gen = scenario_data.get('winter_gen', {})
+    summer_gen = scenario_data.get('summer_gen', {})
+    autumn_spring_gen = scenario_data.get('autumn_spring_gen', {})
+    
+    # Get all unique asset types
+    all_assets = sorted(set(winter_gen.keys()) | 
+                       set(summer_gen.keys()) | 
+                       set(autumn_spring_gen.keys()))
+    
+    if all_assets:
+        # Create data for comparison
+        seasons = ['Winter', 'Summer', 'Autumn/Spring']
+        data = {
+            'Winter': winter_gen,
+            'Summer': summer_gen,
+            'Autumn/Spring': autumn_spring_gen
+        }
+        
+        x = np.arange(len(seasons))
+        width = 0.8 / len(all_assets)
+        
+        for i, asset in enumerate(all_assets):
+            values = [data[season].get(asset, 0) for season in seasons]
+            position = x + (i - len(all_assets)/2 + 0.5) * width
+            ax1.bar(position, values, width, label=asset)
+        
+        ax1.set_ylabel('Generation (MWh)')
+        ax1.set_title('Seasonal Generation Mix')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(seasons)
+        ax1.legend()
+        ax1.grid(True, alpha=0.3)
+
+    # Plot 2: Winter vs Summer Generation (Tornado Chart)
+    if all_assets:
+        # Create data for tornado chart
+        winter_values = [-winter_gen.get(asset, 0) for asset in all_assets]  # Negative for left side
+        summer_values = [summer_gen.get(asset, 0) for asset in all_assets]   # Positive for right side
+        
+        # Create horizontal bars
+        y_pos = np.arange(len(all_assets))
+        
+        # Plot winter values (left side)
+        ax2.barh(y_pos, winter_values, 
+                align='center', 
+                color='lightblue',
+                label='Winter', 
+                alpha=0.8)
+        
+        # Plot summer values (right side)
+        ax2.barh(y_pos, summer_values, 
+                align='center', 
+                color='orange',
+                label='Summer', 
+                alpha=0.8)
+        
+        # Customize plot
+        ax2.set_xlabel('Generation (MWh/week)')
+        ax2.set_title('Winter vs Summer Weekly Generation')
+        ax2.set_yticks(y_pos)
+        ax2.set_yticklabels(all_assets)
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        
+        # Add zero line
+        ax2.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+        
+        # Add value labels
+        for i, v in enumerate(winter_values):
+            if v != 0:
+                ax2.text(v, i, f'{abs(v):,.0f}', 
+                        ha='right', va='center', fontsize=8)
+        for i, v in enumerate(summer_values):
+            if v != 0:
+                ax2.text(v, i, f'{v:,.0f}', 
+                        ha='left', va='center', fontsize=8)
+
+    # Plot 3: Capacity Factors
+    capacity_factors = {k.replace('capacity_factor_', ''): v 
+                       for k, v in scenario_data.items() 
+                       if k.startswith('capacity_factor_')}
+    
+    if capacity_factors:
+        assets = list(capacity_factors.keys())
+        values = [capacity_factors[asset] * 100 for asset in assets]  # Convert to percentage
+        
+        bars = ax3.bar(assets, values)
+        ax3.set_ylabel('Capacity Factor (%)')
+        ax3.set_title('Asset Capacity Factors')
+        ax3.set_xticklabels(assets, rotation=45)
+        ax3.grid(True, alpha=0.3)
+        
+        # Add value labels
+        for bar in bars:
+            height = bar.get_height()
+            ax3.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}%',
+                    ha='center', va='bottom')
+
+    plt.suptitle(f'Scenario Comparison - {scenario_name}', fontsize=16, y=1.05)
+    plt.tight_layout()
+    
+    # Save the plot
+    plot_path = os.path.join(scenario_folder, "scenario_comparison.png")
+    plt.savefig(plot_path, bbox_inches='tight', dpi=300)
+    plt.close()
+    
+    print(f"Saved scenario comparison plot => {plot_path}") 
