@@ -26,7 +26,8 @@ from create_master_invest import InvestmentAnalysis
 from visualization.summary_plots import create_annual_summary_plots, create_scenario_comparison_plot
 from visualization.scenario_plots import plot_scenario_results
 from utils.time_series import build_gen_time_series, build_demand_time_series
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
+from dataclasses import dataclass
 
 # Paths
 working_dir = "/Users/rvieira/Documents/Master/vt1-energy-investment-model/data/working"
@@ -54,6 +55,53 @@ if not api_key:
 # Initialize critic
 critic = ScenarioCritic(api_key)
 
+@dataclass
+class SeasonalData:
+    generation: Dict[str, float]  # Asset type -> generation amount
+    cost: float
+    capacity_factors: Dict[str, float]
+
+@dataclass
+class ScenarioVariant:
+    scenario_name: str
+    variant_type: str  # 'nominal', 'high', 'low'
+    load_factor: float
+    annual_cost: float
+    seasonal_data: Dict[str, SeasonalData]  # season -> data
+    generation_by_asset: Dict[str, float]
+    generation_costs: Dict[str, float]
+    available_capacity: Dict[str, float]
+    capacity_factors: Dict[str, float]
+    
+    @property
+    def full_name(self) -> str:
+        return f"{self.scenario_name}_{self.variant_type}"
+    
+    def to_dict(self) -> Dict:
+        """Convert to flat dictionary for DataFrame"""
+        result = {
+            "scenario_name": self.full_name,
+            "base_scenario": self.scenario_name,
+            "variant": self.variant_type,
+            "load_factor": self.load_factor,
+            "annual_cost": self.annual_cost
+        }
+        
+        # Add seasonal data
+        for season, data in self.seasonal_data.items():
+            for asset, gen in data.generation.items():
+                result[f"{season}_gen_{asset}"] = gen
+            result[f"{season}_cost"] = data.cost
+        
+        # Add annual metrics
+        for asset, gen in self.generation_by_asset.items():
+            result[f"gen_{asset}"] = gen
+            result[f"gen_cost_{asset}"] = self.generation_costs.get(asset, 0)
+            result[f"avail_gen_{asset}"] = self.available_capacity.get(asset, 0)
+            result[f"capacity_factor_{asset}"] = self.capacity_factors.get(asset, 0)
+            
+        return result
+
 def ask_user_confirmation(message: str) -> bool:
     """Ask user for confirmation before proceeding"""
     while True:
@@ -64,159 +112,278 @@ def ask_user_confirmation(message: str) -> bool:
             return False
         print("Please answer with 'y' or 'n'")
 
-def main():
-    # Load Data
+def run_scenario_variant(
+    scenario_name: str,
+    gen_positions: Dict[int, int],
+    storage_positions: Dict[int, int],
+    load_factor: float,
+    variant: str,
+    data_context: Dict[str, Any]
+) -> Optional[ScenarioVariant]:
+    """Run a single scenario variant (nominal, high, or low load)"""
+    
+    seasonal_data = {}
+    total_gen_year = {}
+    total_gen_cost_year = {}
+    total_avail_gen_year = {}
+    
+    print(f"\nProcessing {scenario_name} ({variant} load) with:")
+    print(f"  Load factor: {load_factor}")
+
+    for season in ["winter", "summer", "autumn_spring"]:
+        print(f"  Running {season}...")
+        season_result = run_single_season(
+            season=season,
+            gen_positions=gen_positions,
+            storage_positions=storage_positions,
+            load_factor=load_factor,
+            data_context=data_context
+        )
+        
+        if season_result is None:
+            return None
+            
+        # Convert SeasonResult to SeasonalData
+        generation_dict = {
+            asset: metrics.generation 
+            for asset, metrics in season_result.metrics.items()
+        }
+        capacity_factors = {
+            asset: (metrics.generation / metrics.available if metrics.available > 0 else 0)
+            for asset, metrics in season_result.metrics.items()
+        }
+        
+        seasonal_data[season] = SeasonalData(
+            generation=generation_dict,
+            cost=season_result.cost,
+            capacity_factors=capacity_factors
+        )
+        
+        # Accumulate annual metrics
+        weight = data_context['season_weights'][season]
+        for asset, metrics in season_result.metrics.items():
+            total_gen_year[asset] = total_gen_year.get(asset, 0) + metrics.generation * weight
+            total_gen_cost_year[asset] = total_gen_cost_year.get(asset, 0) + metrics.cost * weight
+            total_avail_gen_year[asset] = total_avail_gen_year.get(asset, 0) + metrics.available * weight
+
+    # Calculate capacity factors
+    capacity_factors = {
+        asset: total_gen_year[asset] / total_avail_gen_year[asset]
+        if total_avail_gen_year.get(asset, 0) > 0 else 0
+        for asset in total_gen_year
+    }
+
+    annual_cost = sum(
+        data.cost * data_context['season_weights'][season] 
+        for season, data in seasonal_data.items()
+    )
+
+    return ScenarioVariant(
+        scenario_name=scenario_name,
+        variant_type=variant,
+        load_factor=load_factor,
+        annual_cost=annual_cost,
+        seasonal_data=seasonal_data,
+        generation_by_asset=total_gen_year,
+        generation_costs=total_gen_cost_year,
+        available_capacity=total_avail_gen_year,
+        capacity_factors=capacity_factors
+    )
+
+def load_data_context() -> Dict[str, Any]:
+    """
+    Load and preprocess all required data for scenario analysis.
+    Returns a context dictionary containing all necessary data and mappings.
+    """
+    # Load base data files
     bus = pd.read_csv(bus_file)
     branch = pd.read_csv(branch_file)
+    master_gen = pd.read_csv(master_gen_file, parse_dates=["time"]).sort_values("time")
+    master_load = pd.read_csv(master_load_file, parse_dates=["time"]).sort_values("time")
+    scenarios_df = pd.read_csv(scenarios_params_file)
+
+    # Process branch data
     branch.rename(columns={"rateA": "ratea"}, inplace=True, errors="ignore")
     branch["sus"] = 1 / branch["x"]
     branch["id"] = np.arange(1, len(branch) + 1)
 
-    master_gen = pd.read_csv(master_gen_file, parse_dates=["time"]).sort_values("time")
-    master_load = pd.read_csv(master_load_file, parse_dates=["time"]).sort_values("time")
-
-    # Create mappings from master_gen.csv
+    # Create mappings
     id_to_type = master_gen.drop_duplicates(subset=['id'])[['id', 'type']].set_index('id')['type'].to_dict()
     type_to_id = master_gen.drop_duplicates(subset=['type'])[['type', 'id']].set_index('type')['id'].to_dict()
     id_to_gencost = master_gen.drop_duplicates(subset=['id'])[['id', 'gencost']].set_index('id')['gencost'].to_dict()
     id_to_pmax = master_gen.drop_duplicates(subset=['id'])[['id', 'pmax']].set_index('id')['pmax'].to_dict()
 
-    # Load Scenarios
-    scenarios_df = pd.read_csv(scenarios_params_file)
-    scenario_results = []
-
-    # Initialize seasonal generation data
-    seasonal_generation = {
-        'winter': {},
-        'summer': {},
-        'autumn_spring': {}
+    return {
+        # Raw data
+        'bus': bus,
+        'branch': branch,
+        'master_gen': master_gen,
+        'master_load': master_load,
+        'scenarios_df': scenarios_df,
+        
+        # Mappings
+        'id_to_type': id_to_type,
+        'type_to_id': type_to_id,
+        'id_to_gencost': id_to_gencost,
+        'id_to_pmax': id_to_pmax,
+        
+        # Constants
+        'season_weights': season_weights,
+        
+        # Paths
+        'results_root': results_root
     }
 
-    for _, row in scenarios_df.iterrows():
-        scenario_name = row["scenario_name"]
-        gen_pos_raw = ast.literal_eval(row["gen_positions"])
-        storage_pos_raw = ast.literal_eval(row["storage_units"])
-        load_factor = float(row["load_factor"])
-
-        # Initialize result entry with seasonal generation data
-        result_entry = {
-            "scenario_name": scenario_name,
-            "annual_cost": None,
-            "winter_gen": {},  # Initialize empty dictionaries for each season
-            "summer_gen": {},
-            "autumn_spring_gen": {}
+def parse_positions(positions_str: str, type_to_id: Dict[str, int]) -> Dict[int, int]:
+    """
+    Parse positions string from scenarios file and convert types to IDs.
+    
+    Args:
+        positions_str: String representation of positions dictionary
+        type_to_id: Mapping from generator type to ID
+    
+    Returns:
+        Dictionary mapping bus numbers to generator IDs
+    """
+    try:
+        positions_raw = ast.literal_eval(positions_str)
+        return {
+            int(bus): type_to_id[gen_type]
+            for bus, gen_type in positions_raw.items()
         }
+    except (ValueError, KeyError) as e:
+        print(f"Error parsing positions: {e}")
+        return {}
 
-        # Map types to IDs
-        try:
-            gen_positions = {bus: type_to_id[gen_type] for bus, gen_type in gen_pos_raw.items()}
-        except KeyError as e:
-            print(f"Error: Generator type '{e.args[0]}' not found in type_to_id mapping.")
-            scenario_results.append(result_entry)
-            continue
+@dataclass
+class SeasonMetrics:
+    generation: float
+    cost: float
+    available: float
 
-        try:
-            storage_positions = {bus: type_to_id[gen_type] for bus, gen_type in storage_pos_raw.items()}
-        except KeyError as e:
-            print(f"Error: Storage type '{e.args[0]}' not found in type_to_id mapping.")
-            scenario_results.append(result_entry)
-            continue
+@dataclass
+class SeasonResult:
+    metrics: Dict[str, SeasonMetrics]
+    cost: float
 
-        print(f"\nProcessing {scenario_name} with Generators: {gen_pos_raw} and Storage: {storage_pos_raw}")
-
-        season_costs = {}
-        all_ok = True
-
-        # Initialize accumulators for metrics
-        total_gen_year = {}
-        total_gen_cost_year = {}
-        total_avail_gen_year = {}
-
-        # Create scenario folder early
-        scenario_folder = os.path.join(results_root, scenario_name)
-        os.makedirs(scenario_folder, exist_ok=True)
-
-        for season in ["winter", "summer", "autumn_spring"]:
-            print(f"  Running {season}...")
-            gen_ts = build_gen_time_series(master_gen, gen_positions, storage_positions, season)
-            demand_ts = build_demand_time_series(master_load, load_factor, season)
-            results = dcopf(gen_ts, branch, bus, demand_ts, delta_t=1)
-
-            if results and results.get("status") == "Optimal":
-                # Sum up total generation for each asset type in this season
-                season_gen = {}
-                for _, gen_row in results['generation'].iterrows():
-                    gen_type = id_to_type.get(gen_row['id'])
-                    if gen_type:
-                        season_gen[gen_type] = season_gen.get(gen_type, 0) + gen_row['gen']
-                
-                # Store the seasonal generation data directly in result_entry
-                result_entry[f"{season}_gen"] = season_gen
-                season_costs[season] = results.get("cost", 0.0)
-                print(f"    Optimal. Cost: {results['cost']}")
-            else:
-                print(f"    Not Optimal.")
-                all_ok = False
-                break
-
-            # Plotting and metric extraction
-            if all_ok:
-                # Plotting and metric extraction
-                plot_gen, plot_gen_cost, plot_avail, gen_vs_demand = plot_scenario_results(
-                    results, 
-                    demand_ts, 
-                    branch, 
-                    bus, 
-                    scenario_folder=scenario_folder,  # Now always providing a valid path
-                    season_key=season, 
-                    id_to_type=id_to_type, 
-                    id_to_gencost=id_to_gencost, 
-                    id_to_pmax=id_to_pmax
+def run_single_season(
+    season: str,
+    gen_positions: Dict[int, int],
+    storage_positions: Dict[int, int],
+    load_factor: float,
+    data_context: Dict[str, Any]
+) -> Optional[SeasonResult]:
+    """
+    Run DCOPF for a single season and collect results.
+    
+    Args:
+        season: Season name ('winter', 'summer', 'autumn_spring')
+        gen_positions: Mapping of bus to generator ID
+        storage_positions: Mapping of bus to storage ID
+        load_factor: Load scaling factor
+        data_context: Dictionary containing all required data
+    
+    Returns:
+        SeasonResult object if successful, None if optimization fails
+    """
+    # Build time series
+    gen_ts = build_gen_time_series(
+        data_context['master_gen'], 
+        gen_positions, 
+        storage_positions, 
+        season
+    )
+    demand_ts = build_demand_time_series(
+        data_context['master_load'], 
+        load_factor, 
+        season
+    )
+    
+    # Run DCOPF
+    results = dcopf(
+        gen_ts, 
+        data_context['branch'], 
+        data_context['bus'], 
+        demand_ts, 
+        delta_t=1
+    )
+    
+    if not results or results.get("status") != "Optimal":
+        return None
+        
+    # Process results
+    metrics_by_type = {}
+    
+    # Group generation by type
+    for _, gen_row in results['generation'].iterrows():
+        gen_type = data_context['id_to_type'].get(gen_row['id'])
+        if gen_type:
+            if gen_type not in metrics_by_type:
+                metrics_by_type[gen_type] = SeasonMetrics(
+                    generation=0,
+                    cost=0,
+                    available=0
                 )
+            
+            # Add generation
+            metrics_by_type[gen_type].generation += gen_row['gen']
+            
+            # Add cost
+            if gen_row['id'] in data_context['id_to_gencost']:
+                cost = gen_row['gen'] * data_context['id_to_gencost'][gen_row['id']]
+                metrics_by_type[gen_type].cost += cost
+            
+            # Calculate available capacity
+            if gen_row['id'] in data_context['id_to_pmax']:
+                metrics_by_type[gen_type].available += data_context['id_to_pmax'][gen_row['id']]
+    
+    return SeasonResult(
+        metrics=metrics_by_type,
+        cost=results.get("cost", 0.0)
+    )
 
-                # Accumulate metrics weighted by season
-                weight = season_weights[season]
-                for asset, gen in plot_gen.items():
-                    total_gen_year[asset] = total_gen_year.get(asset, 0) + gen * weight
-                for asset, cost in plot_gen_cost.items():
-                    total_gen_cost_year[asset] = total_gen_cost_year.get(asset, 0) + cost * weight
-                for asset, avail in plot_avail.items():
-                    total_avail_gen_year[asset] = total_avail_gen_year.get(asset, 0) + avail * weight
+def main():
+    # Load all data
+    data_context = load_data_context()
+    
+    # Ask for sensitivity analysis
+    run_sensitivity = ask_user_confirmation(
+        "Do you want to run sensitivity analysis (±20% load)?"
+    )
 
-        if all_ok:
-            # Calculate Annual Cost
-            annual_cost = sum(season_costs[season] * season_weights[season] for season in season_costs)
-            result_entry["annual_cost"] = round(annual_cost, 1)
+    scenario_variants: List[ScenarioVariant] = []
+    
+    for _, row in data_context['scenarios_df'].iterrows():
+        scenario_name = row["scenario_name"]
+        gen_positions = parse_positions(row["gen_positions"], data_context['type_to_id'])
+        storage_positions = parse_positions(row["storage_units"], data_context['type_to_id'])
+        base_load_factor = float(row["load_factor"])
 
-            # Add Total Generation per Asset
-            for asset, gen in total_gen_year.items():
-                result_entry[f"gen_{asset}"] = round(gen, 1)
+        # Run variants
+        variants_to_run = [
+            ("nominal", base_load_factor),
+            ("high", base_load_factor * 1.2),
+            ("low", base_load_factor * 0.8)
+        ] if run_sensitivity else [("nominal", base_load_factor)]
 
-            # Add Total Generation Cost per Asset
-            for asset, cost in total_gen_cost_year.items():
-                result_entry[f"gen_cost_{asset}"] = round(cost, 1)
+        for variant_name, load_factor in variants_to_run:
+            result = run_scenario_variant(
+                scenario_name=scenario_name,
+                gen_positions=gen_positions,
+                storage_positions=storage_positions,
+                load_factor=load_factor,
+                variant=variant_name,
+                data_context=data_context
+            )
+            if result:
+                scenario_variants.append(result)
 
-            # Add Total Available Generation per Asset
-            for asset, avail in total_avail_gen_year.items():
-                result_entry[f"avail_gen_{asset}"] = round(avail, 1)
+    # Convert to DataFrame
+    results_df = pd.DataFrame([
+        variant.to_dict() for variant in scenario_variants
+    ])
 
-            # Optional: Add Capacity Factor per Asset
-            capacity_factor_year = {}
-            for asset, gen in total_gen_year.items():
-                avail = total_avail_gen_year.get(asset, 0)
-                if avail > 0:
-                    capacity_factor_year[asset] = round(gen / avail, 2)
-                else:
-                    capacity_factor_year[asset] = 0.0
-            for asset, cf in capacity_factor_year.items():
-                result_entry[f"capacity_factor_{asset}"] = cf
-
-            print(f"  Annual Cost: {round(annual_cost, 1)}")
-
-        scenario_results.append(result_entry)
-
-    # Save Results to CSV first
-    results_df = pd.DataFrame(scenario_results)
+    # Save initial results
     results_df.to_csv(os.path.join(results_root, "scenario_results.csv"), index=False)
     print("Initial results saved to CSV.")
 
@@ -278,13 +445,23 @@ def main():
 
     if generate_plots:
         print("\nGenerating plots...")
-        for _, row in results_df.iterrows():
-            scenario_data = row.to_dict()
-            print(f"\nProcessing scenario: {scenario_data['scenario_name']}")
-            print(f"Available data keys: {list(scenario_data.keys())}")
-            create_annual_summary_plots(scenario_data, results_root)
-            create_scenario_comparison_plot(scenario_data, results_root)
-        print("Plot generation completed.")
+        # Group scenarios by base scenario
+        scenario_groups = results_df.groupby('base_scenario')
+        
+        for base_scenario, group in scenario_groups:
+            print(f"\nProcessing scenario: {base_scenario}")
+            
+            # Get variants
+            nominal_data = group[group['variant'] == 'nominal'].iloc[0].to_dict()
+            high_data = group[group['variant'] == 'high'].iloc[0].to_dict() if len(group[group['variant'] == 'high']) > 0 else {}
+            low_data = group[group['variant'] == 'low'].iloc[0].to_dict() if len(group[group['variant'] == 'low']) > 0 else {}
+            
+            # Add sensitivity data to nominal data
+            nominal_data['high_variant'] = high_data
+            nominal_data['low_variant'] = low_data
+            
+            # Create plots
+            create_annual_summary_plots(nominal_data, results_root)
 
     if generate_individual or generate_global:
         print("\nGenerating requested reports...")
