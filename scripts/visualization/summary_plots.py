@@ -5,6 +5,24 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 import numpy as np
+import seaborn as sns
+
+# Set the style for all plots
+plt.style.use('seaborn-v0_8-darkgrid')  # Using a valid matplotlib style
+
+# Define a consistent color palette for assets using a softer palette
+ASSET_COLORS = {
+    'nuclear': sns.color_palette("pastel")[0],
+    'wind': sns.color_palette("pastel")[1],
+    'solar': sns.color_palette("pastel")[2],
+    'storage': sns.color_palette("pastel")[3],
+    'gas': sns.color_palette("pastel")[4],
+    'coal': sns.color_palette("pastel")[5],
+    'hydro': sns.color_palette("pastel")[6],
+    'biomass': sns.color_palette("pastel")[7],
+    'battery1': sns.color_palette("pastel")[3],  # Using storage color
+    'battery2': sns.color_palette("pastel")[3]   # Using storage color
+}
 
 def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
     """Create annual generation and cost mix plots"""
@@ -25,9 +43,12 @@ def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
                          if v and not pd.isna(v)}
         if generation_data:
             total_gen = sum(generation_data.values())
+            colors = [ASSET_COLORS.get(asset, sns.color_palette("pastel")[7]) 
+                     for asset in generation_data.keys()]
             wedges, texts, autotexts = ax1.pie(
                 list(generation_data.values()),
                 labels=list(generation_data.keys()),
+                colors=colors,
                 autopct=lambda pct: f'{pct:.1f}%\n({int(pct/100.*total_gen):,} MWh)',
                 textprops={'fontsize': 8}
             )
@@ -38,95 +59,111 @@ def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
                     ha='center', va='center')
     ax1.set_title('Annual Generation Mix')
 
-    # Plot 2: Winter vs Summer Generation Comparison (Tornado Chart)
+    # Plot 2: Winter vs Summer Generation (Tornado Chart)
     winter_gen = scenario_data.get('winter_gen', {})
     summer_gen = scenario_data.get('summer_gen', {})
     
-    print("\nDebug - Seasonal Generation Data:")
-    print(f"Winter generation: {winter_gen}")
-    print(f"Summer generation: {summer_gen}")
-    
     all_assets = sorted(set(winter_gen.keys()) | set(summer_gen.keys()))
-    print(f"All assets found: {all_assets}")
-    
     if all_assets:
         # Create data for tornado chart
-        winter_values = [-winter_gen.get(asset, 0) for asset in all_assets]  # Negative for left side
-        summer_values = [summer_gen.get(asset, 0) for asset in all_assets]   # Positive for right side
+        winter_values = [-winter_gen.get(asset, 0) for asset in all_assets]
+        summer_values = [summer_gen.get(asset, 0) for asset in all_assets]
+        
+        # Find max absolute value for symmetric axis
+        max_val = max(abs(min(winter_values)), abs(max(summer_values)))
+        
+        # Set white background with grey grid
+        ax2.set_facecolor('white')
+        ax2.grid(True, color='grey', alpha=0.3)
         
         # Create horizontal bars
         y_pos = np.arange(len(all_assets))
         
         # Plot winter values (left side)
-        ax2.barh(y_pos, winter_values, 
-                align='center', 
-                color='lightblue',
-                label='Winter', 
-                alpha=0.8)
+        winter_bars = ax2.barh(y_pos, winter_values, 
+                             align='center',
+                             color=[sns.set_hls_values(ASSET_COLORS.get(asset, 'gray'), l=0.8) 
+                                   for asset in all_assets],
+                             label='Winter',
+                             alpha=0.8)
         
         # Plot summer values (right side)
-        ax2.barh(y_pos, summer_values, 
-                align='center', 
-                color='orange',
-                label='Summer', 
-                alpha=0.8)
+        summer_bars = ax2.barh(y_pos, summer_values, 
+                             align='center',
+                             color=[ASSET_COLORS.get(asset, 'gray') for asset in all_assets],
+                             label='Summer',
+                             alpha=0.8)
         
         # Customize plot
         ax2.set_xlabel('Generation (MWh/week)')
         ax2.set_title('Winter vs Summer Weekly Generation')
         ax2.set_yticks(y_pos)
         ax2.set_yticklabels(all_assets)
-        ax2.legend()
-        ax2.grid(True, alpha=0.3)
+        ax2.legend(loc='upper right')
+        
+        # Set symmetric x-axis
+        ax2.set_xlim(-max_val*1.1, max_val*1.1)
         
         # Add zero line
         ax2.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
         
-        # Add value labels
+        # Add value labels at the start of bars
         for i, v in enumerate(winter_values):
             if v != 0:
-                ax2.text(v, i, f'{abs(v):,.0f}', 
+                ax2.text(0, i, f'{abs(v):,.0f}', 
                         ha='right', va='center', fontsize=8)
         for i, v in enumerate(summer_values):
             if v != 0:
-                ax2.text(v, i, f'{v:,.0f}', 
+                ax2.text(0, i, f'{v:,.0f}', 
                         ha='left', va='center', fontsize=8)
-    else:
-        ax2.text(0.5, 0.5, 'No seasonal generation data', 
-                ha='center', va='center')
+        
+        # Add black frame
+        for spine in ax2.spines.values():
+            spine.set_color('black')
+            spine.set_linewidth(1)
 
     # Plot 3: NPV Comparison
     npv_data = {
-        '10y': scenario_data.get('npv_10y', 0),
-        '20y': scenario_data.get('npv_20y', 0),
-        '30y': scenario_data.get('npv_30y', 0)
+        '10y': scenario_data.get('npv_10y', 0) / 1e6,  # Convert to millions
+        '20y': scenario_data.get('npv_20y', 0) / 1e6,
+        '30y': scenario_data.get('npv_30y', 0) / 1e6
     }
     
     npv_data = {k: v for k, v in npv_data.items() if not pd.isna(v)}
     
     if npv_data:
-        bars = ax3.bar(npv_data.keys(), npv_data.values(), 
-                      color=['red' if v < 0 else 'lightgreen' for v in npv_data.values()])
+        # Set white background with grey grid
+        ax3.set_facecolor('white')
+        ax3.grid(True, color='grey', alpha=0.3)
+        
+        # Using pastel colors for NPV
+        colors = [sns.color_palette("pastel")[3] if v < 0 else sns.color_palette("pastel")[2] 
+                 for v in npv_data.values()]
+        bars = ax3.bar(npv_data.keys(), npv_data.values(), color=colors)
         ax3.set_title('Net Present Value (NPV) Comparison')
-        ax3.set_ylabel('NPV (€)')
-        ax3.grid(True, alpha=0.3)
+        ax3.set_ylabel('NPV (Million CHF)')
+        
+        # Add zero line
         ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
         
+        # Add value labels at the base of bars
         for bar in bars:
             height = bar.get_height()
-            va = 'bottom' if height >= 0 else 'top'
+            y_pos = 0  # Position at x-axis
             ax3.text(
                 bar.get_x() + bar.get_width()/2.,
-                height,
-                f'€{height:,.0f}',
+                y_pos,
+                f'{height:,.1f}M',
                 ha='center',
-                va=va,
+                va='bottom' if height >= 0 else 'top',
                 rotation=0,
                 fontsize=8
             )
-    else:
-        ax3.text(0.5, 0.5, 'No valid NPV data', 
-                ha='center', va='center')
+        
+        # Add black frame
+        for spine in ax3.spines.values():
+            spine.set_color('black')
+            spine.set_linewidth(1)
 
     plt.suptitle(f'Annual Summary - {scenario_name}', fontsize=16, y=1.05)
     plt.tight_layout()

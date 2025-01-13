@@ -58,7 +58,7 @@ This project analyzes different energy system scenarios using DC Optimal Power F
 ### Base Network Structure
 The analysis is built around a base grid topology with two main load buses. This fundamental structure serves as the foundation for all scenario analyses:
 
-![Base Network Topology](figures/base_network_topography.png){width=500}
+<img src="figures/base_network_topography.png" width="500"/>
 
 *The base network defines the core infrastructure upon which different generation scenarios are evaluated.*
 
