@@ -139,7 +139,7 @@ def main():
             season_name=season_name,
             start_str=start_time,
             end_str=end_time,
-            pmax=500.0,   # [MW]
+            pmax=800.0,   # [MW]
             pmin=0.0,
             gencost=5.0,
             emax=0.0,

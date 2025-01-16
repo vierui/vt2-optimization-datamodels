@@ -134,103 +134,64 @@ Generated on: {now}
                          for k, v in d.items()])
 
     def _create_seasonal_comparison(self, scenario_name: str, results_root: str) -> None:
-        """Create a side-by-side comparison of seasonal generation plots"""
-        scenario_folder = os.path.join(results_root, scenario_name, "figure")
+        """Create seasonal comparison plot"""
+        scenario_folder = os.path.join(results_root, scenario_name)
+        figure_folder = os.path.join(scenario_folder, "figure")
+        os.makedirs(figure_folder, exist_ok=True)
         
         # Create figure with three subplots side by side
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(24, 6))
         
-        # Load and plot each seasonal image
+        # Plot each season
         for ax, season in zip([ax1, ax2, ax3], ['winter', 'summer', 'autumn_spring']):
-            img_path = os.path.join(scenario_folder, f'hist_total_gen_with_capacity_{season}.png')
-            if os.path.exists(img_path):
-                img = plt.imread(img_path)
+            season_image = os.path.join(figure_folder, f'{season}_generation.png')
+            if os.path.exists(season_image):
+                img = plt.imread(season_image)
                 ax.imshow(img)
                 ax.axis('off')
-                ax.set_title(season.replace('_', '/').title())
-            else:
-                ax.text(0.5, 0.5, f'No data for {season}', 
-                       ha='center', va='center')
-                ax.set_title(f'Missing: {season}')
+                ax.set_title(f'{season.capitalize()} Generation')
         
         # Add overall title
-        plt.suptitle(f'Seasonal Generation Comparison - {scenario_name}', 
-                     fontsize=16, y=1.02)
+        plt.suptitle(f'Seasonal Generation Comparison - {scenario_name}',
+                    fontsize=16, y=1.02)
         
-        # Save combined plot
-        plt.savefig(os.path.join(scenario_folder, 'seasonal_comparison.png'), 
+        # Save plot
+        plt.savefig(os.path.join(figure_folder, 'seasonal_comparison.png'),
                     bbox_inches='tight', dpi=300)
         plt.close()
 
-    def analyze_scenario(self, scenario_data: Dict[str, Any], results_root: str) -> None:
-        """Analyze a single scenario and generate a report"""
-        scenario_name = scenario_data['scenario_name']
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    def analyze_scenario(self, scenario_data: dict, results_root: str) -> None:
+        """Analyze a single scenario and create a report"""
+        # Get base scenario name (remove variant suffix if present)
+        scenario_name = scenario_data.get('base_scenario', scenario_data['scenario_name'])
+        variant = scenario_data.get('variant', 'nominal')
+        
+        # Only analyze nominal variants
+        if variant != 'nominal':
+            return
+            
+        print(f"\nAnalyzing scenario: {scenario_name}")
+        
+        # Create scenario folder
+        scenario_folder = os.path.join(results_root, scenario_name)
+        os.makedirs(scenario_folder, exist_ok=True)
+        
+        # Create figure subfolder
+        figure_folder = os.path.join(scenario_folder, "figure")
+        os.makedirs(figure_folder, exist_ok=True)
         
         # Create seasonal comparison plot
         self._create_seasonal_comparison(scenario_name, results_root)
         
-        # Format generation data
-        generation_data = {k.replace('gen_', ''): v for k, v in scenario_data.items() 
-                          if k.startswith('gen_') and not k.startswith('gen_cost_')}
-        cost_data = {k.replace('gen_cost_', ''): v for k, v in scenario_data.items() 
-                     if k.startswith('gen_cost_')}
-        capacity_data = {k.replace('capacity_factor_', ''): v for k, v in scenario_data.items() 
-                        if k.startswith('capacity_factor_')}
-
-        # Generate critique using existing method
-        critique = self.generate_critique(scenario_data)
-
-        markdown = f"""# Scenario Analysis Report: {scenario_name}
-Generated on: {now}
-
-## Overview
-![Annual Summary](figure/annual_summary.png)
-
-## Seasonal Generation Patterns
-![Seasonal Comparison](figure/seasonal_comparison.png)
-
-## Financial Analysis
-| Metric | Value |
-|--------|--------|
-| Initial Investment | €{scenario_data.get('initial_investment', 0):,.2f} |
-| Annual Operating Cost | €{scenario_data.get('annual_cost', 0):,.2f} |
-| NPV (10 years) | €{scenario_data.get('npv_10y', 0):,.2f} |
-| NPV (20 years) | €{scenario_data.get('npv_20y', 0):,.2f} |
-| NPV (30 years) | €{scenario_data.get('npv_30y', 0):,.2f} |
-
-## Generation Analysis
-
-### Annual Generation by Asset Type
-| Asset Type | Generation (MWh) |
-|------------|-----------------|
-{self._format_dict_as_table(generation_data)}
-
-### Generation Costs
-| Asset Type | Cost (€) |
-|------------|----------|
-{self._format_dict_as_table(cost_data)}
-
-### Capacity Factors
-| Asset Type | Capacity Factor |
-|------------|----------------|
-{self._format_dict_as_table(capacity_data, "{:.2%}")}
-
-## AI Critical Analysis
-{critique}
-
----
-"""
-        # Create scenario folder if it doesn't exist
-        scenario_folder = os.path.join(results_root, scenario_name)
-        os.makedirs(scenario_folder, exist_ok=True)
+        # Generate report content
+        report_content = self._generate_report_content(scenario_data)
         
-        # Save markdown report
+        # Save report
         report_path = os.path.join(scenario_folder, f"{scenario_name}_analysis.md")
         with open(report_path, 'w') as f:
-            f.write(markdown)
-        
-        print(f"Analysis report saved to '{report_path}'")
+            f.write(report_content)
+            
+        print(f"Analysis saved => {report_path}")
 
     def _format_dict_as_table(self, d: Dict[str, Any], format_str: str = "{:,.2f}") -> str:
         """Helper function to format dictionary data as markdown table rows"""
@@ -339,3 +300,74 @@ Limit the analysis to 400 words."""
             f.write(markdown)
         
         print(f"\nGlobal comparison report saved to '{report_path}'")
+
+    def _generate_report_content(self, scenario_data: dict) -> str:
+        """Generate the markdown report content for a scenario"""
+        scenario_name = scenario_data.get('base_scenario', scenario_data['scenario_name'])
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Format generation data
+        generation_data = {k: v for k, v in scenario_data.items() 
+                          if k.startswith('gen_') and not k.startswith('gen_cost_')}
+        cost_data = {k: v for k, v in scenario_data.items() 
+                     if k.startswith('gen_cost_')}
+        capacity_data = {k: v for k, v in scenario_data.items() 
+                        if k.startswith('capacity_factor_')}
+
+        # Generate critique using OpenAI
+        critique = self.generate_critique(scenario_data)
+
+        # Create markdown report
+        markdown = f"""# Scenario Analysis Report: {scenario_name}
+Generated on: {now}
+
+## Overview
+![Annual Summary](figure/annual_summary.png)
+
+## Seasonal Generation Patterns
+![Seasonal Comparison](figure/seasonal_comparison.png)
+
+## Financial Analysis
+| Metric | Value |
+|--------|--------|
+| Initial Investment | €{scenario_data.get('initial_investment', 0):,.2f} |
+| Annual Operating Cost | €{scenario_data.get('annual_cost', 0):,.2f} |
+| NPV (10 years) | €{scenario_data.get('npv_10y', 0):,.2f} |
+| NPV (20 years) | €{scenario_data.get('npv_20y', 0):,.2f} |
+| NPV (30 years) | €{scenario_data.get('npv_30y', 0):,.2f} |
+
+## Generation Analysis
+
+### Annual Generation by Asset Type
+| Asset Type | Generation (MWh) |
+|------------|-----------------|
+{self._format_dict_as_table(generation_data)}
+
+### Generation Costs
+| Asset Type | Cost (€) |
+|------------|----------|
+{self._format_dict_as_table(cost_data)}
+
+### Capacity Factors
+| Asset Type | Capacity Factor |
+|------------|----------------|
+{self._format_dict_as_table(capacity_data, "{:.2%}")}
+
+## AI Critical Analysis
+{critique}
+
+---
+"""
+        return markdown
+
+    def _format_dict_as_table(self, d: Dict[str, Any], format_str: str = "{:,.2f}") -> str:
+        """Format dictionary as markdown table rows"""
+        rows = []
+        for k, v in d.items():
+            key = k.replace('gen_', '').replace('gen_cost_', '').replace('capacity_factor_', '')
+            try:
+                value = format_str.format(float(v))
+            except (ValueError, TypeError):
+                value = str(v)
+            rows.append(f"| {key} | {value} |")
+        return '\n'.join(rows)

@@ -19,8 +19,8 @@ class InvestmentAnalysis:
         self.lifetime = {
             'wind': 25,
             'solar': 25,
-            'battery1': 15,
-            'battery2': 15,
+            'battery1': 8,
+            'battery2': 8,
         }
         
         self.annual_opex_percent = {

@@ -26,6 +26,10 @@ This modular approach allows us to evaluate various investment strategies while 
 
 
 ### Individual Scenario Reports
+- [scenario_1](data/results/scenario_1/scenario_1_analysis.md)
+- [scenario_2](data/results/scenario_2/scenario_2_analysis.md)
+- [scenario_3](data/results/scenario_3/scenario_3_analysis.md)
+- [scenario_4](data/results/scenario_4/scenario_4_analysis.md)
 ${scenario_links}
 
 ## Project Structure

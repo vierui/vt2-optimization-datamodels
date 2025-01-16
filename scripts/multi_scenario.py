@@ -18,6 +18,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import numpy as np
 import ast
+
 from dcopf import dcopf
 from dotenv import load_dotenv
 from scenario_critic import ScenarioCritic
@@ -25,7 +26,8 @@ from update_readme import update_readme_with_scenarios, create_readme_template, 
 from create_master_invest import InvestmentAnalysis
 from visualization.summary_plots import create_annual_summary_plots, create_scenario_comparison_plot
 from visualization.scenario_plots import plot_scenario_results
-from utils.time_series import build_gen_time_series, build_demand_time_series
+from core.time_series import build_gen_time_series, build_demand_time_series
+from core.helpers import ask_user_confirmation
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
 
@@ -55,6 +57,7 @@ if not api_key:
 # Initialize critic
 critic = ScenarioCritic(api_key)
 
+# Data classes
 @dataclass
 class SeasonalData:
     generation: Dict[str, float]  # Asset type -> generation amount
@@ -77,7 +80,7 @@ class ScenarioVariant:
     def full_name(self) -> str:
         return f"{self.scenario_name}_{self.variant_type}"
     
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> Dict: # Convert to flat dictionary for DataFrame
         """Convert to flat dictionary for DataFrame"""
         result = {
             "scenario_name": self.full_name,
@@ -102,16 +105,7 @@ class ScenarioVariant:
             
         return result
 
-def ask_user_confirmation(message: str) -> bool:
-    """Ask user for confirmation before proceeding"""
-    while True:
-        response = input(f"\n{message} (y/n): ").lower().strip()
-        if response in ['y', 'yes']:
-            return True
-        elif response in ['n', 'no']:
-            return False
-        print("Please answer with 'y' or 'n'")
-
+# Run a single scenario variant (nominal, high, or low load)
 def run_scenario_variant(
     scenario_name: str,
     gen_positions: Dict[int, int],
@@ -189,6 +183,7 @@ def run_scenario_variant(
         available_capacity=total_avail_gen_year,
         capacity_factors=capacity_factors
     )
+
 
 def load_data_context() -> Dict[str, Any]:
     """
@@ -273,31 +268,28 @@ def run_single_season(
     load_factor: float,
     data_context: Dict[str, Any]
 ) -> Optional[SeasonResult]:
-    """
-    Run DCOPF for a single season and collect results.
-    
-    Args:
-        season: Season name ('winter', 'summer', 'autumn_spring')
-        gen_positions: Mapping of bus to generator ID
-        storage_positions: Mapping of bus to storage ID
-        load_factor: Load scaling factor
-        data_context: Dictionary containing all required data
-    
-    Returns:
-        SeasonResult object if successful, None if optimization fails
-    """
+    """Run DCOPF for a single season and collect results"""
     # Build time series
     gen_ts = build_gen_time_series(
         data_context['master_gen'], 
         gen_positions, 
-        storage_positions, 
+        storage_positions,
         season
     )
+    
+    # Build demand time series
     demand_ts = build_demand_time_series(
-        data_context['master_load'], 
-        load_factor, 
+        data_context['master_load'],
+        load_factor,
         season
     )
+    
+    # Print debug info
+    print(f"\nAssets in {season}:")
+    print("Generators:", gen_positions)
+    print("Storage:", storage_positions)
+    print("Types in time series:", gen_ts['type'].unique())
+    print(f"Load factor: {load_factor}")
     
     # Run DCOPF
     results = dcopf(
@@ -309,6 +301,7 @@ def run_single_season(
     )
     
     if not results or results.get("status") != "Optimal":
+        print(f"Failed to find optimal solution for {season}")
         return None
         
     # Process results
@@ -341,6 +334,121 @@ def run_single_season(
         metrics=metrics_by_type,
         cost=results.get("cost", 0.0)
     )
+
+class MultiScenario:
+    """Main class to handle multiple scenario analysis for power system investments"""
+    
+    #######################
+    # 1. INITIALIZATION
+    #######################
+    def __init__(self, plot_gen_mix=False):
+        """Initialize parameters, paths, and configurations"""
+        # Setup paths
+        self.setup_paths()
+        
+        # Load scenario parameters
+        self.load_scenario_parameters()
+        
+        # Initialize analysis parameters
+        self.init_analysis_parameters()
+        
+        # Setup output directories
+        self.create_output_dirs()
+    
+    #######################
+    # 2. NETWORK CREATION
+    #######################
+    def create_network(self):
+        """Create and configure PyPSA network for scenarios"""
+        # Load component data (generators, buses, branches)
+        self.load_component_data()
+        
+        # Configure network parameters
+        self.setup_network_parameters()
+        
+        # Add components to network
+        self.add_network_components()
+        
+        return network
+
+    #######################
+    # 3. SCENARIO SOLVING
+    #######################
+    def solve(self):
+        """Main solving function for all scenarios"""
+        # Iterate through scenarios
+        for scenario in self.scenarios:
+            # Create network for scenario
+            network = self.create_network()
+            
+            # Run OPF
+            self.run_opf(network)
+            
+            # Store results
+            self.store_scenario_results(network)
+            
+            # Calculate metrics
+            self.calculate_scenario_metrics()
+    
+    #######################
+    # 4. METRICS CALCULATION
+    #######################
+    def calculate_metrics(self):
+        """Calculate investment and performance metrics"""
+        # Financial calculations
+        self.calculate_financial_metrics()
+        
+        # Sensitivity analysis
+        self.perform_sensitivity_analysis()
+        
+        # Store metric results
+        self.store_metrics()
+    
+    #######################
+    # 5. VISUALIZATION
+    #######################
+    def generate_plots(self):
+        """Generate all required plots"""
+        # Generation mix plots
+        self.plot_generation_mix()
+        
+        # Investment metric plots
+        self.plot_investment_metrics()
+        
+        # Sensitivity analysis plots
+        self.plot_sensitivity_results()
+        
+        # Add AI comments to plots
+        self.add_plot_comments()
+    
+    #######################
+    # 6. REPORTING
+    #######################
+    def create_summary(self):
+        """Create summary reports and analysis"""
+        # Generate summary statistics
+        self.calculate_summary_stats()
+        
+        # Create summary file
+        self.write_summary_file()
+        
+        # Generate AI analysis
+        self.generate_ai_analysis()
+    
+    #######################
+    # 7. UTILITY FUNCTIONS
+    #######################
+    def setup_paths(self):
+        """Setup directory paths"""
+        pass
+    
+    def load_scenario_parameters(self):
+        """Load and validate scenario parameters"""
+        pass
+    
+    def store_scenario_results(self, network):
+        """Store results for a specific scenario"""
+        pass
 
 def main():
     # Load all data
@@ -451,10 +559,26 @@ def main():
         for base_scenario, group in scenario_groups:
             print(f"\nProcessing scenario: {base_scenario}")
             
-            # Get variants
+            # Get variants with debug printing
             nominal_data = group[group['variant'] == 'nominal'].iloc[0].to_dict()
-            high_data = group[group['variant'] == 'high'].iloc[0].to_dict() if len(group[group['variant'] == 'high']) > 0 else {}
-            low_data = group[group['variant'] == 'low'].iloc[0].to_dict() if len(group[group['variant'] == 'low']) > 0 else {}
+            
+            # Get high variant
+            high_data = {}
+            high_variant = group[group['variant'] == 'high']
+            if not high_variant.empty:
+                high_data = high_variant.iloc[0].to_dict()
+                print(f"Found high variant for {base_scenario}")
+            else:
+                print(f"No high variant for {base_scenario}")
+                
+            # Get low variant
+            low_data = {}
+            low_variant = group[group['variant'] == 'low']
+            if not low_variant.empty:
+                low_data = low_variant.iloc[0].to_dict()
+                print(f"Found low variant for {base_scenario}")
+            else:
+                print(f"No low variant for {base_scenario}")
             
             # Add sensitivity data to nominal data
             nominal_data['high_variant'] = high_data
@@ -469,7 +593,9 @@ def main():
         # Generate individual reports if requested
         if generate_individual:
             print("\nGenerating individual scenario reports...")
-            for _, row in results_df.iterrows():
+            # Only process nominal variants for reports
+            nominal_results = results_df[results_df['variant'] == 'nominal']
+            for _, row in nominal_results.iterrows():
                 if row['annual_cost'] is not None:
                     critic.analyze_scenario(row.to_dict(), results_root)
             print("Individual reports completed.")
@@ -477,7 +603,9 @@ def main():
         # Generate global report if requested
         if generate_global:
             print("\nGenerating global comparison report...")
-            critic.create_global_comparison_report(results_df, results_root)
+            # Use only nominal variants for global comparison
+            nominal_results = results_df[results_df['variant'] == 'nominal']
+            critic.create_global_comparison_report(nominal_results, results_root)
             print("Global report completed.")
         
         print("All requested reports generated.")

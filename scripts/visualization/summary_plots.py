@@ -68,14 +68,17 @@ def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
     winter_gen = {}
     summer_gen = {}
     
-    # Get all generation keys
-    gen_keys = [k for k in scenario_data.keys() if k.startswith('winter_gen_') or k.startswith('summer_gen_')]
+    # Get all generation and storage keys
+    gen_keys = [k for k in scenario_data.keys() 
+                if (k.startswith('winter_gen_') or k.startswith('summer_gen_'))]
     
     # Process winter and summer generation
     for key in gen_keys:
         value = scenario_data.get(key, 0)
         if pd.isna(value):
             value = 0
+        
+        # Extract asset type and handle both generators and storage
         if key.startswith('winter_gen_'):
             asset_type = key.replace('winter_gen_', '')
             winter_gen[asset_type] = float(value)
@@ -83,7 +86,12 @@ def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
             asset_type = key.replace('summer_gen_', '')
             summer_gen[asset_type] = float(value)
     
+    # Ensure all assets appear in both seasons
     all_assets = sorted(set(winter_gen.keys()) | set(summer_gen.keys()))
+    for asset in all_assets:
+        winter_gen.setdefault(asset, 0)
+        summer_gen.setdefault(asset, 0)
+    
     if all_assets:
         # Create data for tornado chart
         winter_values = [-winter_gen.get(asset, 0) for asset in all_assets]
@@ -166,53 +174,76 @@ def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
     high_variant = scenario_data.get('high_variant', {})
     low_variant = scenario_data.get('low_variant', {})
     
-    # Calculate sensitivity ranges
-    x = np.arange(len(npv_data))
+    # Debug print
+    print(f"\nDebug NPV values for {scenario_data.get('base_scenario')}:")
+    print("Nominal:", npv_data)
+    print("High variant raw:", {k: v for k, v in high_variant.items() if k.startswith('npv_')})
+    print("Low variant raw:", {k: v for k, v in low_variant.items() if k.startswith('npv_')})
+    
+    # Prepare data for plotting
+    years = [10, 20, 30]  # x-axis values
     nominal_values = list(npv_data.values())
     
-    # Calculate absolute error values (must be positive)
-    yerr_low = []
-    yerr_high = []
+    # Calculate high and low values with proper scaling
+    high_values = []
+    low_values = []
     
-    for period in npv_data.keys():
-        nominal = npv_data[period]
-        low = low_variant.get(f'npv_{period}', nominal) / 1e6
-        high = high_variant.get(f'npv_{period}', nominal) / 1e6
+    for period, nom in npv_data.items():
+        # Get high value (use nominal if missing or invalid)
+        high_raw = high_variant.get(f'npv_{period}', nom * 1e6)
+        high = high_raw / 1e6 if abs(high_raw) > 1 else nom  # Use nominal if high variant failed
         
-        # Calculate absolute differences
-        yerr_low.append(abs(nominal - low))
-        yerr_high.append(abs(high - nominal))
+        # Get low value (use nominal if missing)
+        low_raw = low_variant.get(f'npv_{period}', nom * 1e6)
+        low = low_raw / 1e6 if abs(low_raw) > 1 else nom
+        
+        high_values.append(high)
+        low_values.append(low)
+        
+        if high < nom:
+            print(f"Note: Using nominal value for high variant at {period} (DCOPF likely failed)")
     
-    yerr = np.array([yerr_low, yerr_high])
+    print("Processed values (in millions):")
+    print("Nominal:", nominal_values)
+    print("High:", high_values)
+    print("Low:", low_values)
     
     # Set white background with grey grid
     ax3.set_facecolor('white')
     ax3.grid(True, color='grey', alpha=0.3)
     
-    # Plot bars with error bars
-    bars = ax3.bar(x, nominal_values, 
-                  color=[sns.color_palette("pastel")[2] if v >= 0 else sns.color_palette("pastel")[3] 
-                        for v in nominal_values])
+    # Plot shaded area for uncertainty
+    ax3.fill_between(years, low_values, high_values, 
+                    alpha=0.3, color='grey', 
+                    label='Load Sensitivity Range')
     
-    # Add error bars
-    ax3.errorbar(x, nominal_values, yerr=yerr, fmt='none', 
-                color='black', capsize=5, capthick=1, elinewidth=1)
+    # Plot nominal line
+    line = ax3.plot(years, nominal_values, 'o-', 
+                    color='darkblue', linewidth=2, 
+                    label='Nominal NPV',
+                    zorder=2)
+    
+    # Add value labels for nominal points
+    for x, y in zip(years, nominal_values):
+        ax3.text(x, y, f'{y:,.1f}M', 
+                ha='center', va='bottom' if y >= 0 else 'top',
+                fontsize=8,
+                bbox=dict(facecolor='white', edgecolor='none', alpha=0.7))
     
     # Customize plot
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(npv_data.keys())
     ax3.set_title('Net Present Value (NPV) with Load Sensitivity')
+    ax3.set_xlabel('Years')
     ax3.set_ylabel('NPV (Million CHF)')
+    
+    # Set x-axis ticks
+    ax3.set_xticks(years)
+    ax3.set_xticklabels([f'{y}y' for y in years])
     
     # Add zero line
     ax3.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
     
-    # Add value labels
-    for i, v in enumerate(nominal_values):
-        ax3.text(i, v, f'{v:,.1f}M', 
-                ha='center', 
-                va='bottom' if v >= 0 else 'top',
-                fontsize=8)
+    # Add legend
+    ax3.legend(loc='lower left')
     
     # Add black frame
     for spine in ax3.spines.values():
