@@ -1,3 +1,4 @@
 .lock
 .env.local
 .DS_store
+.python-version
