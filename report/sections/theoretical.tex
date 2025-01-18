@@ -1,41 +1,44 @@
-\subsection{DC Optimal Power Flow}
-The DC Optimal Power Flow (DCOPF) is a simplified version of the AC power flow problem, making several key assumptions to linearize the problem while maintaining sufficient accuracy for investment analysis.
+\newpage
+\section{Theoretical Background}
+Power systems fundamentals
+DC Optimal Power Flow explanation
+Investment analysis concepts (NPV, annuities)
+Mathematical formulation of the optimization problem
+\subsection{Linear Programming in Energy Systems}
+Overview of optimization techniques in energy asset management.
 
-\subsubsection{Key Assumptions}
+\subsection{DC Optimal Power Flow}
+The DC Optimal Power Flow (DC-OPF) is a simplified version of the AC power flow problem, commonly used in power systems analysis and optimization~\cite{dc_opf}. This linearized model, thoroughly described in~\cite{andersson2004power}, makes the following key assumptions~\cite{wood2013power}:
+
 \begin{itemize}
-    \item Voltage magnitudes are approximately 1.0 per unit
-    \item Voltage angle differences are small ($\sin \theta \approx \theta$)
-    \item Line resistance is negligible compared to reactance (R « X)
-    \item Reactive power flow is ignored
+    \item Voltage magnitudes are assumed to be 1.0 per unit (p.u.)
+    \item Line resistances are negligible compared to reactances ($R \ll X$)
+    \item Voltage angle differences between connected buses are small
+    \item Reactive power flows are ignored
 \end{itemize}
 
 \subsubsection{Mathematical Formulation}
 The DCOPF problem is formulated as a linear programming optimization:
 
 \begin{equation}
-    \min_{P_g, \theta} \sum_{i \in G} c_i P_{g,i}
+    \min_{\mathbf{P_g}, \boldsymbol{\theta}} \sum_{i \in \mathcal{G}} c_i(P_{g,i}) \label{eq:obj}
 \end{equation}
 
 Subject to the following constraints:
 
 \textbf{Power Balance Constraints:}
 \begin{equation}
-    \sum_{i \in G} P_{g,i} - \sum_{i \in D} P_{d,i} = \sum_{(i,j) \in L} P_{ij} \quad \forall i \in N
-\end{equation}
-
-\textbf{Line Flow Constraints:}
-\begin{equation}
-    P_{ij} = \frac{\theta_i - \theta_j}{x_{ij}} \quad \forall (i,j) \in L
+    P_{g,i} - P_{d,i} = \sum_{j \in \mathcal{N}_i} B_{ij}(\theta_i - \theta_j) \quad \forall i \in \mathcal{N} \label{eq:power_balance}
 \end{equation}
 
 \textbf{Generation Limits:}
 \begin{equation}
-    P_{g,i}^{min} \leq P_{g,i} \leq P_{g,i}^{max} \quad \forall i \in G
+    P_{g,i}^{\min} \leq P_{g,i} \leq P_{g,i}^{\max} \quad \forall i \in \mathcal{G} \label{eq:gen_limits}
 \end{equation}
 
 \textbf{Line Capacity Limits:}
 \begin{equation}
-    -P_{ij}^{max} \leq P_{ij} \leq P_{ij}^{max} \quad \forall (i,j) \in L
+    -P_{ij}^{\max} \leq B_{ij}(\theta_i - \theta_j) \leq P_{ij}^{\max} \quad \forall (i,j) \in \mathcal{L} \label{eq:flow_limits}
 \end{equation}
 
 Where:

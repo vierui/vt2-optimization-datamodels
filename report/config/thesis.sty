@@ -1,0 +1,57 @@
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{config/thesis}[2024/03/21 Custom thesis package]
+
+% Required packages
+\RequirePackage{hyperref}
+\RequirePackage{etoolbox}
+
+% Abstract styling
+\renewenvironment{abstract}{
+    \thispagestyle{empty}
+    \null\vfil
+    \begin{center}
+        \setlength{\parskip}{0pt}
+        \begin{large}
+            \bfseries Abstract
+        \end{large}
+    \end{center}
+    \bigskip
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{0.8em}
+}{
+    \vfil\null
+}
+
+% Define thesis variables
+\def\thesistitle#1{\def\ttitle{#1}}
+\def\thesiscontext#1{\def\tcontext{#1}}
+\def\thesistype#1{\def\ttype{#1}}
+\def\thesisdate#1{\def\tdate{#1}}
+\def\thesissemester#1{\def\tsemester{#1}}
+\def\keywords#1{\def\keywordnames{#1}}
+
+% Author information
+\def\author#1{\def\authorname{#1}}
+\def\authorinstitute#1{\def\authorinstitute{#1}}
+\def\degree#1{\def\degreename{#1}}
+\def\studyprogram#1{\def\studyprog{#1}}
+\def\studyprogramlink#1{\def\studyproglink{#1}}
+
+% Supervisor information
+\def\supervisorA#1{\def\supnameA{#1}}
+\def\supervisorAmail#1{\def\supmailA{#1}}
+\def\supervisorAweb#1{\def\supwebA{#1}}
+\def\supervisorAinstitute#1{\def\supinstituteA{#1}}
+\def\supervisorAinfo#1{\def\supinfoA{#1}}
+
+% University information
+\def\univname{ZHAW School of Engineering}
+\def\univlink{https://www.zhaw.ch/en/engineering/}
+
+% Initialize empty supervisor B info
+\def\supnameB{}
+\def\supinfoB{}
+
+% General document styling
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.8em} 
