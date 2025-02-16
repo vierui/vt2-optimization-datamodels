@@ -1,5 +1,6 @@
 \newpage
 \section{Theoretical Background}
+\label{sec:theoretical_background}
 
 \subsection{Linear Programming in Energy Systems}
 
@@ -13,9 +14,9 @@ Linear Programming (LP).
     \caption{LP optimization flowchart showing key steps from problem formulation to optimal solution.} \label{fig:lp_flowchart}
 \end{figure}
 
-Linear Programming enables modeling of key power system relationships - such as power balance(matching
-generation to demand), transmission limits, and generation constraints - as linear equations and inequalities. 
-The basic structure of our optimization problem is:
+Linear Programming enables modeling of key power system relationships - such as power balance 
+(matching generation to demand), transmission limits, and generation constraints - as linear 
+equations and inequalities. The basic structure of our optimization problem is:
 
 \begin{itemize}
     \item \textbf{Objective}: Minimize total generation cost
@@ -158,18 +159,3 @@ Where:
     \item $P_{c,s,t}, P_{d,s,t}$: Charging and discharging power
     \item $\eta_c, \eta_d$: Charging and discharging efficiencies
 \end{itemize}
-
-\subsubsection{Implementation Considerations}
-The model is implemented in Python using PuLP~\cite{mitchell2011pulp}, an open-source optimization framework, 
-with the COIN-OR Branch and Cut (CBC) solver~\cite{forrest2018cbc}. As a first programming project, the 
-focus was on developing a functional and flexible platform rather than computational optimization. This 
-approach prioritized code clarity and feature implementation over algorithmic efficiency.
-
-Howevere, our implementation processes hourly data for generator availability and demand profiles. For a full
- year analysis, this represents over 8,700 objective functions, each generating multiple constraints per time
-  period. Real power systems often require even finer temporal resolution (15-minute intervals), more 
-  elaborate constraints. This is a simplified model but grasps the core principles of the problem.
-
-To manage computational complexity, we use representative weeks selection for seasonal patterns. Involves 
-some uncertainty, but allows meaningful analysis while improving computing time by a factor 20-30x. Future 
-work could focus on algorithmic improvements and computational optimization.

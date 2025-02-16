@@ -1,67 +1,54 @@
 # Scenario Analysis Report: scenario_2
-Generated on: 2025-01-29 17:38:30
+Generated on: 2025-02-15 11:32:16
 
 ## Overview
 ![Annual Summary](figure/annual_summary.png)
 
-## Seasonal Generation Patterns
-![Seasonal Comparison](figure/seasonal_comparison.png)
+<div style="display: flex; justify-content: space-between;">
+<div style="width: 48%;">
 
 ## Financial Analysis
 | Metric | Value |
 |--------|--------|
-| Initial Investment | €22,290,920.00 |
-| Annual Operating Cost | €3,195,590.21 |
-| NPV (10 years) | €-57,221,039.12 |
-| NPV (20 years) | €-74,113,745.25 |
-| NPV (30 years) | €-82,836,250.90 |
+| Initial Investment | CHF nan |
+| Annual Operating Cost | CHF 1,300,109 |
+| NPV (10 years) | CHF nan |
+| NPV (20 years) | CHF nan |
+| NPV (30 years) | CHF nan |
+
+</div>
+<div style="width: 48%;">
 
 ## Generation Analysis
 
 ### Annual Generation by Asset Type
 | Asset Type | Generation (MWh) |
 |------------|-----------------|
-| nuclear | 639,118.04 |
-| solar | 128,315.64 |
-| battery1 | -8.58 |
-| wind | nan |
-| gas | nan |
-| battery2 | nan |
+| nuclear | 260'018 |
+| solar | 123'023 |
+| battery1 | -164 |
+
+</div>
+</div>
 
 ### Generation Costs
-| Asset Type | Cost (€) |
-|------------|----------|
-| cost_nuclear | 3,195,590.21 |
-| cost_solar | 0.00 |
-| cost_battery1 | 0.00 |
-| cost_wind | nan |
-| cost_gas | nan |
-| cost_battery2 | nan |
+| Asset Type | Cost (CHF) |
+|------------|------------|
+| cost_nuclear | 1'300'092 |
 
-### Capacity Factors
-| Asset Type | Capacity Factor |
-|------------|----------------|
-| nuclear | 9.14% |
-| solar | 0.00% |
-| battery1 | -0.00% |
-| wind | nan% |
-| gas | nan% |
-| battery2 | nan% |
+## Storage State of Charge
+![Storage SOC Comparison](figure/storage_soc_comparison.png)
 
 ## AI Critical Analysis
-# Scenario Analysis Results: scenario_2_nominal
+### Critical Analysis of Scenario 2 - Nominal
 
-## Critical Analysis
+**Economic Efficiency of the Generation Mix**  
+The total annual cost of $1,300,108.80 primarily stems from nuclear generation, which, despite its substantial output of 260,018.49 MW, incurs significant operational expenses. The absence of costs associated with both solar and battery storage systems suggests either a subsidy mechanism or underutilization. Given a low capacity factor for nuclear at only 3.72%, the scenario indicates that the high costs may not translate into effective economic efficiency.
 
-### Economic Efficiency of the Generation Mix
-The annual operational cost of approximately $3,195,590 suggests that this scenario heavily relies on nuclear energy, which constitutes the only economically viable energy source with a generation cost matching its operational expense. However, the absence of solar, wind, gas, and battery contributions severely limits overall efficiency and cost viability.
+**System Composition Strengths/Weaknesses**  
+The strategy heavily leans on nuclear energy as the main asset, demonstrating strength in high generation quantity but weakness in reliability and economic adaptability, particularly highlighted by nuclear's low capacity factor. The solar and battery investments appear underdeveloped and contribute minimally to generation, reflecting an unbalanced energy mix. The data for wind generation is absent, indicating a missed opportunity for diversification.
 
-### System Composition Strengths/Weaknesses
-The dependence on nuclear energy presents a strength in terms of consistent base load generation; however, its low capacity factor (9.14%) indicates under-utilization, potentially due to operational constraints or maintenance schedules. The lack of contributions from renewables (solar and wind) raises concerns about sustainability, environmental impact, and vulnerability to price volatility in fossil fuels.
-
-### Key Recommendations for Improvement
-1. **Diversification of Energy Sources**: Incorporate a mix of renewable technologies like solar and wind. This would enhance sustainability, reduce greenhouse gas emissions, and improve resilience against fuel price fluctuations.
-2. **Assess Battery and Storage Solutions**: Reevaluating the role of battery systems could provide grid stability and better energy management, especially during periods of peak demand.
-3. **Performance Optimization**: Conduct a thorough analysis of nuclear operations to identify improvement opportunities, enhancing its capacity factor and overall contribution to the energy mix.
+**Key Recommendations for Improvement**  
+To enhance economic efficiency, it is crucial to incorporate higher capacity factors through optimized energy generation from solar and wind. Investments in energy storage solutions like batteries should be improved to balance the intermittency of solar and wind energy. A re-evaluation of the generation strategy to include a broader mix can foster resilience and cost-effectiveness in the energy system.
 
 ---

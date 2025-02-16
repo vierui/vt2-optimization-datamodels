@@ -1,66 +1,54 @@
 # Scenario Analysis Report: scenario_6
-Generated on: 2025-01-29 17:37:55
+Generated on: 2025-02-15 10:51:18
 
 ## Overview
 ![Annual Summary](figure/annual_summary.png)
 
-## Seasonal Generation Patterns
-![Seasonal Comparison](figure/seasonal_comparison.png)
+<div style="display: flex; justify-content: space-between;">
+<div style="width: 48%;">
 
 ## Financial Analysis
 | Metric | Value |
 |--------|--------|
-| Initial Investment | €22,290,920.00 |
-| Annual Operating Cost | €2,769,124.39 |
-| NPV (10 years) | €-54,359,418.79 |
-| NPV (20 years) | €-69,926,641.03 |
-| NPV (30 years) | €-78,035,191.16 |
+| Initial Investment | CHF 36,672,740 |
+| Annual Operating Cost | CHF 1,048,043 |
+| NPV (10 years) | CHF -69,802,363 |
+| NPV (20 years) | CHF -89,519,520 |
+| NPV (30 years) | CHF -97,741,241 |
+
+</div>
+<div style="width: 48%;">
 
 ## Generation Analysis
 
 ### Annual Generation by Asset Type
 | Asset Type | Generation (MWh) |
 |------------|-----------------|
-| nuclear | 553,824.88 |
-| solar | 128,315.64 |
-| battery1 | -24.19 |
-| wind | 85,308.77 |
-| gas | nan |
-| battery2 | nan |
+| nuclear | 209'609 |
+| solar | 106'529 |
+| wind | 66'576 |
+
+</div>
+</div>
 
 ### Generation Costs
-| Asset Type | Cost (€) |
-|------------|----------|
-| cost_nuclear | 2,769,124.39 |
-| cost_solar | 0.00 |
-| cost_battery1 | 0.00 |
-| cost_wind | 0.00 |
-| cost_gas | nan |
-| cost_battery2 | nan |
+| Asset Type | Cost (CHF) |
+|------------|------------|
+| cost_nuclear | 1'048'043 |
 
-### Capacity Factors
-| Asset Type | Capacity Factor |
-|------------|----------------|
-| nuclear | 7.92% |
-| solar | 0.00% |
-| battery1 | -0.01% |
-| wind | 124.15% |
-| gas | nan% |
-| battery2 | nan% |
+## Storage State of Charge
+![Storage SOC Comparison](figure/storage_soc_comparison.png)
 
 ## AI Critical Analysis
-# Critical Analysis of Scenario 6 Nominal
+## Critical Analysis of Scenario 6: Nominal
 
-**1. Economic Efficiency of the Generation Mix:**  
-The annual operational cost of approximately $2.77 million suggests a potentially high cost given the low energy outputs, particularly from solar and wind assets, which report zero generation costs despite significant operational input. The nuclear asset, while efficiently providing substantial generation (553,824.88 MW), carries the entire operational cost burden, indicating possible economic inefficiency in this narrow reliance on one technology.
+### Economic Efficiency of the Generation Mix
+The annual operational cost of $1,048,043.32 suggests significant expenditure relative to the total generation capacity. Notably, nuclear generation exhibits a low capacity factor (approximately 3%), indicating that the asset is underperforming. In contrast, wind generation shows a high capacity factor of about 97%, reflecting its effectiveness in resource utilization. The cost efficiency is significantly impacted as solar and wind generation costs are reported as zero, potentially indicating either a lack of data or economic incentives not properly captured.
 
-**2. System Composition Strengths/Weaknesses:**  
-Strengths lie in the nuclear generation's stable output and capacity factor (7.92%), essential for baseline load. However, weaknesses are notable—zero performance from solar, wind efficiency exceeding 100% capacity factor, and absence of data for gas and battery systems, which constrains flexibility and resilience during peak demands or outages.
+### System Composition Strengths/Weaknesses
+Strengths of this scenario include the dominance of wind power, which effectively harnesses energy, contributing substantially to generation at a low operational cost. However, the significant reliance on a single source raises concerns about stability. Conversely, the reports of "nan" values for gas and battery storage indicate missing or unutilized capacity, highlighting a substantial weakness in diversification and reliability of the energy mix.
 
-**3. Key Recommendations for Improvement:**  
-1. Diversify the renewable energy portfolio to include operational solar and gas generation. 
-2. Provide analytical clarity on battery technologies to enhance peaking support and storage capabilities. 
-3. Investigate potential upgrades in wind generation efficiency, preventing over-forecasting of capacity. 
-4. Establish cost structures for gas and battery systems to allow better economic assessments and risk management. Adopting these measures will create a more balanced and resilient energy mix.
+### Key Recommendations for Improvement
+To enhance economic efficiency and system resilience, it is essential to reassess the nuclear asset to improve its operational performance and explore the incorporation of gas and batteries to enhance flexibility and backup power. Additionally, further analysis and data collection are required for solar, gas, and battery systems to accurately reflect costs and optimize generation strategies.
 
 ---

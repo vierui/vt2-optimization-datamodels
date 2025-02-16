@@ -27,10 +27,15 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
         # Get generation for this time point
         gen_at_t = results['generation'][results['generation']['time'] == time]
         
+        # Debug print
+        print(f"\nTime {time}:")
+        print("Generation data:", gen_at_t[['id', 'gen']].to_string())
+        
         # Aggregate generation by type
         for _, gen_row in gen_at_t.iterrows():
             gen_type = id_to_type.get(gen_row['id'])
             if gen_type:
+                # For storage types, gen is already net output (discharge - charge)
                 total_gen_per_asset[gen_type] = total_gen_per_asset.get(gen_type, 0) + gen_row['gen']
                 
                 # Calculate generation cost
@@ -38,6 +43,11 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
                     cost = gen_row['gen'] * id_to_gencost[gen_row['id']]
                     total_gen_cost_per_asset[gen_type] = total_gen_cost_per_asset.get(gen_type, 0) + cost
     
+    # # Debug print
+    # print("\nTotal generation per asset type:")
+    # for asset_type, total_gen in total_gen_per_asset.items():
+    #     print(f"{asset_type}: {total_gen}")
+
     # Calculate remaining capacity
     for gen_type in set(id_to_type.values()):
         gen_ids = [id for id, typ in id_to_type.items() if typ == gen_type]
@@ -77,7 +87,7 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     plt.title(f'Generation and Remaining Capacity - {season_key.capitalize()}')
     plt.xticks(x, all_types, rotation=45)
     plt.legend()
-    plt.grid(True, alpha=0.3)
+    plt.grid(True, alpha=0.8)
     plt.tight_layout()
     
     # Save plot
@@ -87,4 +97,4 @@ def plot_scenario_results(results, demand_time_series, branch, bus, scenario_fol
     return (total_gen_per_asset, 
             total_gen_cost_per_asset,
             remaining_capacity_series,
-            {})  # Empty dict since we don't need gen_by_type anymore 
+            {})  # Empty - no need of gen_by_type 

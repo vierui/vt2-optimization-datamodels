@@ -11,21 +11,28 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{amsthm}
+\usepackage{multicol}
 \usepackage{enumitem}
 \usepackage{subcaption}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{positioning}
+\usepackage[export]{adjustbox}
 \usepackage[margin=2.5cm]{geometry}
 \graphicspath{{images/}}
+\usepackage{multirow}
 
 % Load custom thesis style from config directory
 \usepackage{config/thesis}
 
 % Thesis information
-\thesistype{Specialisation Project (VT1 )}
+\thesistype{Specialisation Project (VT1)}
 \thesistitle{Platform for Investment Analysis}
-\thesiscontext{Linear Programming Optimization Model for Energy Asset Management in Python}
+\thesiscontext{Linear Programming Optimization Model for Integrated Energy Systems in Python}
 \thesisdate{\today}
 \thesissemester{HS2024}
-\keywords{linear programming, quantitative modeling, python, strategic planning, risk assessment, portfolio optimization, asset valuation, power-flow, platform}
+\keywords{linear programming, quantitative modeling, python, strategic planning, optimization, asset valuation, power-flow, platform}
 
 % Author information
 \author{Rui Vieira}
@@ -54,6 +61,7 @@
 \input{front/abstract}
 
 % Table of contents
+\setcounter{tocdepth}{2}
 \tableofcontents
 \newpage
 

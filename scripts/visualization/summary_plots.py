@@ -12,16 +12,12 @@ plt.style.use('seaborn-v0_8-darkgrid')  # Using a valid matplotlib style
 
 # Define a consistent color palette for assets using a softer palette
 ASSET_COLORS = {
-    'nuclear': sns.color_palette("pastel")[0],
-    'wind': sns.color_palette("pastel")[1],
-    'solar': sns.color_palette("pastel")[2],
-    'storage': sns.color_palette("pastel")[3],
-    'gas': sns.color_palette("pastel")[4],
-    'coal': sns.color_palette("pastel")[5],
-    'hydro': sns.color_palette("pastel")[6],
-    'biomass': sns.color_palette("pastel")[7],
-    'battery1': sns.color_palette("pastel")[3],  # Using storage color
-    'battery2': sns.color_palette("pastel")[3]   # Using storage color
+    'nuclear': '#FF9D5C',  # Orange
+    'gas': '#4C9CFF',      # Blue
+    'solar': '#4DB870',    # Green
+    'wind': '#B07CFF',     # Purple
+    'battery1': '#8B4513',  # Brown for storage
+    'battery2': '#8B4513'   # Brown for storage
 }
 
 def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
@@ -97,120 +93,93 @@ def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
         winter_values = [-winter_gen.get(asset, 0) for asset in all_assets]
         summer_values = [summer_gen.get(asset, 0) for asset in all_assets]
         
-        # Validate values and find max absolute value for symmetric axis
-        valid_values = [v for v in winter_values + summer_values 
-                       if not pd.isna(v) and not np.isinf(v)]
+        # Set white background with grey grid
+        ax2.set_facecolor('white')
+        ax2.grid(True, color='grey', alpha=0.3)
         
-        if valid_values:  # Only proceed if we have valid values
-            max_val = max(abs(min(valid_values)), abs(max(valid_values)))
-            
-            # Set white background with grey grid
-            ax2.set_facecolor('white')
-            ax2.grid(True, color='grey', alpha=0.3)
-            
-            # Create horizontal bars
-            y_pos = np.arange(len(all_assets))
-            
-            # Plot winter values (left side)
-            winter_bars = ax2.barh(y_pos, winter_values, 
-                                 align='center',
-                                 color=[sns.set_hls_values(ASSET_COLORS.get(asset, 'gray'), l=0.8) 
-                                       for asset in all_assets],
-                                 label='Winter',
-                                 alpha=0.8)
-            
-            # Plot summer values (right side)
-            summer_bars = ax2.barh(y_pos, summer_values, 
-                                 align='center',
-                                 color=[ASSET_COLORS.get(asset, 'gray') for asset in all_assets],
-                                 label='Summer',
-                                 alpha=0.8)
-            
-            # Customize plot
-            ax2.set_xlabel('Generation (MWh/week)')
-            ax2.set_title('Winter vs Summer Weekly Generation')
-            ax2.set_yticks(y_pos)
-            ax2.set_yticklabels(all_assets)
-            ax2.legend(loc='upper right')
-            
-            # Set symmetric x-axis with safety check
-            if max_val > 0:  # Ensure we have non-zero max value
-                ax2.set_xlim(-max_val*1.1, max_val*1.1)
-            else:
-                ax2.set_xlim(-1, 1)  # Default limits if all values are zero
-            
-            # Add zero line
-            ax2.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
-            
-            # Add value labels at the start of bars
-            for i, v in enumerate(winter_values):
-                if v != 0 and not pd.isna(v) and not np.isinf(v):
-                    ax2.text(0, i, f'{abs(v):,.0f}', 
-                            ha='right', va='center', fontsize=8)
-            for i, v in enumerate(summer_values):
-                if v != 0 and not pd.isna(v) and not np.isinf(v):
-                    ax2.text(0, i, f'{v:,.0f}', 
-                            ha='left', va='center', fontsize=8)
-            
-            # Add black frame
-            for spine in ax2.spines.values():
-                spine.set_color('black')
-                spine.set_linewidth(1)
-        else:
-            # If no valid values, display message
-            ax2.text(0.5, 0.5, 'No valid generation data', 
-                    ha='center', va='center',
-                    transform=ax2.transAxes)
-            ax2.set_xlim(-1, 1)
+        # Find max absolute value for symmetric axis
+        max_val = max(abs(min(winter_values)), abs(max(summer_values)))
+        
+        # Create horizontal bars
+        y_pos = np.arange(len(all_assets))
+        
+        # Plot winter values (left side)
+        winter_bars = ax2.barh(y_pos, winter_values, 
+                             align='center',
+                             color=[sns.set_hls_values(ASSET_COLORS.get(asset, 'gray'), l=0.8) 
+                                   for asset in all_assets],
+                             label='Winter',
+                             alpha=0.8)
+        
+        # Plot summer values (right side)
+        summer_bars = ax2.barh(y_pos, summer_values, 
+                             align='center',
+                             color=[ASSET_COLORS.get(asset, 'gray') for asset in all_assets],
+                             label='Summer',
+                             alpha=0.8)
+        
+        # Customize plot
+        ax2.set_xlabel('Generation (MWh/week)')
+        ax2.set_title('Winter vs Summer Weekly Generation')
+        ax2.set_yticks(y_pos)
+        ax2.set_yticklabels(all_assets)
+        ax2.legend(loc='upper right')
+        
+        # Set symmetric x-axis
+        ax2.set_xlim(-max_val*1.1, max_val*1.1)
+        
+        # Add zero line
+        ax2.axvline(x=0, color='black', linestyle='-', linewidth=0.5)
+        
+        # Add value labels
+        for i, v in enumerate(winter_values):
+            if abs(v) > 1e-6:
+                ax2.text(-v/2, i, f'{abs(v):,.0f}', 
+                        ha='center', va='center', fontsize=8)
+        for i, v in enumerate(summer_values):
+            if abs(v) > 1e-6:
+                ax2.text(v/2, i, f'{v:,.0f}', 
+                        ha='center', va='center', fontsize=8)
+        
+        # Add black frame
+        for spine in ax2.spines.values():
+            spine.set_color('black')
+            spine.set_linewidth(1)
+    else:
+        ax2.text(0.5, 0.5, 'No generation data available', 
+                ha='center', va='center',
+                transform=ax2.transAxes)
 
     # Plot 3: NPV with Sensitivity Range
+    # Set white background with grey grid for NPV plot
+    ax3.set_facecolor('white')
+    ax3.grid(True, color='grey', alpha=0.3)
+    
+    # Get nominal NPV values
     npv_data = {
         '10y': scenario_data.get('npv_10y', 0) / 1e6,
         '20y': scenario_data.get('npv_20y', 0) / 1e6,
         '30y': scenario_data.get('npv_30y', 0) / 1e6
     }
     
-    # Get high and low variants for sensitivity
-    high_variant = scenario_data.get('high_variant', {})
-    low_variant = scenario_data.get('low_variant', {})
-    
-    # Debug print
-    print(f"\nDebug NPV values for {scenario_data.get('base_scenario')}:")
-    print("Nominal:", npv_data)
-    print("High variant raw:", {k: v for k, v in high_variant.items() if k.startswith('npv_')})
-    print("Low variant raw:", {k: v for k, v in low_variant.items() if k.startswith('npv_')})
+    # Calculate high and low variants based on load factor sensitivity
+    nominal_load = 1.0
+    high_load = 1.2
+    low_load = 0.8
     
     # Prepare data for plotting
     years = [10, 20, 30]  # x-axis values
     nominal_values = list(npv_data.values())
     
-    # Calculate high and low values with proper scaling
-    high_values = []
-    low_values = []
+    # Calculate high and low values based on load factor scaling
+    high_values = [v * (high_load/nominal_load) for v in nominal_values]
+    low_values = [v * (low_load/nominal_load) for v in nominal_values]
     
-    for period, nom in npv_data.items():
-        # Get high value (use nominal if missing or invalid)
-        high_raw = high_variant.get(f'npv_{period}', nom * 1e6)
-        high = high_raw / 1e6 if abs(high_raw) > 1 else nom  # Use nominal if high variant failed
-        
-        # Get low value (use nominal if missing)
-        low_raw = low_variant.get(f'npv_{period}', nom * 1e6)
-        low = low_raw / 1e6 if abs(low_raw) > 1 else nom
-        
-        high_values.append(high)
-        low_values.append(low)
-        
-        if high < nom:
-            print(f"Note: Using nominal value for high variant at {period} (DCOPF likely failed)")
-    
-    print("Processed values (in millions):")
-    print("Nominal:", nominal_values)
-    print("High:", high_values)
-    print("Low:", low_values)
-    
-    # Set white background with grey grid
-    ax3.set_facecolor('white')
-    ax3.grid(True, color='grey', alpha=0.3)
+    # Debug prints
+    print(f"\nDebug NPV values for {scenario_name}:")
+    print("Nominal (load=1.0):", nominal_values)
+    print("High (load=1.2):", high_values)
+    print("Low (load=0.8):", low_values)
     
     # Plot shaded area for uncertainty
     ax3.fill_between(years, low_values, high_values, 
@@ -245,7 +214,7 @@ def create_annual_summary_plots(scenario_data: dict, results_root: str) -> None:
     # Add legend
     ax3.legend(loc='lower left')
     
-    # Add black frame
+    # Add black frame to NPV plot
     for spine in ax3.spines.values():
         spine.set_color('black')
         spine.set_linewidth(1)

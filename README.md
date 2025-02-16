@@ -36,8 +36,6 @@ This modular approach allows us to evaluate various investment strategies while 
 - [scenario_8](data/results/scenario_8/scenario_8_analysis.md)
 - [scenario_9](data/results/scenario_9/scenario_9_analysis.md)
 - [scenario_10](data/results/scenario_10/scenario_10_analysis.md)
-- [scenario_11](data/results/scenario_11/scenario_11_analysis.md)
-- [scenario_12](data/results/scenario_12/scenario_12_analysis.md)
 ${scenario_links}
 
 ## Project Structure
@@ -74,7 +72,7 @@ OPENAPI_KEY=your_api_key_here
 
 3. Run the main analysis:
 ```bash
-python scripts/multi_scenario.py
+python scripts/main.py
 ```
 
 ## Visualization Examples

@@ -113,7 +113,7 @@ OPENAPI_KEY=your_api_key_here
 
 3. Run the main analysis:
 ```bash
-python scripts/multi_scenario.py
+python scripts/main.py
 ```
 
 ## Visualization Examples

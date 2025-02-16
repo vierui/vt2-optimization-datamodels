@@ -1,51 +1,44 @@
 # Global Scenarios Comparison Report
-Generated on: 2025-01-29 17:38
+Generated on: 2025-02-15 12:05
 
 ## Investment Analysis
 
 ```
-Scenario                      Initial Inv.        Annual Cost         10y NPV             20y NPV             30y NPV             Annuity             
---------------------------------------------------------------------------------------------------------------------------------------------
-scenario_10_nominal           $22,290,920         $2,764,812          $-54,330,481        $-69,884,300        $-77,986,642        $6,927,353          
-scenario_5_nominal            $22,290,920         $2,764,832          $-54,330,618        $-69,884,500        $-77,986,871        $6,927,374          
-scenario_7_nominal            $22,290,920         $2,765,878          $-54,337,634        $-69,894,766        $-77,998,642        $6,928,419          
-scenario_9_nominal            $22,290,920         $2,765,878          $-54,337,634        $-69,894,766        $-77,998,642        $6,928,419          
-scenario_6_nominal            $22,290,920         $2,769,124          $-54,359,419        $-69,926,641        $-78,035,191        $6,931,666          
-scenario_3_nominal            $22,290,920         $2,769,149          $-54,359,584        $-69,926,883        $-78,035,468        $6,931,690          
-scenario_11_nominal           $22,290,920         $2,774,809          $-54,397,566        $-69,982,458        $-78,099,192        $6,937,351          
-scenario_1_nominal            $22,290,920         $3,195,547          $-57,220,751        $-74,113,324        $-82,835,768        $7,358,089          
-scenario_8_nominal            $22,290,920         $3,195,548          $-57,220,756        $-74,113,330        $-82,835,775        $7,358,089          
-scenario_2_nominal            $22,290,920         $3,195,590          $-57,221,039        $-74,113,745        $-82,836,251        $7,358,132          
-scenario_4_nominal            $22,290,920         $3,406,251          $-58,634,589        $-76,182,042        $-85,207,822        $7,568,792          
-scenario_12_nominal           $22,290,920         $3,406,823          $-58,638,429        $-76,187,661        $-85,214,265        $7,569,364          
+Scenario       Initial Inv.        Annual Cost         10y NPV             20y NPV             30y NPV             Annuity             
+-----------------------------------------------------------------------------------------------------------------------------
+7              CHF 2'750'000       CHF 942'766         CHF -9'918'474      CHF -13'556'583     CHF -15'233'659     CHF 1'353'167       
+3              CHF 2'550'000       CHF 980'376         CHF -9'821'150      CHF -13'571'752     CHF -15'258'653     CHF 1'355'387       
+6              CHF 2'300'000       CHF 1'048'043       CHF -9'829'002      CHF -13'616'754     CHF -15'353'770     CHF 1'363'836       
+5              CHF 3'000'000       CHF 905'287         CHF -10'113'189     CHF -13'807'976     CHF -15'478'398     CHF 1'374'906       
+9              CHF 3'200'000       CHF 1'048'043       CHF -10'849'783     CHF -14'693'481     CHF -16'578'091     CHF 1'472'589       
+1              CHF 900'000         CHF 1'380'923       CHF -10'286'888     CHF -14'634'833     CHF -16'770'455     CHF 1'489'676       
+10             CHF 4'100'000       CHF 887'122         CHF -11'361'773     CHF -15'060'448     CHF -16'896'633     CHF 1'500'885       
+2              CHF 1'400'000       CHF 1'300'109       CHF -10'637'014     CHF -15'080'109     CHF -17'193'991     CHF 1'527'298       
+8              CHF 1'800'000       CHF 1'275'673       CHF -11'172'440     CHF -15'548'394     CHF -17'715'738     CHF 1'573'644       
+4              CHF 2'100'000       CHF 1'482'721       CHF -12'967'033     CHF -18'400'575     CHF -20'754'695     CHF 1'843'586       
 ```
 
 ## Annual Cost Comparison
 
-![Annual Cost Comparison](/data/results/annual_cost_comparison.png)
+![Annual Cost Comparison](annual_cost_comparison.png)
 
-## AI Comparative Analysis of Energy Scenarios
-
-Below is an analysis of the key trends and patterns observed across all scenarios:
-
-# Comparative Analysis of Energy Mix Scenarios
+# Comparative Analysis of Energy Scenarios
 
 ## Overall Trends in Cost Effectiveness
-Based on the provided economic data, scenarios utilizing a larger proportion of renewables (wind and solar) exhibit higher annual costs and negative Net Present Values (NPV) over 30 years. Scenarios 10, 5, and 7, despite a mix of generation sources, reflect lower annual operational costs compared to scenarios like 1 and 2, which rely heavily on solar. Notably, the costs escalate when incorporating storage solutions, as seen in scenarios 2, 4, 8, and 12, which include multiple battery units.
+The analysis of operational costs and NPV over a 30-year horizon reveals significant disparities among the scenarios. Scenarios with a higher initial investment, such as scenario_10 (4.1M) and scenario_9 (3.2M), display notably lower NPVs (-16.9M and -16.6M, respectively), indicating less cost-effectiveness over time. Conversely, scenario_1, with the lowest initial investment (0.9M) but higher annual costs (1.38M), shows a relatively better NPV (-16.77M).
 
 ## Trade-offs Between Different Generation Mixes
-A crucial observation is that scenarios incorporating nuclear alongside wind and gas (scenarios 6, 9, and 10) maintain a balance between reliability and cost-effectiveness. While renewable mixes provide environmental benefits, they also incur higher operational costs due to intermittency and reliance on battery storage. Scenarios with diverse generation assets (like Scenario 4) suffer increased costs, reflecting the trade-offs between diversity and economic efficiency.
+The mix of generation technologies appears to influence both operational costs and NPVs. Scenarios that incorporate more renewable sources, such as wind and solar (e.g., scenarios_3, _5, and _4), tend to have higher annual costs due to operational and maintenance complexity, leading to worse NPVs. In contrast, scenarios focusing predominantly on nuclear (scenarios_1 and _2) yield lower annual operational costs while maintaining stable outputs, underscoring nuclear's role in providing a reliable energy source.
+
+Scenarios with battery storage (2, 4, 10) experience diverse impacts on annual costs, highlighting the nuanced role of storage technology in enhancing flexibility but also introducing additional costs. Nonetheless, the cumulative effect of investment and maintenance still hinders their NPV outcomes.
 
 ## Key Success Factors in Better Performing Scenarios
-Successful scenarios (10, 5, and 7) leverage nuclear and a mix of wind and solar generation, which ensures higher capacity factors and less reliance on storage systems. The absence of battery storage in scenarios 1 and 11 suggests that reducing storage dependencies could also enhance cost efficiency. Factors like lower initial operational complexity and increased reliability through nuclear energy appear pivotal for minimizing costs and maximizing NPVs.
+Scenarios such as scenario_7 and scenario_3, which leverage nuclear power heavily while also incorporating renewable resources, demonstrate a balance of lower initial costs and manageable annual expenses, resulting in comparatively better NPVs. The optimal combination of reliable baseload generation (nuclear) and variable resources (solar and wind) alongside efficient storage solutions is essential for improving economic feasibility.
 
 ## Recommendations for Future Scenario Design
-1. **Optimize Generation Mix**: Incorporate a balanced approach between renewable sources and dependable nuclear power to mitigate cost impacts and ensure consistent power supply.
-  
-2. **Evaluate Storage Necessity**: Prioritize scenarios that minimize reliance on battery storage to keep annual costs in check while exploring alternative methods of energy storage that could be more cost-effective.
-  
-3. **Include Technological Innovations**: Exploring new technologies in renewable energy generation and storage could yield long-term benefits, potentially transforming cost dynamics.
+1. **Incorporation of Storage**: Future scenarios should evaluate various types of battery storage, optimizing their deployment to align with peak loads and variable renewable generation without overly inflating costs.
+2. **Focus on Cost Management**: A careful balance must be struck between renewables and conventional sources, emphasizing the importance of minimizing operational costs while ensuring generation stability.
+3. **Investment in Technology**: Continued investment in advanced nuclear technology and innovative renewable systems can enhance long-term cost-effectiveness.
+4. **Consider Economic Incentives**: Examining government policies and market structures could yield strategies for improving project profitability and reducing perceived risks in renewable-heavy scenarios.
 
-4. **Further Sensitivity Analysis**: Conducting extensive simulations on the impacts of fluctuations in energy prices, capacity factors, and operational efficiencies will provide deeper insights into varying scenarios’ real-world applications.
-
-By focusing on these considerations, future energy scenario designs can enhance both economic efficiency and technical feasibility while building towards sustainable energy solutions.
+By emphasizing these considerations, future energy system designs can optimize economic efficiency while ensuring technical feasibility in diverse operational environments.

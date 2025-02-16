@@ -1,11 +1,25 @@
-%\section{Technical Documentation}
-%\subsection{Installation Guide}
-%\subsection{User Manual}
-%\subsection{API Reference}
+\appendix
 
 \section{Code Model}
+
 \subsection{Optimization Model}
+\lstinputlisting[
+    language=Python,
+    caption={DCOPF Implementation},
+    label={lst:dcopf},
+]{code/dcopf.py}
+
 \subsection{Solver}
-\subsection{Economic Calculations} 
-\subsection{AI Integration}
-\subsection{Report Generation}
+\lstinputlisting[
+    language=Python,
+    caption={Solver},
+    label={lst:main},
+]{code/main.py}
+
+\subsection{Economic Calculations}
+% Add your economic calculations code file here
+\lstinputlisting[language=Python]{code/create_master_invest.py}
+
+\subsection{AI Integration and Reporting}
+% Add your AI integration code file here
+\lstinputlisting[language=Python]{code/scenario_critic.py}

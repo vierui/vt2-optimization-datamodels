@@ -1,16 +1,90 @@
 \newpage
 \section{Discussion}
-% 7.1 Platform Capabilities
-    % Strengths and unique features
-    % Computational performance
-    % Flexibility and extensibility
-% 7.2 Limitations and Future Work
-    % Current limitations
-    % Potential improvements
-    % Future development opportunities
+\label{sec:discussion}
 
-\subsection{Platform Capabilities}
-Current functionality and limitations.
+%---------------------------------------------------------------------------------------
+\subsection{Limitations}
+\label{sec:limitations }
 
-\subsection{Future Improvements}
-Potential enhancements and extensions. 
+\paragraph{Multiple Load Profiles.}
+Although the load profiles used in the test case are static (their buses is pre-defined) by platform design it 
+is often the case in real life. However, we did not handle multiple loads at once, and the platform is not yet 
+designed to handle them. This is a limitation that should be addressed in future work. It suggests is yet designed 
+as a single demand per bus-time pair.
+
+\paragraph{Limited Benchmarking.}
+The main limitation of the platform is that it lacks comprehensive benchmarking against established 
+standards or similar systems. While the platform demonstrates functionality, there is no systematic comparison 
+(e.g. IEEE test cases). This makes it difficult to objectively assess the platform's effectiveness compared 
+to existing solutions.
+
+
+\subsection{Methodological Insights}
+\label{sec:methodological_insights}
+
+\paragraph{Technical-Economic Integration.}
+The platform's key methodological contribution lies in establishing a direct link between technical system design
+and economic valuation. By integrating technical dispatch optimization with comprehensive financial analysis, it
+enables stakeholders to evaluate both the operational feasibility and economic viability simultaneously during
+the design phase. This represents a significant advancement over traditional approaches that often treat technical
+and economic assessments as separate processes.
+
+\paragraph{Renewable Asset Valuation.}
+The optimization framework enables assessment of renewable energy assets by quantifying the costs of 
+conventional "dirty" generation within the entire system. This cost metric, when combined with investment 
+parameters, provides a clear basis for comparing different scenarios and determining the profitability of 
+renewable alternatives. Rather than evaluating green assets in isolation, this approach reveals their true 
+economic value by measuring their impact on overall system costs.
+
+\paragraph{Storage Optimization.}
+The platform's analysis of battery state-of-charge patterns reveals opportunities for optimizing 
+storage deployment timing and sizing. By examining partial-year installation scenarios, as shown in the 
+state-of-charge comparison figures, we can better determine not just the optimal storage capacity but also 
+when during the year new storage should be commissioned. This temporal dimension of storage deployment 
+represents an important area for future framework development.
+
+\paragraph{Maintenance Management.}
+The platform could be enhanced by incorporating a maintenance re-routing system that creates temporary 
+alternative paths during asset downtime. This would allow for seamless transitions during maintenance periods 
+by automatically redirecting power flows through equivalent backup systems. Such functionality would improve 
+system reliability and provide more realistic operational scenarios that account for planned and unplanned 
+maintenance events.
+
+
+%---------------------------------------------------------------------------------------
+\subsection{Future Directions}
+\label{sec:future_directions}
+
+\paragraph{Benchmarking and Validation.}
+A critical next step is establishing comprehensive benchmarking 
+against industry standards and IEEE test cases. This would validate the platform's performance and provide 
+objective comparisons with existing solutions, building confidence in its results and highlighting areas 
+for improvement.
+
+\paragraph{Real-Time Price Integration.}
+Incorporating real-time electricity pricing mechanisms would significantly enhance the platform's practical utility. This could enable:
+
+\begin{itemize}
+    \item Analysis of arbitrage opportunities between peak and off-peak periods
+    \item Evaluation of green energy resale potential, particularly for private owners 
+    \item More accurate modeling of revenue streams from grid services
+    \item Dynamic optimization of storage charging/discharging based on market conditions
+\end{itemize}
+
+\paragraph{Code Optimization.}
+While computational efficiency is not an immediate concern, for any serious 
+use of the platform the code reliability and maintainability should be improved. Same goes for the interactions 
+between the different components.
+
+\paragraph{Enhanced Prompt Engineering.}
+Further prompt engineering work could improve report readability, 
+aiming at facilitating stakeholder engagement. This would ensure key metrics and findings are presented in clear, 
+actionable formats aligned with industry standards.
+
+
+\subsection{Concluding Remarks}
+This platform successfully bridges technical dispatch simulations with investment analysis in energy systems. 
+The test cases validate the core functionality while demonstrating how sensitivity analyses, scenario comparisons, 
+and AI-enhanced reporting can generate actionable insights. Future development priorities should be chosen based 
+on specific use cases, whether utility-scale planning, microgrid optimization, or renewable integration. However,
+benchmarking against industry standards and IEEE test cases is a must.

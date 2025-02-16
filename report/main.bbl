@@ -6,10 +6,10 @@ G{\"o}ran Andersson.
 \newblock Lecture Notes 227-0526-00, ETH Z{\"u}rich, Z{\"u}rich, Switzerland, March 2004.
 \newblock Power Systems Laboratory, ETH Z{\"u}rich.
 
-\bibitem{PyPSA}
-T.~Brown, J.~H\"orsch, and D.~Schlachtberger.
-\newblock {PyPSA: Python for Power System Analysis}.
-\newblock {\em Journal of Open Research Software}, 6(4), 2018.
+\bibitem{predictive_modeling_notes}
+Mirko Birbaumer, Klaus Frick, Peter B{\"u}chel, and Simon van Hemert.
+\newblock Predictive modeling: Lecture notes, 2022.
+\newblock Unpublished lecture notes.
 
 \bibitem{forrest2018cbc}
 John Forrest and Robin Lougee-Heimer.
@@ -17,21 +17,30 @@ John Forrest and Robin Lougee-Heimer.
 \newblock {\em COIN-OR Foundation}, 2018.
 \newblock Open-source mixed integer programming solver.
 
+\bibitem{irena2023costs}
+{IRENA}.
+\newblock Renewable power generation costs in 2022.
+\newblock Technical report, International Renewable Energy Agency, Abu Dhabi, 2023.
+
+\bibitem{optimization_notes}
+Andreas Klinkert, Peter Fusek, and Stephan B{\"u}tikofer.
+\newblock Linear and integer linear optimization, 2024.
+\newblock Lecture notes for MSE Module FTP Optimiz C.
+
 \bibitem{matpower2024}
 {MATPOWER Development Team}.
 \newblock Matpower documentation, 2024.
 \newblock MATPOWER: A MATLAB Power System Simulation Package.
 
-\bibitem{mitchell2011pulp}
-Stuart Mitchell, Michael O'Sullivan, and Iain Dunning.
-\newblock Pulp: A linear programming toolkit for python.
-\newblock {\em Optimization Online}, 2011.
-\newblock Software package.
+\bibitem{openai_api_docs}
+{OpenAI}.
+\newblock Openai api quickstart, 2024.
+\newblock API documentation and getting started guide.
 
-\bibitem{dc_opf}
-B~Stott, J~Jardim, and O~Alsaç.
-\newblock Dc power flow in analysis of power networks.
-\newblock {\em IEEE Transactions on Power Systems}, 24(3):1290--1300, 2009.
+\bibitem{renewables_ninja}
+Stefan Pfenninger and Iain Staffell.
+\newblock Renewables.ninja, 2024.
+\newblock Web application for simulating renewable energy production.
 
 \bibitem{wood2013power}
 Allen~J Wood, Bruce~F Wollenberg, and Gerald~B Sheblé.
