@@ -33,13 +33,13 @@ def update_readme_with_scenarios():
     scenario_reports.sort(key=lambda x: int(x.split('_')[1]))
     
     # Create the new scenario links section
-    scenario_links = "\n### Individual Scenario Reports\n"
+    scenario_links = "\n### 📊 Detailed Scenario Analysis\n"
     for scenario in scenario_reports:
         scenario_links += f"- [{scenario}](data/results/{scenario}/{scenario}_analysis.md)\n"
     
     # Replace the existing scenario links section
     import re
-    pattern = r"### Individual Scenario Reports\n(?:- \[.*?\]\(.*?\)\n)*"
+    pattern = r"### 📊 Detailed Scenario Analysis\n(?:- \[.*?\]\(.*?\)\n)*"
     updated_content = re.sub(pattern, scenario_links, content)
     
     # Write the updated content
@@ -50,86 +50,133 @@ def update_readme_with_scenarios():
 
 def create_readme_template(readme_path):
     """Create a new README.md file with the template content"""
-    template_content = """# Energy Investment Analysis Platform
+    template_content = """# Energy Investment Analysis Platform 🔋💡
 
 ## Overview
-This project analyzes different energy system scenarios using DC Optimal Power Flow (DCOPF) to evaluate various combinations of generation sources including nuclear, solar, wind, and storage systems. The analysis considers technical feasibility, economic efficiency, and system reliability across different seasonal patterns.
+This project presents a comprehensive investment framework for energy systems, focusing on optimal technology selection and 
+placement of electrical generation, conversion, and storage assets. By combining DC Optimal Power Flow (DCOPF) simulations with 
+investment analysis, the platform enables data-driven decisions for energy infrastructure planning.
 
-### Base Network Structure
-The analysis is built around a base grid topology with two main load buses. This fundamental structure serves as the foundation for all scenario analyses:
+<p align="center">
+  <img src="figures/base_network_topography.png" width="600"/>
+  <br>
+  <em>Base network topology used for scenario analysis</em>
+</p>
 
-<img src="figures/base_network_topography.png" width="500"/>
+## 🌟 Key Features
 
-*The base network defines the core infrastructure upon which different generation scenarios are evaluated.*
+- **Technical Analysis**
+  - DC Optimal Power Flow (DCOPF) simulation
+  - Multi-scenario analysis capability
+  - Seasonal load profile evaluation
+  - Storage integration modeling
+  - Network constraint handling
 
-### Scenario Analysis
-Each scenario represents a unique combination of:
-- Generation asset placement at specific buses
-- Storage unit allocation
-- Load scaling factors
-- Seasonal variations (winter, summer, autumn/spring)
+- **Economic Assessment**
+  - Net Present Value (NPV) calculations
+  - Investment sensitivity analysis
+  - Technology lifecycle costing
+  - Operational cost optimization
+  - Risk assessment tools
 
-This modular approach allows us to evaluate various investment strategies while maintaining the core network constraints.
+- **Decision Support**
+  - AI-powered scenario analysis
+  - Comparative technology assessment
+  - Investment optimization
+  - Visual analytics and reporting
+  - Scenario-based planning
 
-## Results
+## 📈 Results & Analysis
 
-### Global Analysis
-- [Global Comparison Report](data/results/global_comparison_report.md)
+### Key Findings
 
-### Individual Scenario Reports
+- Balanced technology mixes achieved lowest annuities (~1.35M CHF/year)
+- Scenarios with renewable generation + storage showed optimal performance
+- Gas-heavy scenarios demonstrated higher operational costs
+- Storage sizing significantly impacts system economics
+
+### 📊 Detailed Scenario Analysis
 ${scenario_links}
 
-## Project Structure
+### 📑 Global Analysis
+- [Complete Comparison Report](data/results/global_comparison_report.md)
+
+## 🔧 Technical Implementation
+
+### Project Structure
 ```
 ├── data/
-│   ├── working/          # Input data files
-│   └── results/          # Generated results and analysis
+│   ├── working/          # Input data and parameters
+│   └── results/          # Analysis outputs
 ├── scripts/
-│   ├── core/            # Core processing modules
-│   ├── visualization/   # Plotting and visualization
-│   └── utils/          # Helper utilities
-└── figures/             # Generated figures and diagrams
+│   ├── core/            # DCOPF and optimization engines
+│   ├── visualization/   # Data visualization tools
+│   └── utils/           # Helper functions
+└── figures/             # Generated visualizations
 ```
 
-## Key Features
-- DCOPF analysis for multiple scenarios
-- Seasonal analysis (winter, summer, autumn/spring)
-- Generation vs demand visualization
-- AI-powered scenario critique
-- Economic and technical feasibility assessment
-- Modular scenario creation around base network topology
-- Investment optimization for different time horizons
+### Technologies Used
+- Python for core computation
+- PuLP for linear programming
+- Pandas for data management
+- Matplotlib/Plotly for visualization
+- OpenAI API for analysis enhancement
 
-## Running the Analysis
-1. Ensure all dependencies are installed:
+## 🚀 Getting Started
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/energy-investment-model.git
+```
+
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Set up your OpenAI API key in `.env.local`:
-```
-OPENAPI_KEY=your_api_key_here
+3. Configure OpenAI API (optional):
+```bash
+echo "OPENAI_API_KEY=your_key_here" > .env.local
 ```
 
-3. Run the main analysis:
+4. Run the analysis:
 ```bash
 python scripts/main.py
 ```
 
-## Visualization Examples
-Each scenario analysis includes:
-- Generation vs Demand plots for each season
-- Generation mix analysis
-- Capacity factor comparisons
-- Economic metrics
-- AI-generated critiques
-- Network topology visualizations
+## 📊 Example Visualizations
 
-## Contributing
-Feel free to open issues or submit pull requests with improvements.
+<p align="center">
+  <img src="figures/example_plot.png" width="700"/>
+  <br>
+  <em>Sample visualization of generation mix across scenarios</em>
+</p>
 
-## License
-[MIT License](LICENSE)
+## 📖 Documentation
+
+- [Technical Documentation](docs/technical.md)
+- [User Guide](docs/user_guide.md)
+- [API Reference](docs/api.md)
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 📬 Contact
+
+For questions and feedback:
+- 📧 Email: your.email@example.com
+- 🌐 LinkedIn: [Your Name](https://linkedin.com/in/yourprofile)
+
+## 🙏 Acknowledgments
+
+- Special thanks to [Institution Name] for support
+- Built using [list key libraries/tools]
+- Inspired by [related works/papers]
 """
     
     with open(readme_path, 'w') as f:
