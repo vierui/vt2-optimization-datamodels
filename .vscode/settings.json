@@ -2,8 +2,11 @@
     "latex-workshop.latex.recipe.default": "first",
     "latex-workshop.latex.recipes": [
         {
-            "name": "pdflatex",
+            "name": "pdflatex ➞ bibtex ➞ pdflatex × 2",
             "tools": [
+                "pdflatex",
+                "bibtex",
+                "pdflatex",
                 "pdflatex"
             ]
         }
@@ -17,6 +20,13 @@
                 "-interaction=nonstopmode",
                 "-file-line-error",
                 "%DOC%"
+            ]
+        },
+        {
+            "name": "bibtex",
+            "command": "bibtex",
+            "args": [
+                "%DOCFILE%"
             ]
         }
     ],

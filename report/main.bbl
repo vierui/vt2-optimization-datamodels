@@ -1,0 +1,41 @@
+\begin{thebibliography}{1}
+
+\bibitem{andersson2004power}
+G{\"o}ran Andersson.
+\newblock Modelling and analysis of electric power systems.
+\newblock Lecture Notes 227-0526-00, ETH Z{\"u}rich, Z{\"u}rich, Switzerland, March 2004.
+\newblock Power Systems Laboratory, ETH Z{\"u}rich.
+
+\bibitem{PyPSA}
+T.~Brown, J.~H\"orsch, and D.~Schlachtberger.
+\newblock {PyPSA: Python for Power System Analysis}.
+\newblock {\em Journal of Open Research Software}, 6(4), 2018.
+
+\bibitem{forrest2018cbc}
+John Forrest and Robin Lougee-Heimer.
+\newblock Cbc user guide.
+\newblock {\em COIN-OR Foundation}, 2018.
+\newblock Open-source mixed integer programming solver.
+
+\bibitem{matpower2024}
+{MATPOWER Development Team}.
+\newblock Matpower documentation, 2024.
+\newblock MATPOWER: A MATLAB Power System Simulation Package.
+
+\bibitem{mitchell2011pulp}
+Stuart Mitchell, Michael O'Sullivan, and Iain Dunning.
+\newblock Pulp: A linear programming toolkit for python.
+\newblock {\em Optimization Online}, 2011.
+\newblock Software package.
+
+\bibitem{dc_opf}
+B~Stott, J~Jardim, and O~Alsaç.
+\newblock Dc power flow in analysis of power networks.
+\newblock {\em IEEE Transactions on Power Systems}, 24(3):1290--1300, 2009.
+
+\bibitem{wood2013power}
+Allen~J Wood, Bruce~F Wollenberg, and Gerald~B Sheblé.
+\newblock {\em Power Generation, Operation, and Control}.
+\newblock John Wiley \& Sons, 2013.
+
+\end{thebibliography}
