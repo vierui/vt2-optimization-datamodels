@@ -94,7 +94,7 @@ class InvestmentAnalysis:
                         ((1 + self.discount_rate)**years - 1)
         return -npv * annuity_factor  # Negative NPV becomes positive annuity
 
-    def analyze_scenario(self, scenario_results_path, master_gen_path):
+    def analyze_scenario(self, scenario_results_path, master_gen_path, run_sensitivity=False):
         """Main analysis function"""
         try:
             # Get project root for path resolution
@@ -131,8 +131,13 @@ class InvestmentAnalysis:
                 # Calculate base values
                 initial_inv = self.calculate_initial_investment(installed_capacity)
                 
+                # Determine which variants to process based on sensitivity flag
+                variants_to_process = {'nominal': 1.0}
+                if run_sensitivity:
+                    variants_to_process.update({'low': 0.8, 'high': 1.2})
+                
                 # Process each variant
-                for variant, load_factor in self.load_factors.items():
+                for variant, load_factor in variants_to_process.items():
                     scenario_id = f"{scenario}_{variant}"
                     print(f"\nProcessing variant: {variant} (load factor: {load_factor})")
                     
@@ -203,7 +208,8 @@ if __name__ == '__main__':
     # Use proper paths relative to project root
     results = analysis.analyze_scenario(
         os.path.join(project_root, 'data', 'results', 'scenario_results.csv'),
-        os.path.join(project_root, 'data', 'working', 'master_gen.csv')
+        os.path.join(project_root, 'data', 'working', 'master_gen.csv'),
+        run_sensitivity=True  # Default to True when running directly
     )
     
     print(results)

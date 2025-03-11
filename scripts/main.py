@@ -488,6 +488,7 @@ def main():
     run_sensitivity = ask_user_confirmation(
         "Do you want to run sensitivity analysis (±20% load)?"
     )
+    print(f"Sensitivity analysis: {'Enabled' if run_sensitivity else 'Disabled'}")
 
     scenario_variants: List[ScenarioVariant] = []
     
@@ -572,9 +573,12 @@ def main():
     # Then perform investment analysis
     print("\nPerforming investment analysis...")
     analysis = InvestmentAnalysis()
+    
+    # Pass the run_sensitivity flag to the analyze_scenario method
     investment_results = analysis.analyze_scenario(
         os.path.join(results_root, "scenario_results.csv"),
-        master_gen_file
+        master_gen_file,
+        run_sensitivity
     )
     
     print("Investment analysis columns:", investment_results.columns.tolist())
@@ -606,8 +610,14 @@ def main():
 
     print("\nSelected essential columns:", essential_columns)
 
-    # Filter columns
-    nominal_results = nominal_results[essential_columns]
+    # Filter columns, but make sure all essential columns exist
+    for col in base_essential_columns:
+        if col not in nominal_results.columns:
+            nominal_results[col] = 'nominal' if col == 'variant' else None
+    
+    # Now filter to only include essential columns that exist
+    existing_essential_columns = [col for col in essential_columns if col in nominal_results.columns]
+    nominal_results = nominal_results[existing_essential_columns]
 
     # Merge the results
     final_results = nominal_results.merge(
@@ -617,9 +627,16 @@ def main():
     )
 
     # Add a clean scenario identifier
-    final_results['scenario_id'] = final_results.apply(
-        lambda x: f"{x['base_scenario']}_{x['variant']}", axis=1
-    )
+    # Check if 'variant' column exists in final_results
+    if 'variant' in final_results.columns:
+        final_results['scenario_id'] = final_results.apply(
+            lambda x: f"{x['base_scenario']}_{x['variant']}", axis=1
+        )
+    else:
+        # If 'variant' column doesn't exist, just use base_scenario as scenario_id
+        final_results['scenario_id'] = final_results['base_scenario']
+        # Also add a variant column with 'nominal' as default
+        final_results['variant'] = 'nominal'
 
     # Define base columns that we want first
     base_columns = [
