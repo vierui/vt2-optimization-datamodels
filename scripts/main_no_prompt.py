@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 
 """
-multi_scenario.py
+main_no_prompt.py
+
+A version of main.py that doesn't require user input for sensitivity analysis and other prompts.
+All prompts are set to False by default.
 
 - Loads scenarios from scenarios_parameters.csv
 - Runs DCOPF for each scenario across winter, summer, autumn_spring
@@ -362,120 +365,27 @@ def run_single_season(
         storage_data=storage_data
     )
 
-class MultiScenario:
-    """Main class to handle multiple scenario analysis for power system investments"""
+def clean_old_scenario_directories(scenarios_df):
+    """
+    Clean up old scenario directories that don't match the current scenarios_parameters.csv file.
+    """
+    # Get the list of valid scenario names from the scenarios_parameters.csv file
+    valid_scenario_names = set(scenarios_df['scenario_name'].tolist())
     
-    #######################
-    # 1. INITIALIZATION
-    #######################
-    def __init__(self, plot_gen_mix=False):
-        """Initialize parameters, paths, and configurations"""
-        # Setup paths
-        self.setup_paths()
-        
-        # Load scenario parameters
-        self.load_scenario_parameters()
-        
-        # Initialize analysis parameters
-        self.init_analysis_parameters()
-        
-        # Setup output directories
-        self.create_output_dirs()
+    # Get the list of existing scenario directories
+    existing_dirs = [d for d in os.listdir(results_root) 
+                    if os.path.isdir(os.path.join(results_root, d)) 
+                    and d.startswith('scenario_')]
     
-    #######################
-    # 2. NETWORK CREATION
-    #######################
-    def create_network(self):
-        """Create and configure PyPSA network for scenarios"""
-        # Load component data (generators, buses, branches)
-        self.load_component_data()
-        
-        # Configure network parameters
-        self.setup_network_parameters()
-        
-        # Add components to network
-        self.add_network_components()
-        
-        return network
-
-    #######################
-    # 3. SCENARIO SOLVING
-    #######################
-    def solve(self):
-        """Main solving function for all scenarios"""
-        # Iterate through scenarios
-        for scenario in self.scenarios:
-            # Create network for scenario
-            network = self.create_network()
-            
-            # Run OPF
-            self.run_opf(network)
-            
-            # Store results
-            self.store_scenario_results(network)
-            
-            # Calculate metrics
-            self.calculate_scenario_metrics()
-    
-    #######################
-    # 4. METRICS CALCULATION
-    #######################
-    def calculate_metrics(self):
-        """Calculate investment and performance metrics"""
-        # Financial calculations
-        self.calculate_financial_metrics()
-        
-        # Sensitivity analysis
-        self.perform_sensitivity_analysis()
-        
-        # Store metric results
-        self.store_metrics()
-    
-    #######################
-    # 5. VISUALIZATION
-    #######################
-    def generate_plots(self):
-        """Generate all required plots"""
-        # Generation mix plots
-        self.plot_generation_mix()
-        
-        # Investment metric plots
-        self.plot_investment_metrics()
-        
-        # Sensitivity analysis plots
-        self.plot_sensitivity_results()
-        
-        # Add AI comments to plots
-        self.add_plot_comments()
-    
-    #######################
-    # 6. REPORTING
-    #######################
-    def create_summary(self):
-        """Create summary reports and analysis"""
-        # Generate summary statistics
-        self.calculate_summary_stats()
-        
-        # Create summary file
-        self.write_summary_file()
-        
-        # Generate AI analysis
-        self.generate_ai_analysis()
-    
-    #######################
-    # 7. UTILITY FUNCTIONS
-    #######################
-    def setup_paths(self):
-        """Setup directory paths"""
-        pass
-    
-    def load_scenario_parameters(self):
-        """Load and validate scenario parameters"""
-        pass
-    
-    def store_scenario_results(self, network):
-        """Store results for a specific scenario"""
-        pass
+    # Remove directories that don't match valid scenario names
+    for dir_name in existing_dirs:
+        if dir_name not in valid_scenario_names:
+            print(f"Removing old scenario directory: {dir_name}")
+            try:
+                import shutil
+                shutil.rmtree(os.path.join(results_root, dir_name))
+            except Exception as e:
+                print(f"Error removing directory {dir_name}: {e}")
 
 def main():
     # Load all data
@@ -484,10 +394,9 @@ def main():
     # Clean up old scenario directories
     clean_old_scenario_directories(data_context['scenarios_df'])
     
-    # Ask for sensitivity analysis (keep this prompt)
-    run_sensitivity = ask_user_confirmation(
-        "Do you want to run sensitivity analysis (±20% load)?"
-    )
+    # Set sensitivity analysis to False (no prompt)
+    run_sensitivity = False
+    print(f"Sensitivity analysis: {'Enabled' if run_sensitivity else 'Disabled'}")
 
     scenario_variants: List[ScenarioVariant] = []
     
@@ -670,10 +579,14 @@ def main():
     final_results.to_csv(os.path.join(results_root, "scenario_results_with_investment.csv"), 
                          index=False)
 
-    # Ask user for generation preferences (keep these prompts)
-    generate_plots = ask_user_confirmation("Do you want to generate plots?")
-    generate_individual = ask_user_confirmation("Do you want to generate individual scenario reports?")
-    generate_global = ask_user_confirmation("Do you want to generate a global comparison report?")
+    # Set all generation preferences to False (no prompts)
+    generate_plots = False
+    generate_individual = False
+    generate_global = False
+    
+    print(f"\nPlot generation: {'Enabled' if generate_plots else 'Disabled'}")
+    print(f"Individual reports: {'Enabled' if generate_individual else 'Disabled'}")
+    print(f"Global comparison: {'Enabled' if generate_global else 'Disabled'}")
 
     if generate_plots:
         print("\nGenerating plots...")
@@ -748,27 +661,5 @@ def main():
     create_readme_template(readme_path)  # Create/update the full README
     update_readme_with_scenarios()       # Update the scenario links
 
-def clean_old_scenario_directories(scenarios_df):
-    """
-    Clean up old scenario directories that don't match the current scenarios_parameters.csv file.
-    """
-    # Get the list of valid scenario names from the scenarios_parameters.csv file
-    valid_scenario_names = set(scenarios_df['scenario_name'].tolist())
-    
-    # Get the list of existing scenario directories
-    existing_dirs = [d for d in os.listdir(results_root) 
-                    if os.path.isdir(os.path.join(results_root, d)) 
-                    and d.startswith('scenario_')]
-    
-    # Remove directories that don't match valid scenario names
-    for dir_name in existing_dirs:
-        if dir_name not in valid_scenario_names:
-            print(f"Removing old scenario directory: {dir_name}")
-            try:
-                import shutil
-                shutil.rmtree(os.path.join(results_root, dir_name))
-            except Exception as e:
-                print(f"Error removing directory {dir_name}: {e}")
-
 if __name__ == "__main__":
-    main()
+    main() 

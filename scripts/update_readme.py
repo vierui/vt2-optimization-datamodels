@@ -3,7 +3,7 @@ from pathlib import Path
 
 def get_project_root():
     """Get the absolute path to the project root directory"""
-    return "/Users/rvieira/Documents/Master/vt1-energy-investment-model"
+    return "/Users/rvieira/Documents/Master/vt2-optimization-datamodels"
 
 def update_readme_with_scenarios():
     """Update README.md with links to all scenario reports"""

@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "vt1-energy-investment-model"
-version = "0.1.0"
-description = "Optimization model for energy investment decisions"
+name = "vt2-optimization-datamodels"
+version = "0.2.0"
+description = "Optimization MILP and datamodels for forecasting"
 authors = ["Rui Vieira <ruivieira.pro@gmail.com>"]
 readme = "README.md"
 package-mode = false
@@ -9,7 +9,7 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.10"
 pandas = "^2.2.3"
-numpy = "^2.1.3"
+numpy = "^1.26.4"
 pulp = "^2.9.0"
 matplotlib = "^3.9.3"
 networkx = "^3.4.2"
