@@ -18,11 +18,11 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-from dcopf import dcopf
+from scripts.dcopf import dcopf
 
 def create_simple_power_system(line_limits=None):
     """
-    Create a simple 5-bus power system model for learning about marginal prices.
+    Simple 5-bus power system model for learning about marginal prices.
     One bus will be empty (no generation or load) to observe price formation.
     
     Args:
@@ -35,7 +35,7 @@ def create_simple_power_system(line_limits=None):
     current_time = datetime.now().replace(minute=0, second=0, microsecond=0)
     time_periods = [current_time]
     
-    # 1. Create buses
+    # 1. Read bus data from CSV file
     # bus_i: bus number
     # type: 1=PQ bus (load), 2=PV bus (generator), 3=reference bus
     # Pd: real power demand (MW)
@@ -47,23 +47,16 @@ def create_simple_power_system(line_limits=None):
     # baseKV: base voltage (kV) - not used in DC model
     # zone: loss zone - not used in DC model
     # Vmax, Vmin: max/min voltage magnitude - not used in DC model
-    bus = pd.DataFrame({
-        'bus_i': [1, 2, 3, 4, 5],
-        'type': [3, 2, 2, 1, 1],  # Bus 1 is reference, 2-3 are generators, 4-5 are loads
-        'Pd': [0, 0, 0, 50, 100],  # Demand at buses 4 and 5
-        'Qd': [0, 0, 0, 0, 0],
-        'Gs': [0, 0, 0, 0, 0],
-        'Bs': [0, 0, 0, 0, 0],
-        'area': [1, 1, 1, 1, 1],
-        'Vm': [1, 1, 1, 1, 1],
-        'Va': [0, 0, 0, 0, 0],
-        'baseKV': [230, 230, 230, 230, 230],
-        'zone': [1, 1, 1, 1, 1],
-        'Vmax': [1.1, 1.1, 1.1, 1.1, 1.1],
-        'Vmin': [0.9, 0.9, 0.9, 0.9, 0.9]
-    })
+    bus_file = os.path.join('data', 'working', 'bus.csv')
+    bus = pd.read_csv(bus_file)
     
-    # 2. Create branches (transmission lines)
+    # Ensure numeric types for critical columns
+    bus['bus_i'] = bus['bus_i'].astype(int)
+    bus['type'] = bus['type'].astype(int)
+    bus['Pd'] = bus['Pd'].astype(float)
+    bus['Qd'] = bus['Qd'].astype(float)
+    
+    # 2. Read branch data from CSV file
     # fbus, tbus: from/to bus number
     # r, x: resistance and reactance (p.u.)
     # b: total line charging susceptance (p.u.)
@@ -73,24 +66,17 @@ def create_simple_power_system(line_limits=None):
     # angle: transformer phase shift angle (degrees) - not used in DC model
     # status: initial branch status, 1 = in-service, 0 = out-of-service
     # angmin, angmax: min/min angle difference - not used in DC model
-    branch_data = [
-        # From bus 1 (reference) to other buses
-        [1, 2, 0.01, 0.1, 0, 100, 0, 0, 0, 0, 1, -360, 360],
-        [1, 4, 0.01, 0.1, 0, 100, 0, 0, 0, 0, 1, -360, 360],
-        # From bus 2 (generator) to other buses
-        [2, 3, 0.01, 0.1, 0, 100, 0, 0, 0, 0, 1, -360, 360],
-        [2, 5, 0.01, 0.1, 0, 100, 0, 0, 0, 0, 1, -360, 360],
-        # From bus 3 (generator) to other buses
-        [3, 4, 0.01, 0.1, 0, 100, 0, 0, 0, 0, 1, -360, 360],
-        [3, 5, 0.01, 0.1, 0, 100, 0, 0, 0, 0, 1, -360, 360],
-        # Connect load buses
-        [4, 5, 0.01, 0.1, 0, 100, 0, 0, 0, 0, 1, -360, 360],
-    ]
+    branch_file = os.path.join('data', 'working', 'branch.csv')
+    branch = pd.read_csv(branch_file)
     
-    branch = pd.DataFrame(branch_data, columns=[
-        'fbus', 'tbus', 'r', 'x', 'b', 'ratea', 'rateb', 'ratec', 
-        'ratio', 'angle', 'status', 'angmin', 'angmax'
-    ])
+    # Ensure numeric types for critical columns
+    branch['fbus'] = branch['fbus'].astype(int)
+    branch['tbus'] = branch['tbus'].astype(int)
+    branch['r'] = branch['r'].astype(float)
+    branch['x'] = branch['x'].astype(float)
+    branch['b'] = branch['b'].astype(float)
+    branch['ratea'] = branch['ratea'].astype(float)
+    branch['status'] = branch['status'].astype(int)
     
     # Calculate susceptance (1/x) for DC power flow
     branch['sus'] = 1.0 / branch['x']
@@ -258,6 +244,9 @@ def plot_marginal_prices(results):
         print("DCOPF optimization failed.")
         return
     
+    # Create results directory if it doesn't exist
+    os.makedirs('results/marginal_price_analysis', exist_ok=True)
+    
     # Extract marginal prices
     prices = results.get('marginal_prices')
     if prices is None or prices.empty:
@@ -273,23 +262,10 @@ def plot_marginal_prices(results):
     plt.grid(True, alpha=0.3)
     plt.xticks(prices['bus'])
     plt.tight_layout()
-    plt.savefig('marginal_prices.png')
-    plt.close()
     
-    # Create a plot of line flows
-    flows = results['flows']
-    line_labels = [f"{int(row['from_bus'])}->{int(row['to_bus'])}" for _, row in flows.iterrows()]
-    flow_values = flows['flow'].values
-    
-    plt.figure(figsize=(12, 6))
-    plt.bar(line_labels, flow_values)
-    plt.xlabel('Line')
-    plt.ylabel('Flow (MW)')
-    plt.title('Line Flows')
-    plt.grid(True, alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig('line_flows.png')
+    # Save to results folder
+    plot_path = 'results/marginal_price_analysis/marginal_prices.png'
+    plt.savefig(plot_path)
     plt.close()
     
     # Create a plot of generation dispatch
@@ -304,10 +280,13 @@ def plot_marginal_prices(results):
     plt.grid(True, alpha=0.3)
     plt.xticks(gen_by_bus['node'])
     plt.tight_layout()
-    plt.savefig('generation_dispatch.png')
+    
+    # Save to results folder
+    plot_path = 'results/marginal_price_analysis/generation_dispatch.png'
+    plt.savefig(plot_path)
     plt.close()
     
-    print("Plots saved as 'marginal_prices.png', 'line_flows.png', and 'generation_dispatch.png'")
+    print(f"Plots saved in results/marginal_price_analysis/")
     
     return prices
 
@@ -318,6 +297,10 @@ def compare_scenarios(scenarios):
     Args:
         scenarios: Dictionary of {scenario_name: results}
     """
+    # Create results directory if it doesn't exist
+    os.makedirs('results/marginal_price_analysis', exist_ok=True)
+    
+    # 1. Compare marginal prices
     # Extract marginal prices for each scenario
     scenario_prices = {}
     for name, results in scenarios.items():
@@ -371,10 +354,76 @@ def compare_scenarios(scenarios):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig('price_comparison.png')
+    
+    # Save to results folder
+    plot_path = 'results/marginal_price_analysis/price_comparison.png'
+    plt.savefig(plot_path)
     plt.close()
     
-    print("Comparison plot saved as 'price_comparison.png'")
+    print("Marginal price comparison plot saved in results/marginal_price_analysis/")
+    
+    # 2. Compare line flows
+    # Extract flows for each scenario
+    scenario_flows = {}
+    for name, results in scenarios.items():
+        if results is not None:
+            flows = results.get('flows')
+            if flows is not None and not flows.empty:
+                scenario_flows[name] = flows
+    
+    if not scenario_flows:
+        print("No valid flow data to compare.")
+        return
+    
+    # Create a grouped bar chart of line flows
+    plt.figure(figsize=(14, 8))
+    
+    # Create line labels
+    all_lines = set()
+    for flows in scenario_flows.values():
+        for _, row in flows.iterrows():
+            line_label = f"{int(row['from_bus'])}->{int(row['to_bus'])}"
+            all_lines.add(line_label)
+    all_lines = sorted(all_lines)
+    
+    # Set width of bars
+    bar_width = 0.8 / len(scenario_flows)
+    
+    # Set position of bars on x axis
+    positions = {}
+    for i, line in enumerate(all_lines):
+        positions[line] = i
+    
+    # Plot bars for each scenario
+    for i, (name, flows) in enumerate(scenario_flows.items()):
+        # Create a dictionary of line -> flow for easy lookup
+        line_to_flow = {}
+        for _, row in flows.iterrows():
+            line_label = f"{int(row['from_bus'])}->{int(row['to_bus'])}"
+            line_to_flow[line_label] = row['flow']
+        
+        # Get flows for all lines (use 0 if line not in this scenario)
+        scenario_values = [line_to_flow.get(line, 0) for line in all_lines]
+        
+        # Calculate bar positions
+        bar_positions = [pos + (i - len(scenario_flows)/2 + 0.5) * bar_width for pos in positions.values()]
+        
+        plt.bar(bar_positions, scenario_values, width=bar_width, label=name)
+    
+    plt.xlabel('Line (From->To)')
+    plt.ylabel('Flow (MW)')
+    plt.title('Comparison of Line Flows Across Scenarios')
+    plt.xticks(list(positions.values()), all_lines, rotation=45)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    # Save to results folder
+    plot_path = 'results/marginal_price_analysis/flow_comparison.png'
+    plt.savefig(plot_path)
+    plt.close()
+    
+    print("Line flow comparison plot saved in results/marginal_price_analysis/")
 
 def main():
     """
@@ -411,6 +460,7 @@ def main():
     compare_scenarios(scenarios)
     
     print("\n=== Analysis Complete ===")
+    print("All plots have been saved to the results/marginal_price_analysis/ directory.")
     print("You can modify the line limits in the code to observe different congestion patterns.")
     print("The relationship between congestion and marginal prices is demonstrated in the results.")
     print("\nUsing CPLEX solver to get accurate marginal prices (dual variables) from the optimization.")
