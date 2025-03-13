@@ -3,15 +3,8 @@
 """
 dcopf.py
 
-A DC Optimal Power Flow (DCOPF) solver using CPLEX for power system optimization.
-This implementation solves the DCOPF problem to:
-- Minimize total system generation costs
-- Determine optimal generator dispatch
-- Calculate power flows on transmission lines
-- Extract locational marginal prices (LMPs)
-- Handle time series data for generators and demand
-
-The solver uses the CPLEX optimization engine and requires the CPLEX Python API.
+A DC Optimal Power Flow (DCOPF) solver using CPLEX.
+This implementation focuses on extracting and analyzing marginal prices.
 """
 
 import sys
@@ -94,7 +87,10 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
     next_time = T[-1] + DateOffset(hours=delta_t)
     extended_T = list(T) + [next_time]
     
-    # 1. Create variables    
+    # 1. Create variables
+    
+    # Variable names must be valid CPLEX identifiers (no special chars)
+    
     # a) Generation variables for non-storage generators
     gen_vars = {}
     gen_names = []
@@ -113,7 +109,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
             pmax = gen_row['pmax'].iloc[0]
             cost = gen_row['gencost'].iloc[0]
             
-            var_name = f"g_{g}_t{t.strftime('%Y%m%d%H')}"
+            var_name = f"g{g}t{t.strftime('%Y%m%d%H')}"
             gen_vars[g, t] = var_name
             gen_names.append(var_name)
             gen_costs.append(safe_float(cost))
@@ -135,7 +131,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
     
     for i in N:
         for t in T:
-            var_name = f"t_{i}_t{t.strftime('%Y%m%d%H')}"
+            var_name = f"t{i}t{t.strftime('%Y%m%d%H')}"
             theta_vars[i, t] = var_name
             theta_names.append(var_name)
             theta_lbs.append(-cplex.infinity)
@@ -157,7 +153,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         i = int(row['fbus'])
         j = int(row['tbus'])
         for t in T:
-            var_name = f"flow_{i}_{j}_t{t.strftime('%Y%m%d%H')}"
+            var_name = f"f{i}{j}t{t.strftime('%Y%m%d%H')}"
             flow_vars[i, j, t] = var_name
             flow_names.append(var_name)
             flow_lbs.append(-cplex.infinity)
@@ -181,7 +177,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         
         for t in T:
             # Charge variables
-            pch_name = f"pc_{s}_t{t.strftime('%Y%m%d%H')}"
+            pch_name = f"pc{s}t{t.strftime('%Y%m%d%H')}"
             pch_vars[s, t] = pch_name
             problem.variables.add(
                 lb=[0],
@@ -190,7 +186,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
             )
             
             # Discharge variables
-            pdis_name = f"pd_{s}_t{t.strftime('%Y%m%d%H')}"
+            pdis_name = f"pd{s}t{t.strftime('%Y%m%d%H')}"
             pdis_vars[s, t] = pdis_name
             problem.variables.add(
                 lb=[0],
@@ -200,7 +196,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         
         # Energy variables
         for t in extended_T:
-            e_name = f"e_{s}_t{t.strftime('%Y%m%d%H')}"
+            e_name = f"e{s}t{t.strftime('%Y%m%d%H')}"
             e_vars[s, t] = e_name
             problem.variables.add(
                 lb=[0],
@@ -209,7 +205,6 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
             )
     
     # 2. Add constraints
-    print("[DCOPF] Adding DC Power Flow Constraints...")
     
     # a) DC Power Flow Constraints
     for idx_b, row_b in branch.iterrows():
@@ -219,52 +214,37 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         rate_a = safe_float(row_b['ratea'])  # Convert limit to float
         
         for t in T:
+            # flow_i_j = susceptance * (theta_i - theta_j)
+            flow_var = flow_vars[i, j, t]
+            from_angle_var = theta_vars[i, t]
+            to_angle_var = theta_vars[j, t]
+            
             # Flow = (angle_from - angle_to) / x
-            from_angle_var_name = theta_vars[i, t]
-            to_angle_var_name = theta_vars[j, t]
-            flow_var_name = flow_vars[i, j, t]
-            
-            constraint_name = f"dcflow_{int(i)}_{int(j)}_t{t.strftime('%Y%m%d%H')}"
-            print(f"[DCOPF] Adding constraint: {constraint_name}")
-            print(f"[DCOPF] Variables: {flow_var_name}, {from_angle_var_name}, {to_angle_var_name}")
-            
-            # Instead of creating a nested list, create individual variable-coefficient pairs 
-            # and explicitly pass them to the constraint
-            var_list = [flow_var_name, from_angle_var_name, to_angle_var_name]
-            coef_list = [1.0, -safe_float(susceptance), safe_float(susceptance)]
-            
-            try:
-                problem.linear_constraints.add(
-                    lin_expr=[[var_list, coef_list]],
-                    senses=["E"],
-                    rhs=[0.0],
-                    names=[constraint_name]
-                )
-            except Exception as e:
-                print(f"[DCOPF] Error adding constraint {constraint_name}: {e}")
-                print(f"[DCOPF] Variable list: {var_list}")
-                print(f"[DCOPF] Coefficient list: {coef_list}")
-                raise
-            
-            # Upper limit: FLOW[i, j, t] <= rate_a
-            flow_var_name = flow_vars[i, j, t]
-            upper_constraint_name = f"upflow_{int(i)}_{int(j)}_t{t.strftime('%Y%m%d%H')}"
+            names = [flow_var, from_angle_var, to_angle_var]
+            coeffs = [1.0, -safe_float(susceptance), safe_float(susceptance)]
             
             problem.linear_constraints.add(
-                lin_expr=[[[flow_var_name], [1.0]]],
+                lin_expr=[[names, coeffs]],
+                senses=["E"],
+                rhs=[0.0],
+                names=[f"dc_flow_{i}_{j}_{t}"]
+            )
+            
+            # Upper limit: FLOW[i, j, t] <= rate_a
+            flow_var = flow_vars[i, j, t]
+            problem.linear_constraints.add(
+                lin_expr=[[[flow_var]], [1.0]],
                 senses=["L"],
                 rhs=[safe_float(rate_a)],
-                names=[upper_constraint_name]
+                names=[f"flow_upper_{i}_{j}_{t}"]
             )
             
             # Lower limit: FLOW[i, j, t] >= -rate_a
-            lower_constraint_name = f"loflow_{int(i)}_{int(j)}_t{t.strftime('%Y%m%d%H')}"
-            
             problem.linear_constraints.add(
-                lin_expr=[[[flow_var_name], [1.0]]],
+                lin_expr=[[[flow_var]], [1.0]],
                 senses=["G"],
                 rhs=[safe_float(-rate_a)],
-                names=[lower_constraint_name]
+                names=[f"flow_lower_{i}_{j}_{t}"]
             )
     
     # b) Initial storage state constraint
@@ -273,14 +253,11 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         E_initial = s_row['einitial']
         
         # Initial SoC: E[T[0]] = E_initial
-        e_var_name = e_vars[s, T[0]]
-        constraint_name = f"inite_{int(s)}"
-        
         problem.linear_constraints.add(
-            lin_expr=[[[e_var_name], [1.0]]],
+            lin_expr=[[[e_vars[s, T[0]]], [1.0]]],
             senses=["E"],
             rhs=[safe_float(E_initial)],
-            names=[constraint_name]
+            names=[f"inite{s}"]
         )
     
     # c) Storage dynamics
@@ -292,20 +269,17 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
             next_t = extended_T[idx_t + 1]
             
             # E[next] = E[t] + eta*charge - (1/eta)*discharge
-            e_t_name = e_vars[s, t]
-            e_next_name = e_vars[s, next_t]
-            pch_t_name = pch_vars[s, t]
-            pdis_t_name = pdis_vars[s, t]
-            
-            storage_var_names = [e_t_name, e_next_name, pch_t_name, pdis_t_name]
-            storage_coefs = [1.0, -1.0, -safe_float(eta) * safe_float(delta_t), safe_float(1/eta) * safe_float(delta_t)]
-            constraint_name = f"sd_{int(s)}_t{t.strftime('%Y%m%d%H')}"
-            
+            e_t = e_vars[s, t]
+            pch_t = pch_vars[s, t]
+            pdis_t = pdis_vars[s, t]
             problem.linear_constraints.add(
-                lin_expr=[[storage_var_names, storage_coefs]],
+                lin_expr=[[
+                    [e_t, e_vars[s, next_t], pch_t, pdis_t],
+                    [1.0, -1.0, -safe_float(eta) * safe_float(delta_t), safe_float(1/eta) * safe_float(delta_t)]
+                ]],
                 senses=["E"],
                 rhs=[0.0],
-                names=[constraint_name]
+                names=[f"sd{s}t{t.strftime('%Y%m%d%H')}"]
             )
     
     # d) Final storage state constraint
@@ -314,35 +288,29 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         E_initial = s_row['einitial']
         
         # Final SoC: E[extended_T[-1]] = E_initial
-        e_final_name = e_vars[s, extended_T[-1]]
-        constraint_name = f"finsoc_{int(s)}"
-        
         problem.linear_constraints.add(
-            lin_expr=[[[e_final_name], [1.0]]],
+            lin_expr=[[[e_vars[s, extended_T[-1]]], [1.0]]],
             senses=["E"],
             rhs=[safe_float(E_initial)],
-            names=[constraint_name]
+            names=[f"finsoc{s}"]
         )
     
     # e) Slack bus constraint
     slack_bus = 1  # Bus 1 is the reference
     for t in T:
-        theta_slack_name = theta_vars[slack_bus, t]
-        constraint_name = f"slack_t{t.strftime('%Y%m%d%H')}"
-        
         problem.linear_constraints.add(
-            lin_expr=[[[theta_slack_name], [1.0]]],
+            lin_expr=[[[theta_vars[slack_bus, t]], [1.0]]],
             senses=["E"],
             rhs=[0.0],
-            names=[constraint_name]
+            names=[f"slack{t.strftime('%Y%m%d%H')}"]
         )
     
     # f) Power balance constraints
     for t in T:
         for i in N:  # Include all buses, even those without generators
-            # Collect all variable names and coefficients
-            var_names = []
-            coefficients = []
+            # Prepare the power balance constraint
+            lin_vars = []
+            lin_coefs = []
             
             # Add non-storage generation
             for g in G:
@@ -350,8 +318,8 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
                     (gen_time_series['id'] == g) & (gen_time_series['time'] == t)
                 ]
                 if not gen_rows.empty and gen_rows['bus'].iloc[0] == i:
-                    var_names.append(gen_vars[g, t])
-                    coefficients.append(1.0)
+                    lin_vars.append(gen_vars[g, t])
+                    lin_coefs.append(1.0)
             
             # Add storage (discharge - charge)
             for s in S:
@@ -359,26 +327,22 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
                     (gen_time_series['id'] == s) & (gen_time_series['time'] == t)
                 ]
                 if not stor_rows.empty and stor_rows['bus'].iloc[0] == i:
-                    var_names.append(pdis_vars[s, t])
-                    coefficients.append(1.0)
-                    var_names.append(pch_vars[s, t])
-                    coefficients.append(-1.0)
+                    lin_vars.append(pdis_vars[s, t])
+                    lin_coefs.append(1.0)
+                    lin_vars.append(pch_vars[s, t])
+                    lin_coefs.append(-1.0)
             
             # Add flows into the bus
             for idx_b, row_b in branch.iterrows():
                 if row_b['tbus'] == i:  # Flow into bus i
-                    from_bus = int(row_b['fbus'])
-                    to_bus = int(row_b['tbus'])
-                    var_names.append(flow_vars[from_bus, to_bus, t])
-                    coefficients.append(1.0)
+                    lin_vars.append(flow_vars[int(row_b['fbus']), int(row_b['tbus']), t])
+                    lin_coefs.append(1.0)
             
             # Add flows out of the bus
             for idx_b, row_b in branch.iterrows():
                 if row_b['fbus'] == i:  # Flow out of bus i
-                    from_bus = int(row_b['fbus'])
-                    to_bus = int(row_b['tbus'])
-                    var_names.append(flow_vars[from_bus, to_bus, t])
-                    coefficients.append(-1.0)
+                    lin_vars.append(flow_vars[int(row_b['fbus']), int(row_b['tbus']), t])
+                    lin_coefs.append(-1.0)
             
             # Get demand at bus i
             pd_val = 0
@@ -388,15 +352,13 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
             ]
             pd_val = demands_at_bus.sum() if not demands_at_bus.empty else 0
             
-            constraint_name = f"pb_{int(i)}_t{t.strftime('%Y%m%d%H')}"
-            
             # Add power balance constraint
-            if var_names:
+            if lin_vars:
                 problem.linear_constraints.add(
-                    lin_expr=[[var_names, coefficients]],
+                    lin_expr=[[lin_vars, lin_coefs]],
                     senses=["E"],
                     rhs=[safe_float(pd_val)],
-                    names=[constraint_name]
+                    names=[f"pb{i}t{t.strftime('%Y%m%d%H')}"]
                 )
     
     # g) Flow limits
@@ -407,24 +369,20 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         
         for t in T:
             # Upper limit: FLOW[i, j, t] <= rate_a
-            flow_var_name = flow_vars[i, j, t]
-            upper_constraint_name = f"upflow_{i}_{j}_t{t.strftime('%Y%m%d%H')}"
-            
+            flow_var = flow_vars[i, j, t]
             problem.linear_constraints.add(
-                lin_expr=[[[flow_var_name], [1.0]]],
+                lin_expr=[[[flow_var]], [1.0]],
                 senses=["L"],
                 rhs=[safe_float(rate_a)],
-                names=[upper_constraint_name]
+                names=[f"up{i}{j}t{t.strftime('%Y%m%d%H')}"]
             )
             
             # Lower limit: FLOW[i, j, t] >= -rate_a
-            lower_constraint_name = f"loflow_{i}_{j}_t{t.strftime('%Y%m%d%H')}"
-            
             problem.linear_constraints.add(
-                lin_expr=[[[flow_var_name], [1.0]]],
+                lin_expr=[[[flow_var]], [1.0]],
                 senses=["G"],
                 rhs=[safe_float(-rate_a)],
-                names=[lower_constraint_name]
+                names=[f"lo{i}{j}t{t.strftime('%Y%m%d%H')}"]
             )
     
     # h) Add storage cost to objective
@@ -449,6 +407,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         return None
     
     # 4. Extract results
+    
     # a) Extract objective value
     objective_value = problem.solution.get_objective_value()
     print(f"[DCOPF] Final cost = {objective_value}, status = {status_string}")
@@ -557,7 +516,7 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
     marginal_prices = []
     for t in T:
         for i in N:
-            constraint_name = f"pb_{i}_t{t.strftime('%Y%m%d%H')}"
+            constraint_name = f"pb{i}t{t.strftime('%Y%m%d%H')}"
             try:
                 constraint_idx = problem.linear_constraints.get_indices(constraint_name)
                 dual_value = problem.solution.get_dual_values(constraint_idx)
@@ -576,8 +535,8 @@ def _dcopf_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1):
         i = int(row_b['fbus'])
         j = int(row_b['tbus'])
         for t in T:
-            upper_constraint = f"upflow_{i}_{j}_t{t.strftime('%Y%m%d%H')}"
-            lower_constraint = f"loflow_{i}_{j}_t{t.strftime('%Y%m%d%H')}"
+            upper_constraint = f"up{i}{j}t{t.strftime('%Y%m%d%H')}"
+            lower_constraint = f"lo{i}{j}t{t.strftime('%Y%m%d%H')}"
             
             try:
                 upper_idx = problem.linear_constraints.get_indices(upper_constraint)

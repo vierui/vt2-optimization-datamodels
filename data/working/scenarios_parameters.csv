@@ -5,7 +5,3 @@ scenario_3,"{1:'nuclear',4:'solar',2:'wind'}","{7:'battery1'}",1.0
 scenario_4,"{2:'nuclear',4:'wind', 8:'gas'}","{1:'battery1',7:'battery2'}",1.0
 scenario_5,"{1:'wind',2:'solar',3:'nuclear'}","{8:'battery1',4:'battery2'}",1.0
 scenario_6,"{2:'nuclear',4:'wind',7:'solar'}","{}",1.0
-scenario_7,"{3:'solar',4:'nuclear',8:'wind'}","{1:'battery2'}",1.0
-scenario_8,"{1:'gas',4:'nuclear',7:'solar'}","{9:'battery2',2:'battery2'}",1.0
-scenario_9,"{2:'wind',4:'nuclear',7:'solar',1:'solar'}","{}",1.0
-scenario_10,"{2:'wind',4:'nuclear',7:'solar',1:'solar'}","{3:'battery2',9:'battery2'}",1.0

@@ -1,4 +1,56 @@
-# Energy Investment Analysis Platform 🔋💡
+import os
+from pathlib import Path
+
+def get_project_root():
+    """Get the absolute path to the project root directory"""
+    return "/Users/rvieira/Documents/Master/vt2-optimization-datamodels"
+
+def update_readme_with_scenarios():
+    """Update README.md with links to all scenario reports"""
+    project_root = get_project_root()
+    readme_path = os.path.join(project_root, 'README.md')
+    results_dir = os.path.join(project_root, 'data', 'results')
+    
+    try:
+        with open(readme_path, 'r') as f:
+            content = f.read()
+    except FileNotFoundError:
+        # If README doesn't exist, create it first
+        create_readme_template(readme_path)
+        with open(readme_path, 'r') as f:
+            content = f.read()
+    
+    # Find all scenario reports
+    scenario_reports = []
+    for item in os.listdir(results_dir):
+        scenario_dir = os.path.join(results_dir, item)
+        if os.path.isdir(scenario_dir) and item.startswith('scenario_'):
+            report_path = os.path.join(scenario_dir, f'{item}_analysis.md')
+            if os.path.exists(report_path):
+                scenario_reports.append(item)
+    
+    # Sort scenarios numerically
+    scenario_reports.sort(key=lambda x: int(x.split('_')[1]))
+    
+    # Create the new scenario links section
+    scenario_links = "\n### 📊 Detailed Scenario Analysis\n"
+    for scenario in scenario_reports:
+        scenario_links += f"- [{scenario}](data/results/{scenario}/{scenario}_analysis.md)\n"
+    
+    # Replace the existing scenario links section
+    import re
+    pattern = r"### 📊 Detailed Scenario Analysis\n(?:- \[.*?\]\(.*?\)\n)*"
+    updated_content = re.sub(pattern, scenario_links, content)
+    
+    # Write the updated content
+    with open(readme_path, 'w') as f:
+        f.write(updated_content)
+    
+    print(f"README.md updated with current scenario links at {readme_path}")
+
+def create_readme_template(readme_path):
+    """Create a new README.md file with the template content"""
+    template_content = """# Energy Investment Analysis Platform 🔋💡
 
 ## Overview
 This project presents a comprehensive investment framework for energy systems, focusing on optimal technology selection and 
@@ -42,7 +94,6 @@ investment analysis, the platform enables data-driven decisions for energy infra
 - Scenarios with renewable generation + storage showed optimal performance
 - Gas-heavy scenarios demonstrated higher operational costs
 - Storage sizing significantly impacts system economics
-
 
 ### 📊 Detailed Scenario Analysis
 ${scenario_links}
@@ -126,3 +177,18 @@ For questions and feedback:
 - Special thanks to [Institution Name] for support
 - Built using [list key libraries/tools]
 - Inspired by [related works/papers]
+"""
+    
+    with open(readme_path, 'w') as f:
+        f.write(template_content)
+    
+    print(f"Created new README.md at {readme_path}")
+
+if __name__ == "__main__":
+    project_root = get_project_root()
+    readme_path = os.path.join(project_root, 'README.md')
+    
+    # Always create/update the full template first
+    create_readme_template(readme_path)
+    # Then update the scenario links
+    update_readme_with_scenarios() 
