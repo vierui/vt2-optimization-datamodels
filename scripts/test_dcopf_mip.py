@@ -3,12 +3,15 @@
 """
 test_dcopf_mip.py
 
-Test script for the Mixed Integer Programming DC Optimal Power Flow (DCOPF-MIP) implementation.
+Test script for the Simplified Mixed Integer Programming DC Optimal Power Flow (DCOPF-MIP) implementation.
 This script:
 1. Creates a simple power system model directly
-2. Runs the DCOPF-MIP solver with various parameters
+2. Runs the simplified DCOPF-MIP solver with binary commitment variables
 3. Compares the results with the standard DCOPF solver
-4. Displays the unit commitment decisions and related metrics
+4. Displays the unit commitment decisions and startup/shutdown costs
+
+The simplified MIP implementation only includes binary commitment variables and 
+startup/shutdown variables, without linking constraints or temporal operational constraints.
 """
 
 import os
@@ -27,6 +30,10 @@ sys.path.insert(0, project_root)
 
 # Add the scripts directory to the Python path
 sys.path.insert(0, script_dir)
+
+# Create results directory if it doesn't exist
+results_dir = os.path.join(project_root, 'results', 'test-mip')
+os.makedirs(results_dir, exist_ok=True)
 
 # Import the modules
 from scripts.dcopf import dcopf
@@ -176,7 +183,7 @@ def run_and_compare():
             return
         
         # Run DCOPF-MIP with default parameters
-        print("\n===== Running DCOPF-MIP with default parameters =====")
+        print("\n===== Running simplified DCOPF-MIP with binary commitment variables =====")
         mip_results = dcopf_mip(gen_time_series, branch, bus, demand_time_series)
         
         if mip_results is None:
@@ -240,15 +247,20 @@ def run_and_compare():
             else:
                 print("MIP LMPs are not available because mixed-integer programs don't provide dual values directly.")
         
+        # Save the results to a CSV file
+        results_file = os.path.join(results_dir, 'lp_vs_mip_comparison.csv')
+        gen_compare.to_csv(results_file, index=False)
+        print(f"\nComparison results saved to {results_file}")
+        
         return lp_results, mip_results
     
     except Exception as e:
         print(f"Error: {e}")
         return None, None
 
-def run_with_min_up_down_time():
+def run_with_varying_demand():
     """
-    Run DCOPF-MIP with minimum up and down time constraints.
+    Run DCOPF-MIP with varying demand to demonstrate startup/shutdown decisions.
     """
     print("Creating simple power system model with multiple time periods...")
     
@@ -260,17 +272,9 @@ def run_with_min_up_down_time():
         # Create power system model with the time periods
         gen_time_series, branch, bus, _ = create_simple_power_system_direct(time_periods)
         
-        # Override generator parameters for min up/down time test
-        for i, row in gen_time_series.iterrows():
-            if row['id'] == 1:  # Baseload
-                gen_time_series.at[i, 'pmin'] = 30  # Lower min output
-                gen_time_series.at[i, 'pmax'] = 200
-            elif row['id'] == 2:  # Mid-merit
-                gen_time_series.at[i, 'pmin'] = 20  # Lower min output
-                gen_time_series.at[i, 'pmax'] = 100
-            elif row['id'] == 3:  # Peaker
-                gen_time_series.at[i, 'pmin'] = 10  # Lower min output
-                gen_time_series.at[i, 'pmax'] = 100
+        # Define startup and shutdown costs
+        startup_costs = {1: 500, 2: 200, 3: 100}  # More expensive for baseload units
+        shutdown_costs = {1: 300, 2: 100, 3: 50}  # More expensive for baseload units
         
         # Create time-varying demand
         demand_data = []
@@ -302,17 +306,15 @@ def run_with_min_up_down_time():
         
         demand_time_series = pd.DataFrame(demand_data)
         
-        # Run DCOPF-MIP with minimum up and down time constraints
-        print("\n===== Running DCOPF-MIP with min up/down time =====")
+        # Run DCOPF-MIP with varying demand
+        print("\n===== Running DCOPF-MIP with varying demand =====")
         mip_results = dcopf_mip(
             gen_time_series, 
             branch, 
             bus, 
             demand_time_series,
-            min_up_time=2,    # Reduced from 3 to 2
-            min_down_time=1,  # Reduced from 2 to 1
-            startup_costs={1: 500, 2: 200, 3: 100},  # Lower startup costs
-            shutdown_costs={1: 300, 2: 100, 3: 50}    # Lower shutdown costs
+            startup_costs=startup_costs,
+            shutdown_costs=shutdown_costs
         )
         
         if mip_results is None:
@@ -381,9 +383,14 @@ def run_with_min_up_down_time():
         plt.grid(True)
         
         plt.tight_layout()
-        # Save the figure to the project root directory
-        plt.savefig(os.path.join(project_root, 'dcopf_mip_results.png'))
+        # Save the figure to the results directory
+        plt.savefig(os.path.join(results_dir, 'dcopf_mip_results.png'))
         plt.close()
+        
+        # Save results to CSV
+        commitment_df.to_csv(os.path.join(results_dir, 'commitment.csv'), index=False)
+        startup_shutdown_df.to_csv(os.path.join(results_dir, 'startup_shutdown.csv'), index=False)
+        generation_df.to_csv(os.path.join(results_dir, 'generation.csv'), index=False)
         
         return mip_results
     
@@ -392,7 +399,7 @@ def run_with_min_up_down_time():
         return None
 
 if __name__ == "__main__":
-    print("Testing DCOPF-MIP...")
+    print("Testing Simplified DCOPF-MIP with Binary Commitment Variables...")
     
     # Run and compare LP vs MIP for single time period
     lp_results, mip_results = run_and_compare()
@@ -402,11 +409,11 @@ if __name__ == "__main__":
         print("One or both solvers failed. Terminating test.")
         sys.exit(1)
     
-    # Run with minimum up/down time constraints for multiple periods
-    mip_updown_results = run_with_min_up_down_time()
+    # Run with varying demand to demonstrate startup/shutdown decisions
+    mip_varying_demand_results = run_with_varying_demand()
     
-    if mip_updown_results is None:
-        print("Min up/down time test failed. Terminating test.")
+    if mip_varying_demand_results is None:
+        print("Varying demand test failed. Terminating test.")
         sys.exit(1)
     
-    print("\nDCOPF-MIP testing complete! Results saved to dcopf_mip_results.png") 
+    print("\nDCOPF-MIP testing complete! Results saved to", results_dir) 

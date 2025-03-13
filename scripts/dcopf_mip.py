@@ -8,9 +8,7 @@ This implementation extends the standard DCOPF by including binary variables for
 
 Key extensions over the LP formulation:
 - Binary commitment variables for generators (on/off status)
-- Minimum generation levels when generators are committed
 - Startup and shutdown costs
-- Ramping constraints
 
 The solver uses the CPLEX optimization engine and requires the CPLEX Python API.
 """
@@ -46,8 +44,8 @@ def dcopf_mip(gen_time_series, branch, bus, demand_time_series, delta_t=1,
         bus: DataFrame with bus data
         demand_time_series: DataFrame with demand data
         delta_t: Time step duration in hours
-        min_up_time: Minimum up time for generators (default: 1)
-        min_down_time: Minimum down time for generators (default: 1)
+        min_up_time: Minimum up time for generators (not used in simplified version)
+        min_down_time: Minimum down time for generators (not used in simplified version)
         startup_costs: Dictionary of generator startup costs {gen_id: cost}
         shutdown_costs: Dictionary of generator shutdown costs {gen_id: cost}
     
@@ -135,7 +133,7 @@ def _dcopf_mip_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1
             gen_vars[g, t] = var_name
             gen_names.append(var_name)
             gen_costs.append(safe_float(cost))
-            gen_lbs.append(0.0)  # Lower bound will be controlled by commitment * pmin
+            gen_lbs.append(0.0)  # Lower bound is no longer controlled by commitment, but just 0
             gen_ubs.append(safe_float(pmax))
     
     problem.variables.add(
@@ -342,40 +340,7 @@ def _dcopf_mip_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1
                 names=[lower_constraint_name]
             )
     
-    # b) Generator minimum output constraints (p >= pmin * u)
-    for g in G:
-        for t in T:
-            gen_row = gen_time_series[(gen_time_series['id'] == g) & (gen_time_series['time'] == t)]
-            pmin = gen_row['pmin'].iloc[0]
-            
-            gen_var_name = gen_vars[g, t]
-            commit_var_name = commit_vars[g, t]
-            constraint_name = f"min_gen_{g}_t{t.strftime('%Y%m%d%H')}"
-            
-            problem.linear_constraints.add(
-                lin_expr=[[[gen_var_name, commit_var_name], [1.0, -safe_float(pmin)]]],
-                senses=["G"],
-                rhs=[0.0],
-                names=[constraint_name]
-            )
-    
-    # c) Generator maximum output constraints (p <= pmax * u)
-    for g in G:
-        for t in T:
-            gen_row = gen_time_series[(gen_time_series['id'] == g) & (gen_time_series['time'] == t)]
-            pmax = gen_row['pmax'].iloc[0]
-            
-            gen_var_name = gen_vars[g, t]
-            commit_var_name = commit_vars[g, t]
-            constraint_name = f"max_gen_{g}_t{t.strftime('%Y%m%d%H')}"
-            
-            problem.linear_constraints.add(
-                lin_expr=[[[gen_var_name, commit_var_name], [1.0, -safe_float(pmax)]]],
-                senses=["L"],
-                rhs=[0.0],
-                names=[constraint_name]
-            )
-    
+    # Simplified constraint for startup/shutdown variables
     # d) Startup constraints: u[g,t] - u[g,t-1] <= su[g,t]
     for g in G:
         for t_idx, t in enumerate(T):
@@ -435,56 +400,6 @@ def _dcopf_mip_cplex(gen_time_series, branch, bus, demand_time_series, delta_t=1
                     rhs=[0.0],
                     names=[constraint_name]
                 )
-    
-    # f) Minimum up time constraints
-    if min_up_time > 1:
-        for g in G:
-            for t_idx, t in enumerate(T):
-                # Look at the minimum up time window
-                end_idx = min(t_idx + min_up_time, len(T))
-                window_t = T[t_idx:end_idx]
-                
-                if t_idx > 0 and len(window_t) > 1:  # Only if we have a previous period and at least 2 periods in window
-                    startup_var_name = startup_vars[g, t]
-                    commit_var_names = [commit_vars[g, w_t] for w_t in window_t]
-                    coeffs = [-len(window_t)] + [1.0] * len(window_t)
-                    
-                    constraint_name = f"min_up_{g}_t{t.strftime('%Y%m%d%H')}"
-                    
-                    problem.linear_constraints.add(
-                        lin_expr=[[
-                            [startup_var_name] + commit_var_names,
-                            coeffs
-                        ]],
-                        senses=["L"],
-                        rhs=[0.0],
-                        names=[constraint_name]
-                    )
-    
-    # g) Minimum down time constraints
-    if min_down_time > 1:
-        for g in G:
-            for t_idx, t in enumerate(T):
-                # Look at the minimum down time window
-                end_idx = min(t_idx + min_down_time, len(T))
-                window_t = T[t_idx:end_idx]
-                
-                if t_idx > 0 and len(window_t) > 1:  # Only if we have a previous period and at least 2 periods in window
-                    shutdown_var_name = shutdown_vars[g, t]
-                    commit_var_names = [commit_vars[g, w_t] for w_t in window_t]
-                    coeffs = [len(window_t)] + [-1.0] * len(window_t)
-                    
-                    constraint_name = f"min_down_{g}_t{t.strftime('%Y%m%d%H')}"
-                    
-                    problem.linear_constraints.add(
-                        lin_expr=[[
-                            [shutdown_var_name] + commit_var_names,
-                            coeffs
-                        ]],
-                        senses=["L"],
-                        rhs=[len(window_t)],
-                        names=[constraint_name]
-                    )
     
     # h) Initial storage state constraint
     for s in S:
