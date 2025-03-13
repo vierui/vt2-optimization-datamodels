@@ -1,128 +1,14 @@
-# Energy Investment Analysis Platform 🔋💡
+# Energy Investment Analysis Platform
 
-## Overview
-This project presents a comprehensive investment framework for energy systems, focusing on optimal technology selection and 
-placement of electrical generation, conversion, and storage assets. By combining DC Optimal Power Flow (DCOPF) simulations with 
-investment analysis, the platform enables data-driven decisions for energy infrastructure planning.
+### Overview
+*Currently under development* - This project represents the second specialization project in my Master's studies in Business Engineering at ZHAW (Zurich University of Applied Sciences). It builds upon [an investment model for energy assets](https://github.com/vierui/vt1-energy-investment-model.git) in energy system modeling and optimization, with a focus on linear programming, investment metrics via scenario analysis featuring automated reporting and AI-assisted decision support.
 
-<p align="center">
-  <img src="figures/base_network_topography.png" width="600"/>
-  <br>
-  <em>Base network topology used for scenario analysis</em>
-</p>
+The new platform creates an advanced mathematical modeling toolset for electrical energy system investment optimization. Using sophisticated analytics and forecasting techniques, the goal is to provide comprehensive decision support for energy market stakeholders and business decisions.
 
-## 🌟 Key Features
+### Methodologies to be implemented
+- Switch from Linear Programming (LP) to Mixed Integer Linear Programming (MIP) featuring binary decision variables
+- Forecasting time-series models (unsure if this will be based on predictive modeling or machine learning)
+- Stochastic Programming & Risk Assessment for electricity contracts on spot markets
+- Data Validation Against Real-World Measurements
+---
 
-- **Technical Analysis**
-  - DC Optimal Power Flow (DCOPF) simulation
-  - Multi-scenario analysis capability
-  - Seasonal load profile evaluation
-  - Storage integration modeling
-  - Network constraint handling
-
-- **Economic Assessment**
-  - Net Present Value (NPV) calculations
-  - Investment sensitivity analysis
-  - Technology lifecycle costing
-  - Operational cost optimization
-  - Risk assessment tools
-
-- **Decision Support**
-  - AI-powered scenario analysis
-  - Comparative technology assessment
-  - Investment optimization
-  - Visual analytics and reporting
-  - Scenario-based planning
-
-## 📈 Results & Analysis
-
-### Key Findings
-
-- Balanced technology mixes achieved lowest annuities (~1.35M CHF/year)
-- Scenarios with renewable generation + storage showed optimal performance
-- Gas-heavy scenarios demonstrated higher operational costs
-- Storage sizing significantly impacts system economics
-
-
-### 📊 Detailed Scenario Analysis
-${scenario_links}
-
-### 📑 Global Analysis
-- [Complete Comparison Report](data/results/global_comparison_report.md)
-
-## 🔧 Technical Implementation
-
-### Project Structure
-```
-├── data/
-│   ├── working/          # Input data and parameters
-│   └── results/          # Analysis outputs
-├── scripts/
-│   ├── core/            # DCOPF and optimization engines
-│   ├── visualization/   # Data visualization tools
-│   └── utils/           # Helper functions
-└── figures/             # Generated visualizations
-```
-
-### Technologies Used
-- Python for core computation
-- PuLP for linear programming
-- Pandas for data management
-- Matplotlib/Plotly for visualization
-- OpenAI API for analysis enhancement
-
-## 🚀 Getting Started
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/energy-investment-model.git
-```
-
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Configure OpenAI API (optional):
-```bash
-echo "OPENAI_API_KEY=your_key_here" > .env.local
-```
-
-4. Run the analysis:
-```bash
-python scripts/main.py
-```
-
-## 📊 Example Visualizations
-
-<p align="center">
-  <img src="figures/example_plot.png" width="700"/>
-  <br>
-  <em>Sample visualization of generation mix across scenarios</em>
-</p>
-
-## 📖 Documentation
-
-- [Technical Documentation](docs/technical.md)
-- [User Guide](docs/user_guide.md)
-- [API Reference](docs/api.md)
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 📬 Contact
-
-For questions and feedback:
-- 📧 Email: your.email@example.com
-- 🌐 LinkedIn: [Your Name](https://linkedin.com/in/yourprofile)
-
-## 🙏 Acknowledgments
-
-- Special thanks to [Institution Name] for support
-- Built using [list key libraries/tools]
-- Inspired by [related works/papers]
