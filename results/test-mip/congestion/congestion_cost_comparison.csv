@@ -1,0 +1,7 @@
+Scenario,Solver,Cost
+Normal,LP,29600.000000000004
+Congested,LP,30100.000000000004
+Highly Congested,LP,32166.666666666646
+Normal,MIP,29600.0
+Congested,MIP,30100.0
+Highly Congested,MIP,32166.666666666664

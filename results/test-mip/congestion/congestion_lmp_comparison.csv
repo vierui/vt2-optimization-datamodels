@@ -1,0 +1,151 @@
+Scenario,Solver,Bus,Price
+Normal,LP,1,10.0
+Normal,LP,2,10.0
+Normal,LP,3,10.0
+Normal,LP,4,10.0
+Normal,LP,5,10.0
+Normal,LP,1,10.0
+Normal,LP,2,10.0
+Normal,LP,3,10.0
+Normal,LP,4,10.0
+Normal,LP,5,10.0
+Normal,LP,1,10.0
+Normal,LP,2,10.0
+Normal,LP,3,10.0
+Normal,LP,4,10.0
+Normal,LP,5,10.0
+Normal,LP,1,10.0
+Normal,LP,2,30.0
+Normal,LP,3,40.0
+Normal,LP,4,50.0
+Normal,LP,5,40.0
+Normal,LP,1,10.0
+Normal,LP,2,36.66666666666667
+Normal,LP,3,50.0
+Normal,LP,4,63.333333333333336
+Normal,LP,5,49.99999999999999
+Normal,LP,1,10.0
+Normal,LP,2,36.666666666666664
+Normal,LP,3,50.0
+Normal,LP,4,63.33333333333334
+Normal,LP,5,50.0
+Normal,LP,1,10.0
+Normal,LP,2,36.666666666666664
+Normal,LP,3,50.0
+Normal,LP,4,63.33333333333334
+Normal,LP,5,50.0
+Normal,LP,1,10.0
+Normal,LP,2,30.0
+Normal,LP,3,40.0
+Normal,LP,4,50.0
+Normal,LP,5,40.0
+Normal,LP,1,10.0
+Normal,LP,2,10.0
+Normal,LP,3,10.0
+Normal,LP,4,10.0
+Normal,LP,5,10.0
+Normal,LP,1,10.0
+Normal,LP,2,9.999999999999998
+Normal,LP,3,9.999999999999996
+Normal,LP,4,9.999999999999998
+Normal,LP,5,9.999999999999996
+Congested,LP,1,10.0
+Congested,LP,2,10.0
+Congested,LP,3,10.0
+Congested,LP,4,10.0
+Congested,LP,5,10.0
+Congested,LP,1,10.0
+Congested,LP,2,10.0
+Congested,LP,3,10.0
+Congested,LP,4,10.0
+Congested,LP,5,10.0
+Congested,LP,1,10.0
+Congested,LP,2,10.0
+Congested,LP,3,10.0
+Congested,LP,4,10.0
+Congested,LP,5,10.0
+Congested,LP,1,10.0
+Congested,LP,2,30.0
+Congested,LP,3,40.0
+Congested,LP,4,50.0
+Congested,LP,5,40.0
+Congested,LP,1,10.0
+Congested,LP,2,36.66666666666667
+Congested,LP,3,50.0
+Congested,LP,4,63.333333333333336
+Congested,LP,5,49.99999999999999
+Congested,LP,1,10.0
+Congested,LP,2,36.666666666666664
+Congested,LP,3,50.0
+Congested,LP,4,63.33333333333334
+Congested,LP,5,50.0
+Congested,LP,1,10.0
+Congested,LP,2,36.666666666666664
+Congested,LP,3,50.0
+Congested,LP,4,63.33333333333334
+Congested,LP,5,50.0
+Congested,LP,1,10.0
+Congested,LP,2,30.0
+Congested,LP,3,40.0
+Congested,LP,4,50.0
+Congested,LP,5,40.0
+Congested,LP,1,10.0
+Congested,LP,2,30.0
+Congested,LP,3,25.0
+Congested,LP,4,20.0
+Congested,LP,5,24.999999999999996
+Congested,LP,1,10.0
+Congested,LP,2,30.0
+Congested,LP,3,25.0
+Congested,LP,4,20.0
+Congested,LP,5,25.0
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,25.0
+Highly Congested,LP,4,20.0
+Highly Congested,LP,5,24.999999999999996
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,25.0
+Highly Congested,LP,4,20.0
+Highly Congested,LP,5,24.999999999999996
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,25.0
+Highly Congested,LP,4,20.0
+Highly Congested,LP,5,24.999999999999996
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,50.0
+Highly Congested,LP,4,63.333333333333336
+Highly Congested,LP,5,56.666666666666664
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,50.0
+Highly Congested,LP,4,63.333333333333336
+Highly Congested,LP,5,56.666666666666664
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,50.0
+Highly Congested,LP,4,63.333333333333336
+Highly Congested,LP,5,56.666666666666664
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,50.0
+Highly Congested,LP,4,63.333333333333336
+Highly Congested,LP,5,56.666666666666664
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,25.0
+Highly Congested,LP,4,20.0
+Highly Congested,LP,5,24.999999999999996
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,25.0
+Highly Congested,LP,4,20.0
+Highly Congested,LP,5,24.999999999999996
+Highly Congested,LP,1,10.0
+Highly Congested,LP,2,30.0
+Highly Congested,LP,3,25.0
+Highly Congested,LP,4,20.0
+Highly Congested,LP,5,25.0
