@@ -3,10 +3,10 @@
 """
 test_investment.py
 
-Test script for the multi-stage investment model using a chunk-based approach.
+Test script for the power system investment model using a lifetime-based approach.
 This script:
 1. Creates a simple power system model for investment planning
-2. Runs the multi-stage investment model with different asset lifetimes
+2. Runs the investment model with different asset lifetimes
 3. Visualizes the investment decisions and operational results
 4. Analyzes the costs and benefits of different investment strategies
 """
@@ -18,6 +18,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
 import matplotlib.dates as mdates
+from numpy import ones
 
 # Get the absolute path of the script directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -33,9 +34,94 @@ sys.path.insert(0, script_dir)
 results_dir = os.path.join(project_root, 'results', 'investment')
 os.makedirs(results_dir, exist_ok=True)
 
-# Import the modules
-from scripts.dcopf_investment import dcopf_investment
-from scripts.test_dcopf_mip import create_simple_power_system_direct
+# Import the CPLEX-based optimizer implementation
+from scripts.optimizer import run_investment_model
+
+# Define a simple function to create a power system for testing
+def create_simple_power_system_direct(time_periods=None, line_limits=None):
+    """
+    Create a simple power system model for testing.
+    
+    Args:
+        time_periods: List of time periods
+        line_limits: Optional dictionary to override default line limits
+        
+    Returns:
+        Tuple of (gen_time_series, branch, bus, demand_time_series)
+    """
+    if time_periods is None:
+        time_periods = [datetime.now()]
+    
+    # Create buses
+    bus_data = [
+        {'bus_i': 1, 'type': 3, 'pd': 0.0, 'qd': 0.0, 'gs': 0.0, 'bs': 0.0, 'vm': 1.0, 'va': 0.0},  # Slack bus
+        {'bus_i': 2, 'type': 1, 'pd': 0.0, 'qd': 0.0, 'gs': 0.0, 'bs': 0.0, 'vm': 1.0, 'va': 0.0},
+        {'bus_i': 3, 'type': 1, 'pd': 0.0, 'qd': 0.0, 'gs': 0.0, 'bs': 0.0, 'vm': 1.0, 'va': 0.0},
+        {'bus_i': 4, 'type': 1, 'pd': 0.0, 'qd': 0.0, 'gs': 0.0, 'bs': 0.0, 'vm': 1.0, 'va': 0.0},
+        {'bus_i': 5, 'type': 1, 'pd': 0.0, 'qd': 0.0, 'gs': 0.0, 'bs': 0.0, 'vm': 1.0, 'va': 0.0},
+    ]
+    
+    # Create branches
+    if line_limits is None:
+        line_limits = {
+            (1, 2): 100.0,
+            (1, 3): 100.0,
+            (2, 4): 100.0,
+            (3, 4): 100.0,
+            (3, 5): 100.0,
+            (4, 5): 100.0
+        }
+    
+    branch_data = [
+        {'fbus': 1, 'tbus': 2, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': line_limits.get((1, 2), 100.0), 'sus': 10.0},
+        {'fbus': 1, 'tbus': 3, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': line_limits.get((1, 3), 100.0), 'sus': 10.0},
+        {'fbus': 2, 'tbus': 4, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': line_limits.get((2, 4), 100.0), 'sus': 10.0},
+        {'fbus': 3, 'tbus': 4, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': line_limits.get((3, 4), 100.0), 'sus': 10.0},
+        {'fbus': 3, 'tbus': 5, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': line_limits.get((3, 5), 100.0), 'sus': 10.0},
+        {'fbus': 4, 'tbus': 5, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': line_limits.get((4, 5), 100.0), 'sus': 10.0},
+    ]
+    
+    # Create generators
+    gen_data = []
+    for t in time_periods:
+        # Baseload generator at bus 1
+        gen_data.append({
+            'id': 1, 'time': t, 'bus': 1, 'pmin': 20, 'pmax': 100, 'gencost': 20,
+            'emax': 0, 'einitial': 0, 'eta': 0
+        })
+        
+        # Mid-merit generator at bus 2
+        gen_data.append({
+            'id': 2, 'time': t, 'bus': 2, 'pmin': 10, 'pmax': 80, 'gencost': 40,
+            'emax': 0, 'einitial': 0, 'eta': 0
+        })
+        
+        # Peaker generator at bus 3
+        gen_data.append({
+            'id': 3, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': 50, 'gencost': 80,
+            'emax': 0, 'einitial': 0, 'eta': 0
+        })
+    
+    # Create demand
+    demand_data = []
+    for t in time_periods:
+        # Demand at bus 4
+        demand_data.append({
+            'time': t, 'bus': 4, 'pd': 50
+        })
+        
+        # Demand at bus 5
+        demand_data.append({
+            'time': t, 'bus': 5, 'pd': 100
+        })
+    
+    # Convert to DataFrames
+    gen_time_series = pd.DataFrame(gen_data)
+    branch = pd.DataFrame(branch_data)
+    bus = pd.DataFrame(bus_data)
+    demand_time_series = pd.DataFrame(demand_data)
+    
+    return gen_time_series, branch, bus, demand_time_series
 
 def create_investment_test_system(planning_horizon=10, time_periods=None, line_limits=None):
     """
@@ -170,11 +256,161 @@ def create_investment_test_system(planning_horizon=10, time_periods=None, line_l
     
     return gen_time_series_inv, branch, bus, demand_time_series_inv
 
-def run_investment_model():
+def create_investment_test_system_from_csv(planning_horizon=10, time_periods=None):
     """
-    Run the multi-stage investment model on the test system.
+    Create a power system for investment testing using grid configuration from CSV files.
+    
+    Includes:
+    - A mandatory generator at bus 1 (always active)
+    - Optional generators at bus 1, bus 2, and bus 3
+    - Loads at bus 4 and bus 5
+    - Storage units at bus 3 and bus 4
+    
+    Args:
+        planning_horizon: Planning horizon in years
+        time_periods: Optional list of time periods to use (default: 24 hours)
+        
+    Returns:
+        Tuple of (gen_time_series, branch, bus, demand_time_series)
     """
-    print("Creating investment test system...")
+    # Create time periods if not provided
+    if time_periods is None:
+        # Create 24 hours of data
+        start_time = datetime.now().replace(minute=0, second=0, microsecond=0)
+        time_periods = [start_time + timedelta(hours=h) for h in range(24)]
+    
+    # Load grid configuration from CSV files
+    bus_csv_path = os.path.join(project_root, 'data', 'working', 'bus.csv')
+    branch_csv_path = os.path.join(project_root, 'data', 'working', 'branch.csv')
+    
+    # Read bus and branch data
+    bus = pd.read_csv(bus_csv_path)
+    branch = pd.read_csv(branch_csv_path)
+    
+    # Create generators
+    gen_data = []
+    
+    # 1. Mandatory generator at bus 1 (always active)
+    for t in time_periods:
+        gen_data.append({
+            'id': 1, 'time': t, 'bus': 1, 'pmin': 20, 'pmax': 100, 'gencost': 20,
+            'emax': 0, 'einitial': 0, 'eta': 0,
+            'lifetime': 20,  # 20 years
+            'capex': 1500000,  # $1.5M/MW
+            'investment_required': 0  # 0 means already installed (mandatory)
+        })
+    
+    # 2. Optional generator at bus 1 (can be invested in)
+    for t in time_periods:
+        gen_data.append({
+            'id': 2, 'time': t, 'bus': 1, 'pmin': 0, 'pmax': 120, 'gencost': 30,
+            'emax': 0, 'einitial': 0, 'eta': 0,
+            'lifetime': 15,  # 15 years
+            'capex': 1200000,  # $1.2M/MW
+            'investment_required': 1  # 1 means investment required
+        })
+    
+    # 3. Optional generator at bus 2 (mid-merit)
+    for t in time_periods:
+        gen_data.append({
+            'id': 3, 'time': t, 'bus': 2, 'pmin': 0, 'pmax': 80, 'gencost': 40,
+            'emax': 0, 'einitial': 0, 'eta': 0,
+            'lifetime': 15,  # 15 years
+            'capex': 1000000,  # $1M/MW
+            'investment_required': 1  # 1 means investment required
+        })
+    
+    # 4. Optional generator at bus 3 (peaker)
+    for t in time_periods:
+        gen_data.append({
+            'id': 4, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': 50, 'gencost': 70,
+            'emax': 0, 'einitial': 0, 'eta': 0,
+            'lifetime': 10,  # 10 years
+            'capex': 600000,  # $0.6M/MW
+            'investment_required': 1  # 1 means investment required
+        })
+    
+    # 5. Optional renewable generator at bus 3
+    for t in time_periods:
+        gen_data.append({
+            'id': 5, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': 60, 'gencost': 5,
+            'emax': 0, 'einitial': 0, 'eta': 0,
+            'lifetime': 7,  # 7 years
+            'capex': 800000,  # $0.8M/MW
+            'investment_required': 1  # 1 means investment required
+        })
+    
+    # 6. Storage unit at bus 3
+    for t in time_periods:
+        gen_data.append({
+            'id': 6, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': 40, 'gencost': 0,
+            'emax': 160,  # 160 MWh energy capacity
+            'einitial': 40,  # Start 25% charged
+            'eta': 0.9,  # 90% round-trip efficiency
+            'lifetime': 5,  # 5 years
+            'capex': 400000,  # $0.4M/MWh
+            'investment_required': 1  # 1 means investment required
+        })
+    
+    # 7. Storage unit at bus 4
+    for t in time_periods:
+        gen_data.append({
+            'id': 7, 'time': t, 'bus': 4, 'pmin': 0, 'pmax': 50, 'gencost': 0,
+            'emax': 200,  # 200 MWh energy capacity
+            'einitial': 50,  # Start 25% charged
+            'eta': 0.9,  # 90% round-trip efficiency
+            'lifetime': 5,  # 5 years
+            'capex': 400000,  # $0.4M/MWh
+            'investment_required': 1  # 1 means investment required
+        })
+    
+    # Create time-varying demand
+    demand_data = []
+    
+    # Base demand at each bus (from bus.csv)
+    base_demand_bus4 = float(bus[bus['bus_i'] == 4]['Pd'].values[0])  # From CSV
+    base_demand_bus5 = float(bus[bus['bus_i'] == 5]['Pd'].values[0])  # From CSV
+    
+    # Create daily pattern with morning and evening peaks
+    for t in time_periods:
+        hour = t.hour
+        
+        # Morning peak 7-9 AM, evening peak 6-8 PM
+        if 7 <= hour < 10:
+            factor = 1.5  # Morning peak
+        elif 18 <= hour < 21:
+            factor = 1.8  # Evening peak
+        elif 0 <= hour < 5:
+            factor = 0.7  # Night valley
+        else:
+            factor = 1.0  # Base load
+        
+        # Add demand at bus 4
+        demand_data.append({
+            'time': t,
+            'bus': 4,
+            'pd': base_demand_bus4 * factor
+        })
+        
+        # Add demand at bus 5
+        demand_data.append({
+            'time': t,
+            'bus': 5,
+            'pd': base_demand_bus5 * factor
+        })
+    
+    # Convert to DataFrames
+    gen_time_series = pd.DataFrame(gen_data)
+    demand_time_series = pd.DataFrame(demand_data)
+    
+    # Return the power system data
+    return gen_time_series, branch, bus, demand_time_series
+
+def run_test_model_from_csv():
+    """
+    Run the investment model on the test system with CSV data.
+    """
+    print("Creating investment test system from CSV files...")
     
     # Create 24 hours of data for 4 typical days
     time_periods = []
@@ -182,31 +418,35 @@ def run_investment_model():
         start_time = datetime(2023, 1 + season*3, 1)  # Start of each season
         time_periods.extend([start_time + timedelta(hours=h) for h in range(24)])
     
-    gen_time_series, branch, bus, demand_time_series = create_investment_test_system(
+    gen_time_series, branch, bus, demand_time_series = create_investment_test_system_from_csv(
         planning_horizon=10,
         time_periods=time_periods
     )
     
     # Define asset lifetimes
     asset_lifetimes = {
-        1: 20,  # Baseload: 20 years
-        2: 15,  # Mid-merit: 15 years
-        3: 10,  # Peaker: 10 years
-        4: 7,   # Renewable: 7 years
-        5: 5    # Storage: 5 years
+        1: 20,  # Mandatory generator at bus 1: 20 years
+        2: 15,  # Optional generator at bus 1: 15 years
+        3: 15,  # Mid-merit at bus 2: 15 years
+        4: 10,  # Peaker at bus 3: 10 years
+        5: 7,   # Renewable at bus 3: 7 years
+        6: 5,   # Storage at bus 3: 5 years
+        7: 5    # Storage at bus 4: 5 years
     }
     
     # Define asset capex
     asset_capex = {
-        1: 1500000,  # Baseload: $1.5M/MW
-        2: 1000000,  # Mid-merit: $1M/MW
-        3: 500000,   # Peaker: $0.5M/MW
-        4: 800000,   # Renewable: $0.8M/MW
-        5: 400000    # Storage: $0.4M/MWh
+        1: 1500000,  # Mandatory generator: $1.5M/MW
+        2: 1200000,  # Optional generator at bus 1: $1.2M/MW
+        3: 1000000,  # Mid-merit: $1M/MW
+        4: 600000,   # Peaker: $0.6M/MW
+        5: 800000,   # Renewable: $0.8M/MW
+        6: 400000,   # Storage at bus 3: $0.4M/MWh
+        7: 400000    # Storage at bus 4: $0.4M/MWh
     }
     
-    print("\n===== Running Multi-Stage Investment Model =====")
-    investment_results = dcopf_investment(
+    print("\n===== Running Investment Model =====")
+    investment_results = run_investment_model(
         gen_time_series, branch, bus, demand_time_series,
         planning_horizon=10,
         start_year=2023,
@@ -223,7 +463,7 @@ def run_investment_model():
     # Print investment decisions
     print("\n===== Investment Decisions =====")
     inv_df = investment_results['investment']
-    print(inv_df[inv_df['decision'] == 1].sort_values(['asset_id', 'chunk_idx']))
+    print(inv_df[inv_df['decision'] == 1].sort_values(['asset_id', 'lifetime_period']))
     
     # Print cost summary
     print("\n===== Cost Summary =====")
@@ -233,7 +473,7 @@ def run_investment_model():
     # Calculate cost details by asset
     print("\n===== Cost Details by Asset =====")
     asset_costs = {}
-    for (asset_id, chunk_idx), cost in investment_results['investment_costs'].items():
+    for (asset_id, period_idx), cost in investment_results['investment_costs'].items():
         if asset_id not in asset_costs:
             asset_costs[asset_id] = 0
         asset_costs[asset_id] += cost
@@ -241,12 +481,12 @@ def run_investment_model():
     for asset_id, cost in asset_costs.items():
         print(f"Asset {asset_id}: ${cost:,.2f}")
     
-    # Calculate generation by asset (sum across all chunks)
+    # Calculate generation by asset (sum across all lifetime periods)
     print("\n===== Generation by Asset =====")
     total_gen_by_asset = {}
     
-    for chunk_key, gen_df in investment_results['generation_by_chunk'].items():
-        asset_id, chunk_idx = chunk_key
+    for period_key, gen_df in investment_results['generation_by_period'].items():
+        asset_id, period_idx = period_key
         for _, row in gen_df.iterrows():
             gen_id = row['id']
             if gen_id not in total_gen_by_asset:
@@ -259,8 +499,8 @@ def run_investment_model():
     # Plot investment decisions
     plot_investment_decisions(investment_results)
     
-    # Plot generation by chunk
-    plot_generation_by_chunk(investment_results)
+    # Plot generation by lifetime period
+    plot_generation_by_period(investment_results)
     
     return investment_results
 
@@ -277,20 +517,24 @@ def plot_investment_decisions(investment_results):
     
     # Create a colormap for assets
     asset_colors = {
-        1: 'navy',     # Baseload
-        2: 'forestgreen',  # Mid-merit
-        3: 'firebrick',    # Peaker
-        4: 'gold',      # Renewable
-        5: 'purple'    # Storage
+        1: 'navy',     # Mandatory generator at bus 1
+        2: 'forestgreen',  # Optional generator at bus 1
+        3: 'darkgreen',  # Mid-merit at bus 2
+        4: 'firebrick',  # Peaker at bus 3
+        5: 'gold',     # Renewable at bus 3
+        6: 'purple',   # Storage at bus 3
+        7: 'orchid'    # Storage at bus 4
     }
     
     # Create asset labels
     asset_labels = {
-        1: 'Baseload',
-        2: 'Mid-merit',
-        3: 'Peaker',
-        4: 'Renewable',
-        5: 'Storage'
+        1: 'Mandatory Gen (Bus 1)',
+        2: 'Optional Gen (Bus 1)',
+        3: 'Mid-merit (Bus 2)',
+        4: 'Peaker (Bus 3)',
+        5: 'Renewable (Bus 3)',
+        6: 'Storage (Bus 3)',
+        7: 'Storage (Bus 4)'
     }
     
     plt.figure(figsize=(12, 6))
@@ -322,22 +566,16 @@ def plot_investment_decisions(investment_results):
     plt.xlim(min_year - 0.5, max_year + 0.5)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, 'investment_decisions.png'))
+    
+    # Save the plot and print confirmation message
+    output_path = os.path.join(results_dir, 'investment_decisions.png')
+    plt.savefig(output_path)
+    print(f"Investment decisions plot saved to: {output_path}")
     plt.close()
 
-def plot_generation_by_chunk(investment_results):
-    """
-    Plot the generation by chunk and asset.
-    """
-    # Get a sample chunk to plot
-    sample_key = list(investment_results['generation_by_chunk'].keys())[0]
-    sample_gen = investment_results['generation_by_chunk'][sample_key]
-    
-    if sample_gen.empty:
-        print("No generation data to plot.")
-        return
-    
-    # Asset labels
+def plot_generation_by_period(results):
+    """Plot the generation for each period and asset."""
+    # Create asset labels
     asset_labels = {
         1: 'Baseload',
         2: 'Mid-merit',
@@ -346,36 +584,79 @@ def plot_generation_by_chunk(investment_results):
         5: 'Storage'
     }
     
-    # Create hourly generation plots for a specific asset and chunk
-    asset_id, chunk_idx = sample_key
-    chunk_gen = sample_gen.copy()
+    # Extract generation data from the results
+    # Check if we have generation_by_period data
+    if 'generation_by_period' not in results or not results['generation_by_period']:
+        print("No generation data to plot.")
+        return
     
-    # Convert times to datetime if they're not already
-    if not isinstance(chunk_gen['time'].iloc[0], datetime):
-        chunk_gen['time'] = pd.to_datetime(chunk_gen['time'])
+    # Combine generation data from all periods into one DataFrame
+    all_gen_data = []
+    for period_key, period_df in results['generation_by_period'].items():
+        all_gen_data.append(period_df)
+    
+    if not all_gen_data:
+        print("No generation data to plot.")
+        return
+        
+    period_gen = pd.concat(all_gen_data, ignore_index=True)
+    
+    if isinstance(period_gen, pd.DataFrame):
+        # Handle the case where period_gen is already a DataFrame
+        pass
+    else:
+        period_gen = pd.DataFrame(period_gen)
+        period_gen['time'] = pd.to_datetime(period_gen['time'])
     
     # Group by time and generator
-    pivoted = chunk_gen.pivot_table(index='time', columns='id', values='gen', aggfunc='sum')
+    pivoted = period_gen.pivot_table(index='time', columns='id', values='gen', aggfunc='sum')
     
     plt.figure(figsize=(12, 6))
     
-    # Create a stacked area plot
-    pivoted.plot.area(ax=plt.gca(), stacked=True, alpha=0.7)
+    # Separate positive and negative values for plotting
+    pos_data = pivoted.copy()
+    neg_data = pivoted.copy()
+    
+    # Set negative values to 0 in pos_data
+    pos_data[pos_data < 0] = 0
+    
+    # Set positive values to 0 in neg_data
+    neg_data[neg_data > 0] = 0
+    
+    # Plot positive values as stacked area
+    ax = plt.gca()
+    if not pos_data.empty and (pos_data > 0).any().any():
+        pos_data.plot.area(ax=ax, stacked=True, alpha=0.7)
+    
+    # Plot negative values as stacked area, but on the negative side
+    if not neg_data.empty and (neg_data < 0).any().any():
+        neg_data.plot.area(ax=ax, stacked=True, alpha=0.7)
     
     plt.xlabel('Time')
-    plt.ylabel('Generation (MW)')
-    plt.title(f'Hourly Generation by Generator Type for Asset {asset_id}, Chunk {chunk_idx}')
+    plt.ylabel('Generation/Consumption (MW)')
+    plt.title('Hourly Generation and Storage Operation')
     
     # Use asset labels in the legend
     handles, labels = plt.gca().get_legend_handles_labels()
-    new_labels = [asset_labels.get(int(label), f'Generator {label}') for label in labels]
-    plt.legend(handles, new_labels)
+    new_labels = []
+    for label in labels:
+        asset_id = int(label)
+        if asset_id in asset_labels:
+            new_labels.append(asset_labels[asset_id])
+        else:
+            new_labels.append(f'Generator {label}')
+    
+    if handles and new_labels:
+        plt.legend(handles, new_labels)
     
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.savefig(os.path.join(results_dir, f'generation_asset{asset_id}_chunk{chunk_idx}.png'))
+    
+    # Save the plot
+    plt.savefig(os.path.join(results_dir, 'generation_by_period.png'))
+    print("Generation plot saved to:", os.path.join(results_dir, 'generation_by_period.png'))
     plt.close()
 
 if __name__ == "__main__":
-    # Run the investment model
-    investment_results = run_investment_model() 
+    # Run the modified investment model using CSV data
+    investment_results = run_test_model_from_csv() 
