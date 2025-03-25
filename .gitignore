@@ -4,6 +4,10 @@
 .python-version
 *.log
 
+# IDE settings
+.vscode/
+.idea/
+
 scripts/archives/
 notes/
 
