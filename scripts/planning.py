@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-test_dcopf_planning.py
+planning.py
 
 Test script for the DCOPF investment planning model which creates an
 installation plan across the planning horizon.
@@ -31,7 +31,7 @@ os.makedirs(results_dir, exist_ok=True)
 
 # Import our investment DCOPF planning implementation
 from scripts.optimization import investment_dcopf_planning
-from scripts.test_dcopf_investment import create_test_system
+from scripts.investment import create_test_system
 
 def plot_installation_timeline(planning_results):
     """

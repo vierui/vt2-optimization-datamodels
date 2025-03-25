@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-test_dcopf_investment.py
+investment.py
 
 Test script for the integrated DCOPF investment model.
 """
