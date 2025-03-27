@@ -30,21 +30,31 @@ os.makedirs(results_dir, exist_ok=True)
 # Import our investment DCOPF implementation
 from scripts.optimization import investment_dcopf
 
-def create_test_system(time_periods=None):
+def create_test_system(time_periods=None, data_mapping=None):
     """
-    Create a simple power system with mandatory nuclear and optional green assets.
+    Create a simple power system with mandatory nuclear and optional renewable assets,
+    using real load, solar and wind data from CSV files.
     
     Args:
         time_periods: Optional list of time periods (default: 24 hours)
+        data_mapping: Dictionary mapping timestamps to load, solar, and wind data
         
     Returns:
         Tuple of (gen_time_series, branch, bus, demand_time_series)
     """
-    # Create time periods if not provided
-    if time_periods is None:
-        # Create 24 hours of data
-        start_time = datetime.now().replace(minute=0, second=0, microsecond=0)
-        time_periods = [start_time + timedelta(hours=h) for h in range(24)]
+    # Verify that time_periods and data_mapping exist
+    if not time_periods:
+        raise ValueError("No time periods provided. This function requires real data timestamps.")
+    
+    if not data_mapping:
+        raise ValueError("No data mapping provided. Please provide the real data mapping.")
+    
+    # Check if all time periods have entries in the mapping
+    missing_timestamps = [t for t in time_periods if t not in data_mapping]
+    if missing_timestamps:
+        raise ValueError(f"Missing data for {len(missing_timestamps)} timestamps. First missing: {missing_timestamps[0]}")
+    
+    print(f"Using real data for {len(time_periods)} time periods")
     
     # Create buses
     bus_data = [
@@ -68,50 +78,109 @@ def create_test_system(time_periods=None):
     # Create generators
     gen_data = []
     
+    # Get raw values directly from data mapping
+    load_values = [data_mapping[t]['load'] for t in time_periods]
+    solar_values = [data_mapping[t]['solar'] for t in time_periods]
+    wind_values = [data_mapping[t]['wind'] for t in time_periods]
+    
+    max_load = max(load_values)
+    max_solar = max(solar_values)
+    max_wind = max(wind_values)
+    
+    # Identify the season to help with debugging
+    seasons = [data_mapping[t]['season'] for t in time_periods]
+    unique_seasons = set(seasons)
+    print(f"Data includes {len(unique_seasons)} seasons: {', '.join(unique_seasons)}")
+    
+    print(f"Maximum load value: {max_load:.2f}")
+    print(f"Maximum solar value: {max_solar:.2f}")
+    print(f"Maximum wind value: {max_wind:.2f}")
+    
     # 1. Mandatory nuclear generator at bus 1 (always active with non-zero cost)
     for t in time_periods:
         gen_data.append({
-            'id': 1, 'time': t, 'bus': 1, 'pmin': 40, 'pmax': 120, 'gencost': 10,
+            'id': 1, 'time': t, 'bus': 1, 'pmin': 40, 'pmax': 70, 'gencost': 10,
             'emax': 0, 'einitial': 0, 'eta': 0,
             'lifetime': 9,  # Nuclear: 9 years
-            'capex': 0,  # $0 as it's mandatory/already installed
+            'capex': 0,  # already installed
             'investment_required': 0  # 0 means already installed (mandatory)
         })
     
-    # 2. Optional green generator at bus 1 (can be invested in)
+    # 2. Optional solar generator at bus 1 
     for t in time_periods:
+        # Direct use of raw solar value - scale appropriately based on season-specific max
+        season = data_mapping[t]['season']
+        season_solar_values = [data_mapping[tp]['solar'] for tp in time_periods if data_mapping[tp]['season'] == season]
+        season_max_solar = max(season_solar_values) if season_solar_values else 1.0
+        
+        # Apply scaling: maximum capacity is 90 MW
+        pmax_solar = 90 * (data_mapping[t]['solar'] / season_max_solar) if season_max_solar > 0 else 0
+        
         gen_data.append({
-            'id': 2, 'time': t, 'bus': 1, 'pmin': 0, 'pmax': 120, 'gencost': 0,
+            'id': 2, 'time': t, 'bus': 1, 'pmin': 0, 'pmax': pmax_solar, 'gencost': 0,
             'emax': 0, 'einitial': 0, 'eta': 0,
             'lifetime': 8,  # 8 years
             'capex': 1500000,  # $1.5M/MW
             'investment_required': 1  # 1 means investment required
         })
     
-    # 3. Optional green generator at bus 2
+    # 3. Optional wind generator at bus 2
     for t in time_periods:
+        # Direct use of raw wind value - scale appropriately based on season-specific max
+        season = data_mapping[t]['season']
+        season_wind_values = [data_mapping[tp]['wind'] for tp in time_periods if data_mapping[tp]['season'] == season]
+        season_max_wind = max(season_wind_values) if season_wind_values else 1.0
+        
+        # Apply scaling: maximum capacity is 80 MW, with 10% lower for generator 3
+        wind_factor = data_mapping[t]['wind'] / season_max_wind if season_max_wind > 0 else 0
+        wind_factor_3 = wind_factor * 0.9  # 10% lower than main wind profile
+        
+        pmax_wind_3 = 80 * wind_factor_3
+        
         gen_data.append({
-            'id': 3, 'time': t, 'bus': 2, 'pmin': 0, 'pmax': 80, 'gencost': 0,
+            'id': 3, 'time': t, 'bus': 2, 'pmin': 0, 'pmax': pmax_wind_3, 'gencost': 0,
             'emax': 0, 'einitial': 0, 'eta': 0,
             'lifetime': 7,  # 7 years
             'capex': 1200000,  # $1.2M/MW
             'investment_required': 1  # 1 means investment required
         })
     
-    # 4. Optional green generator at bus 3
+    # 4. Optional wind generator at bus 3 (different wind pattern)
     for t in time_periods:
+        # Direct use of raw wind value - scale appropriately based on season-specific max
+        season = data_mapping[t]['season']
+        season_wind_values = [data_mapping[tp]['wind'] for tp in time_periods if data_mapping[tp]['season'] == season]
+        season_max_wind = max(season_wind_values) if season_wind_values else 1.0
+        
+        # Apply scaling: maximum capacity is 50 MW, with 10% higher for generator 4
+        wind_factor = data_mapping[t]['wind'] / season_max_wind if season_max_wind > 0 else 0
+        wind_factor_4 = wind_factor * 1.1  # 10% higher than main wind profile
+        
+        pmax_wind_4 = 50 * wind_factor_4
+        
         gen_data.append({
-            'id': 4, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': 50, 'gencost': 0,
+            'id': 4, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': pmax_wind_4, 'gencost': 0,
             'emax': 0, 'einitial': 0, 'eta': 0,
             'lifetime': 6,  # 6 years
             'capex': 900000,  # $0.9M/MW
             'investment_required': 1  # 1 means investment required
         })
     
-    # 5. Optional renewable generator at bus 3
+    # 5. Optional solar generator at bus 3 (different solar pattern)
     for t in time_periods:
+        # Direct use of raw solar value - scale appropriately based on season-specific max
+        season = data_mapping[t]['season']
+        season_solar_values = [data_mapping[tp]['solar'] for tp in time_periods if data_mapping[tp]['season'] == season]
+        season_max_solar = max(season_solar_values) if season_solar_values else 1.0
+        
+        # Apply scaling: maximum capacity is 60 MW, with 5% lower for generator 5
+        solar_factor = data_mapping[t]['solar'] / season_max_solar if season_max_solar > 0 else 0
+        solar_factor_5 = solar_factor * 0.95  # 5% lower than main solar profile
+        
+        pmax_solar_5 = 60 * solar_factor_5
+        
         gen_data.append({
-            'id': 5, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': 60, 'gencost': 0,
+            'id': 5, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': pmax_solar_5, 'gencost': 0,
             'emax': 0, 'einitial': 0, 'eta': 0,
             'lifetime': 5,  # 5 years
             'capex': 800000,  # $0.8M/MW
@@ -145,36 +214,32 @@ def create_test_system(time_periods=None):
     # Create time-varying demand
     demand_data = []
     
-    # Base demand at each bus
+    # Base demand at each bus (will be scaled by real data)
     base_demand_bus4 = 50  # MW
     base_demand_bus5 = 100  # MW
     
-    # Create daily pattern with morning and evening peaks
+    # Create demand data for each time period
     for t in time_periods:
-        hour = t.hour
+        # Get season-specific load scaling
+        season = data_mapping[t]['season']
+        season_load_values = [data_mapping[tp]['load'] for tp in time_periods if data_mapping[tp]['season'] == season]
+        season_max_load = max(season_load_values) if season_load_values else 1.0
         
-        # Morning peak 7-9 AM, evening peak 6-8 PM
-        if 7 <= hour < 10:
-            factor = 1.5  # Morning peak
-        elif 18 <= hour < 21:
-            factor = 1.8  # Evening peak
-        elif 0 <= hour < 5:
-            factor = 0.7  # Night valley
-        else:
-            factor = 1.0  # Base load
+        # Scale demand based on the actual load data
+        demand_factor = data_mapping[t]['load'] / season_max_load if season_max_load > 0 else 1.0
         
         # Add demand at bus 4
         demand_data.append({
             'time': t,
             'bus': 4,
-            'pd': base_demand_bus4 * factor
+            'pd': base_demand_bus4 * demand_factor
         })
         
         # Add demand at bus 5
         demand_data.append({
             'time': t,
             'bus': 5,
-            'pd': base_demand_bus5 * factor
+            'pd': base_demand_bus5 * demand_factor
         })
     
     # Convert to DataFrames
@@ -210,106 +275,16 @@ def plot_investment_decisions(investment_results):
                  ha='center', va='bottom')
     
     plt.ylim(0, 1.5)  # Set y-axis limit
-    plt.xticks(assets, [f"Asset {asset}" for asset in assets])
+    plt.title('Investment Decisions')
     plt.ylabel('Decision (1=Selected, 0=Not Selected)')
-    plt.title('Investment Decisions by Asset')
-    plt.grid(True, alpha=0.3)
+    plt.xlabel('Asset ID')
+    
+    plt.xticks(assets)
+    plt.grid(axis='y', alpha=0.3)
     
     # Save the plot
-    plt.savefig(os.path.join(results_dir, 'plots', 'dcopf_investment_decisions.png'))
+    plt.savefig(os.path.join(results_dir, 'plots', 'investment_decisions.png'))
     plt.close()
-
-def plot_generation(investment_results):
-    """Plot the generation by asset and time."""
-    gen_df = investment_results['generation']
-    
-    # Create a directory for plots if it doesn't exist
-    os.makedirs(os.path.join(results_dir, 'plots'), exist_ok=True)
-    
-    # Pivot the data for plotting
-    pivot_df = gen_df.pivot(index='time', columns='id', values='gen')
-    
-    # Identify storage and non-storage units
-    storage_ids = []
-    non_storage_ids = []
-    
-    for asset_id in pivot_df.columns:
-        # Check if the asset has both positive and negative values (storage)
-        if (pivot_df[asset_id] > 0).any() and (pivot_df[asset_id] < 0).any():
-            storage_ids.append(asset_id)
-        else:
-            non_storage_ids.append(asset_id)
-    
-    # 1. Plot generation (non-storage assets and discharging storage)
-    plt.figure(figsize=(12, 6))
-    
-    # Create copy for plotting generation only
-    gen_only_df = pivot_df.copy()
-    
-    # For storage assets, replace negative values (charging) with zeros
-    for asset_id in storage_ids:
-        if asset_id in gen_only_df.columns:
-            gen_only_df[asset_id] = gen_only_df[asset_id].clip(lower=0)
-    
-    # Plot stacked area chart for generation
-    gen_only_df.plot(kind='area', stacked=True, ax=plt.gca())
-    
-    plt.xlabel('Time')
-    plt.ylabel('Generation (MW)')
-    plt.title('Generation and Discharge by Asset and Time')
-    plt.grid(True, alpha=0.3)
-    plt.legend(title='Asset ID')
-    
-    # Save the plot
-    plt.savefig(os.path.join(results_dir, 'plots', 'dcopf_generation.png'))
-    plt.close()
-    
-    # 2. Plot consumption (charging storage only)
-    if storage_ids:
-        plt.figure(figsize=(12, 6))
-        
-        # Create dataframe for plotting storage charging only
-        storage_df = pd.DataFrame(index=pivot_df.index)
-        
-        # For storage assets, replace positive values (discharging) with zeros and take absolute value of charging
-        for asset_id in storage_ids:
-            if asset_id in pivot_df.columns:
-                storage_df[f'Storage {asset_id}'] = -pivot_df[asset_id].clip(upper=0)
-        
-        # Plot stacked area chart for storage charging
-        if not storage_df.empty:
-            storage_df.plot(kind='area', stacked=True, ax=plt.gca())
-            
-            plt.xlabel('Time')
-            plt.ylabel('Charging (MW)')
-            plt.title('Storage Charging by Asset and Time')
-            plt.grid(True, alpha=0.3)
-            plt.legend(title='Storage ID')
-            
-            # Save the plot
-            plt.savefig(os.path.join(results_dir, 'plots', 'dcopf_storage_charging.png'))
-            plt.close()
-    
-    # 3. Plot storage state of charge if available
-    if 'storage_soc' in investment_results:
-        soc_df = investment_results['storage_soc']
-        
-        if not soc_df.empty:
-            plt.figure(figsize=(12, 6))
-            
-            # Pivot the data for plotting
-            soc_pivot = soc_df.pivot(index='time', columns='id', values='soc')
-            soc_pivot.plot(ax=plt.gca())
-            
-            plt.xlabel('Time')
-            plt.ylabel('State of Charge (MWh)')
-            plt.title('Storage State of Charge by Time')
-            plt.grid(True, alpha=0.3)
-            plt.legend(title='Storage ID')
-            
-            # Save the plot
-            plt.savefig(os.path.join(results_dir, 'plots', 'dcopf_storage_soc.png'))
-            plt.close()
 
 def run_test():
     """Run the test for the investment DCOPF model."""
@@ -364,11 +339,49 @@ def run_test():
     
     # Plot results
     plot_investment_decisions(investment_results)
-    plot_generation(investment_results)
-    
-    print(f"\nResults saved to: {results_dir}")
-    
-    return investment_results
 
 if __name__ == "__main__":
-    run_test() 
+    run_test()
+
+'''
+# This is example code showing how to use the Network class
+# Commented out to prevent execution
+
+# Create a Network instance
+net = Network(name="MyPowerSystem")
+
+# Define snapshots and weightings
+snapshots = winter_hours + summer_hours + spring_autumn_hours
+net.set_snapshots(snapshots)
+
+weights = {}
+for h in winter_hours:
+    weights[h] = 13  # Winter represents 13 weeks
+for h in summer_hours:
+    weights[h] = 13  # Summer represents 13 weeks
+for h in spring_autumn_hours:
+    weights[h] = 26  # Spring/autumn represents 26 weeks
+    
+net.set_snapshot_weightings(weights)
+
+# For operations only:
+results = net.solve_dc()
+
+# For investment decisions:
+results = net.solve_dc(investment=True)
+
+# For multi-period planning:
+results = net.solve_dc(investment=True, multi_period=True)
+
+# Print summary
+net.summary()
+
+# Access specific results
+investment_decisions = net.results['investment_decisions']
+generation = net.results['generation']
+prices = net.results['marginal_prices']
+
+# Create visualizations
+plot_investment_decisions(net, results_dir)
+plot_generation(net, results_dir)
+''' 

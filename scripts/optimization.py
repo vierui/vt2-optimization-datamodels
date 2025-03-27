@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-dcopf.py
+optimization.py
 
 A DC Optimal Power Flow (DCOPF) solver using CPLEX.
 This implementation focuses on extracting and analyzing marginal prices.
@@ -30,7 +30,7 @@ except ImportError:
 
 def dcopf(gen_time_series, branch, bus, demand_time_series, delta_t=1, 
           include_investment=False, planning_horizon=1, asset_lifetimes=None, asset_capex=None, 
-          existing_investment=None):
+          existing_investment=None, snapshot_weightings=None):
     """
     DC Optimal Power Flow solver using CPLEX with optional investment decisions.
     
@@ -45,6 +45,7 @@ def dcopf(gen_time_series, branch, bus, demand_time_series, delta_t=1,
         asset_lifetimes: Dictionary mapping asset IDs to their lifetimes in years
         asset_capex: Dictionary mapping asset IDs to their capital costs
         existing_investment: Dictionary mapping asset IDs to boolean values indicating if they are already installed
+        snapshot_weightings: Dictionary mapping time periods to their weighting factors
     
     Returns:
         Dictionary with DCOPF results including generation, flows, prices, etc.
@@ -135,6 +136,10 @@ def dcopf(gen_time_series, branch, bus, demand_time_series, delta_t=1,
             pmin = safe_float(gen_row['pmin'].iloc[0])
             pmax = safe_float(gen_row['pmax'].iloc[0])
             cost = safe_float(gen_row['gencost'].iloc[0])
+            
+            # Apply weighting if provided
+            if snapshot_weightings is not None and t in snapshot_weightings:
+                cost = cost * safe_float(snapshot_weightings[t])
             
             var_name = f"g{g}t{t.strftime('%Y%m%d%H')}"
             gen_vars[g, t] = var_name
@@ -476,8 +481,16 @@ def dcopf(gen_time_series, branch, bus, demand_time_series, delta_t=1,
         # Simple storage cost to prevent unnecessary cycling
         for s in S:
             for t in T:
-                problem.objective.set_linear(pch_vars[s, t], 0.001)
-                problem.objective.set_linear(pdis_vars[s, t], 0.001)
+                base_cost = 0.001
+                
+                # Apply weighting if provided
+                if snapshot_weightings is not None and t in snapshot_weightings:
+                    weighted_cost = base_cost * safe_float(snapshot_weightings[t])
+                else:
+                    weighted_cost = base_cost
+                
+                problem.objective.set_linear(pch_vars[s, t], weighted_cost)
+                problem.objective.set_linear(pdis_vars[s, t], weighted_cost)
     
     # i) Add investment constraints for generators and storage
     if include_investment:
@@ -749,12 +762,16 @@ def dcopf(gen_time_series, branch, bus, demand_time_series, delta_t=1,
             'operational_cost': operational_cost
         })
     
+    # Include snapshot_weightings in results if provided
+    if snapshot_weightings:
+        result['snapshot_weightings'] = snapshot_weightings
+    
     return result
 
 
 def investment_dcopf(gen_time_series, branch, bus, demand_time_series, planning_horizon,
                    asset_lifetimes, asset_capex, delta_t=1, mip_gap=0.01, mip_time_limit=1800,
-                   existing_investment=None):
+                   existing_investment=None, snapshot_weightings=None):
     """
     Wrapper function for the DCOPF with investment decisions.
     
@@ -770,6 +787,7 @@ def investment_dcopf(gen_time_series, branch, bus, demand_time_series, planning_
         mip_gap: MIP gap for the solver
         mip_time_limit: Time limit for the solver in seconds
         existing_investment: Dictionary mapping asset IDs to boolean values indicating if they are already installed
+        snapshot_weightings: Dictionary mapping time periods to their weighting factors
     
     Returns:
         Dictionary with DCOPF results including investment decisions
@@ -784,11 +802,13 @@ def investment_dcopf(gen_time_series, branch, bus, demand_time_series, planning_
         planning_horizon=planning_horizon,
         asset_lifetimes=asset_lifetimes,
         asset_capex=asset_capex,
-        existing_investment=existing_investment
+        existing_investment=existing_investment,
+        snapshot_weightings=snapshot_weightings
     )
 
 def investment_dcopf_planning(gen_time_series, branch, bus, demand_time_series, planning_horizon, asset_lifetimes, 
-                            asset_capex, start_year=2023, delta_t=1, mip_gap=0.01, mip_time_limit=1800):
+                            asset_capex, start_year=2023, delta_t=1, mip_gap=0.01, mip_time_limit=1800,
+                            snapshot_weightings=None):
     """
     Solves the DC Optimal Power Flow problem with investment decisions across a planning horizon.
     
@@ -808,6 +828,7 @@ def investment_dcopf_planning(gen_time_series, branch, bus, demand_time_series, 
         delta_t (float, optional): Time step in hours. Defaults to 1 (1 hour).
         mip_gap (float, optional): MIP gap for the solver. Defaults to 0.01 (1%).
         mip_time_limit (int, optional): Time limit for the solver in seconds. Defaults to 1800 (30 minutes).
+        snapshot_weightings: Dictionary mapping time periods to their weighting factors
     
     Returns:
         dict: Dictionary containing the results of the optimization, including:
@@ -884,7 +905,8 @@ def investment_dcopf_planning(gen_time_series, branch, bus, demand_time_series, 
             existing_investment=existing_investment,
             delta_t=delta_t,
             mip_gap=mip_gap,
-            mip_time_limit=mip_time_limit
+            mip_time_limit=mip_time_limit,
+            snapshot_weightings=snapshot_weightings
         )
         
         if investment_results is None:
