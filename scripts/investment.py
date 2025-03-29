@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import math
 
 # Get the absolute path of the script directory
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -67,12 +68,12 @@ def create_test_system(time_periods=None, data_mapping=None):
     
     # Create branches with line limits
     branch_data = [
-        {'fbus': 1, 'tbus': 2, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 100.0, 'sus': 10.0},
-        {'fbus': 1, 'tbus': 3, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 100.0, 'sus': 10.0},
-        {'fbus': 2, 'tbus': 4, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 100.0, 'sus': 10.0},
-        {'fbus': 3, 'tbus': 4, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 100.0, 'sus': 10.0},
-        {'fbus': 3, 'tbus': 5, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 100.0, 'sus': 10.0},
-        {'fbus': 4, 'tbus': 5, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 100.0, 'sus': 10.0},
+        {'fbus': 1, 'tbus': 2, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 110.0, 'sus': 10.0},
+        {'fbus': 1, 'tbus': 3, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 110.0, 'sus': 10.0},
+        {'fbus': 2, 'tbus': 4, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 110.0, 'sus': 10.0},
+        {'fbus': 3, 'tbus': 4, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 110.0, 'sus': 10.0},
+        {'fbus': 3, 'tbus': 5, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 110.0, 'sus': 10.0},
+        {'fbus': 4, 'tbus': 5, 'r': 0.01, 'x': 0.1, 'b': 0.0, 'ratea': 110.0, 'sus': 10.0},
     ]
     
     # Create generators
@@ -99,7 +100,7 @@ def create_test_system(time_periods=None, data_mapping=None):
     # 1. Mandatory nuclear generator at bus 1 (always active with non-zero cost)
     for t in time_periods:
         gen_data.append({
-            'id': 1, 'time': t, 'bus': 1, 'pmin': 40, 'pmax': 70, 'gencost': 10,
+            'id': 1, 'time': t, 'bus': 1, 'pmin': 40, 'pmax': 100, 'gencost': 10,
             'emax': 0, 'einitial': 0, 'eta': 0,
             'lifetime': 9,  # Nuclear: 9 years
             'capex': 0,  # already installed
@@ -108,13 +109,9 @@ def create_test_system(time_periods=None, data_mapping=None):
     
     # 2. Optional solar generator at bus 1 
     for t in time_periods:
-        # Direct use of raw solar value - scale appropriately based on season-specific max
-        season = data_mapping[t]['season']
-        season_solar_values = [data_mapping[tp]['solar'] for tp in time_periods if data_mapping[tp]['season'] == season]
-        season_max_solar = max(season_solar_values) if season_solar_values else 1.0
-        
-        # Apply scaling: maximum capacity is 90 MW
-        pmax_solar = 90 * (data_mapping[t]['solar'] / season_max_solar) if season_max_solar > 0 else 0
+        # Direct use of solar value without seasonal normalization
+        # Maximum installed capacity is 90 MW
+        pmax_solar = 90 * data_mapping[t]['solar']
         
         gen_data.append({
             'id': 2, 'time': t, 'bus': 1, 'pmin': 0, 'pmax': pmax_solar, 'gencost': 0,
@@ -126,16 +123,9 @@ def create_test_system(time_periods=None, data_mapping=None):
     
     # 3. Optional wind generator at bus 2
     for t in time_periods:
-        # Direct use of raw wind value - scale appropriately based on season-specific max
-        season = data_mapping[t]['season']
-        season_wind_values = [data_mapping[tp]['wind'] for tp in time_periods if data_mapping[tp]['season'] == season]
-        season_max_wind = max(season_wind_values) if season_wind_values else 1.0
-        
-        # Apply scaling: maximum capacity is 80 MW, with 10% lower for generator 3
-        wind_factor = data_mapping[t]['wind'] / season_max_wind if season_max_wind > 0 else 0
-        wind_factor_3 = wind_factor * 0.9  # 10% lower than main wind profile
-        
-        pmax_wind_3 = 80 * wind_factor_3
+        # Direct use of wind value without seasonal normalization
+        # Apply 10% lower factor for this generator
+        pmax_wind_3 = 80 * data_mapping[t]['wind'] * 0.9
         
         gen_data.append({
             'id': 3, 'time': t, 'bus': 2, 'pmin': 0, 'pmax': pmax_wind_3, 'gencost': 0,
@@ -147,16 +137,9 @@ def create_test_system(time_periods=None, data_mapping=None):
     
     # 4. Optional wind generator at bus 3 (different wind pattern)
     for t in time_periods:
-        # Direct use of raw wind value - scale appropriately based on season-specific max
-        season = data_mapping[t]['season']
-        season_wind_values = [data_mapping[tp]['wind'] for tp in time_periods if data_mapping[tp]['season'] == season]
-        season_max_wind = max(season_wind_values) if season_wind_values else 1.0
-        
-        # Apply scaling: maximum capacity is 50 MW, with 10% higher for generator 4
-        wind_factor = data_mapping[t]['wind'] / season_max_wind if season_max_wind > 0 else 0
-        wind_factor_4 = wind_factor * 1.1  # 10% higher than main wind profile
-        
-        pmax_wind_4 = 50 * wind_factor_4
+        # Direct use of wind value without seasonal normalization
+        # Apply 10% higher factor for this generator
+        pmax_wind_4 = 50 * data_mapping[t]['wind'] * 1.1
         
         gen_data.append({
             'id': 4, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': pmax_wind_4, 'gencost': 0,
@@ -168,16 +151,9 @@ def create_test_system(time_periods=None, data_mapping=None):
     
     # 5. Optional solar generator at bus 3 (different solar pattern)
     for t in time_periods:
-        # Direct use of raw solar value - scale appropriately based on season-specific max
-        season = data_mapping[t]['season']
-        season_solar_values = [data_mapping[tp]['solar'] for tp in time_periods if data_mapping[tp]['season'] == season]
-        season_max_solar = max(season_solar_values) if season_solar_values else 1.0
-        
-        # Apply scaling: maximum capacity is 60 MW, with 5% lower for generator 5
-        solar_factor = data_mapping[t]['solar'] / season_max_solar if season_max_solar > 0 else 0
-        solar_factor_5 = solar_factor * 0.95  # 5% lower than main solar profile
-        
-        pmax_solar_5 = 60 * solar_factor_5
+        # Direct use of solar value without seasonal normalization
+        # Apply 5% lower factor for this generator
+        pmax_solar_5 = 60 * data_mapping[t]['solar'] * 0.95
         
         gen_data.append({
             'id': 5, 'time': t, 'bus': 3, 'pmin': 0, 'pmax': pmax_solar_5, 'gencost': 0,
@@ -202,7 +178,7 @@ def create_test_system(time_periods=None, data_mapping=None):
     # 7. Storage unit at bus 4
     for t in time_periods:
         gen_data.append({
-            'id': 7, 'time': t, 'bus': 4, 'pmin': 0, 'pmax': 50, 'gencost': 0,
+            'id': 7, 'time': t, 'bus': 4, 'pmin': 0, 'pmax': 60, 'gencost': 0,
             'emax': 200,  # 200 MWh energy capacity
             'einitial': 50,  # Start 25% charged
             'eta': 0.9,  # 90% round-trip efficiency
@@ -214,32 +190,21 @@ def create_test_system(time_periods=None, data_mapping=None):
     # Create time-varying demand
     demand_data = []
     
-    # Base demand at each bus (will be scaled by real data)
-    base_demand_bus4 = 50  # MW
-    base_demand_bus5 = 100  # MW
-    
-    # Create demand data for each time period
+    # Create power demand at buses 4 & 5
+    # NOTE: 'b' x 'd' where 'b' is base demand and 'd' is the normalized demand data
+    base_demand_bus4 = 4.0  # MW - Reduced from 50 MW to 4.0 MW
+    base_demand_bus5 = 2.0  # MW - Reduced from 3 MW to 2.0 MW
+    # Load(b,t) = base(b) * relative_load(t)
     for t in time_periods:
-        # Get season-specific load scaling
-        season = data_mapping[t]['season']
-        season_load_values = [data_mapping[tp]['load'] for tp in time_periods if data_mapping[tp]['season'] == season]
-        season_max_load = max(season_load_values) if season_load_values else 1.0
-        
-        # Scale demand based on the actual load data
-        demand_factor = data_mapping[t]['load'] / season_max_load if season_max_load > 0 else 1.0
-        
-        # Add demand at bus 4
         demand_data.append({
             'time': t,
             'bus': 4,
-            'pd': base_demand_bus4 * demand_factor
+            'pd': base_demand_bus4 * data_mapping[t]['load']
         })
-        
-        # Add demand at bus 5
         demand_data.append({
             'time': t,
             'bus': 5,
-            'pd': base_demand_bus5 * demand_factor
+            'pd': base_demand_bus5 * data_mapping[t]['load']
         })
     
     # Convert to DataFrames
@@ -290,12 +255,35 @@ def run_test():
     """Run the test for the investment DCOPF model."""
     print("Creating test system...")
     
-    # Create 24 hours of data
+    # Create 24 hours of data and synthetic data mapping
     start_time = datetime(2023, 1, 1)
     time_periods = [start_time + timedelta(hours=h) for h in range(24)]
     
+    # Create synthetic data mapping
+    data_mapping = {}
+    for t in time_periods:
+        hour = t.hour
+        # Simple diurnal patterns
+        solar_value = 0.0
+        if 6 <= hour <= 18:  # Daylight hours
+            solar_value = max(0, 0.8 * math.sin(math.pi * (hour - 6) / 12))
+        
+        # Wind tends to be stronger in evening/night
+        wind_value = 0.4 + 0.2 * math.sin(math.pi * hour / 12)
+        
+        # Load peaks in morning and evening
+        load_value = 0.6 + 0.2 * math.sin(math.pi * hour / 12) + 0.2 * math.sin(math.pi * hour / 6)
+        
+        data_mapping[t] = {
+            'solar': solar_value,
+            'wind': wind_value,
+            'load': load_value,
+            'season': 'winter'  # Just use winter for this test
+        }
+    
     gen_time_series, branch, bus, demand_time_series = create_test_system(
-        time_periods=time_periods
+        time_periods=time_periods,
+        data_mapping=data_mapping
     )
     
     # Define asset lifetimes and capex from the generator data
