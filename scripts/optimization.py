@@ -48,7 +48,17 @@ def create_dcopf_problem(network):
     
     # Generator capacity constraints
     for gen_id, gen_data in network.generators.iterrows():
-        constraints += [p_gen[gen_id] <= gen_data['capacity_mw']]
+        # Get generator capacity
+        capacity = gen_data['capacity_mw']
+        
+        # Check if we have time-dependent availability (p_max_pu)
+        if hasattr(network, 'gen_p_max_pu') and gen_id in network.gen_p_max_pu:
+            # Time-dependent constraint
+            for t in range(network.T):
+                constraints += [p_gen[gen_id][t] <= capacity * network.gen_p_max_pu[gen_id][t]]
+        else:
+            # Static capacity constraint
+            constraints += [p_gen[gen_id] <= capacity]
         
     # Storage constraints
     for storage_id, storage_data in network.storage_units.iterrows():

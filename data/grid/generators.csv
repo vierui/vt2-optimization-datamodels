@@ -1,3 +1,4 @@
-id,name,bus_id,capacity_mw,cost_mwh
-1001,Generator 1,1,100,50
-1002,Generator 2,2,80,60 
+id,name,bus_id,capacity_mw,cost_mwh,type
+1001,Thermal Generator,1,100,50,thermal
+1002,Wind Generator,2,80,30,wind
+1003,Solar Generator,1,70,40,solar 

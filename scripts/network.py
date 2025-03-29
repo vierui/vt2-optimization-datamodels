@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import cvxpy as cp
-from loader import load_grid_data
+from loader import load_grid_data, load_day_profiles
 from optimization import create_dcopf_problem, solve_with_cplex, extract_results
 
 class Network:
@@ -9,12 +9,14 @@ class Network:
     Network class that holds all power system components and handles optimization
     Similar to PyPSA's Network class with numeric IDs for components
     """
-    def __init__(self, data_dir=None):
+    def __init__(self, data_dir=None, use_day_profiles=False, day=10):
         """
         Initialize the network, optionally loading data from CSV files
         
         Args:
             data_dir: Directory containing grid component CSV files
+            use_day_profiles: Whether to use time-dependent profiles from processed data
+            day: Day of the year (1-365) to use for time profiles
         """
         # Time settings
         self.snapshots = None
@@ -30,17 +32,65 @@ class Network:
         
         # Time-series component DataFrames
         self.loads_t = pd.DataFrame()
-        
-        # Results storage
-        self.generators_t = {}
+        self.generators_t = {}  # Will store results after optimization
         self.storage_units_t = {}
         self.lines_t = {}
         self.buses_t = {}
+        
+        # Day profiles
+        self.use_day_profiles = use_day_profiles
+        self.day = day
+        self.day_profiles = None
         
         # Load data if directory provided
         if data_dir:
             self.import_from_csv(data_dir)
             
+        # Load day profiles if requested
+        if use_day_profiles:
+            self.load_day_profiles(day)
+            
+    def load_day_profiles(self, day=10):
+        """
+        Load time-dependent profiles for the specified day
+        
+        Args:
+            day: Day of the year (1-365)
+        """
+        self.day_profiles = load_day_profiles(day)
+        
+        # Update time settings
+        self.T = self.day_profiles['T']
+        self.snapshots = pd.RangeIndex(self.T)
+        
+        # Create time-dependent availability factors for generators
+        self.gen_p_max_pu = pd.DataFrame(index=self.snapshots)
+        
+        # Assign wind/solar profiles to generators based on their type (if specified in the CSV)
+        for gen_id, gen_data in self.generators.iterrows():
+            gen_type = gen_data.get('type', 'thermal')
+            
+            if gen_type == 'wind':
+                # Wind generators use wind profile
+                self.gen_p_max_pu[gen_id] = self.day_profiles['wind'] / 100.0
+            elif gen_type == 'solar':
+                # Solar generators use solar profile
+                self.gen_p_max_pu[gen_id] = self.day_profiles['solar'] / 100.0
+            else:
+                # Thermal generators are always available
+                self.gen_p_max_pu[gen_id] = [1.0] * self.T
+        
+        # Update load time series with day profile
+        # Scale the nominal load values by the profile
+        load_factors = self.day_profiles['load'] / 100.0  # Normalize to percentage
+        self.loads_t = pd.DataFrame(index=self.snapshots)
+        
+        for load_id, load_data in self.loads.iterrows():
+            nom_load = load_data['p_mw']
+            self.loads_t[load_id] = nom_load * load_factors
+            
+        print(f"Loaded time-dependent profiles for day {day}")
+        
     def import_from_csv(self, data_dir="data/grid"):
         """
         Import network data from CSV files
@@ -56,16 +106,23 @@ class Network:
         self.loads = data['loads']
         self.storage_units = data['storage_units']
         self.lines = data['lines']
-        self.loads_t = data['loads_t']
         
-        # Set time horizon
-        self.T = data['T']
-        self.snapshots = pd.RangeIndex(self.T)
+        # Set time horizon if not using day profiles
+        if not self.use_day_profiles:
+            self.loads_t = data['loads_t']
+            self.T = data['T']
+            self.snapshots = pd.RangeIndex(self.T)
                 
     def set_snapshots(self, T):
         """Set the time snapshots for the model"""
         self.T = T
         self.snapshots = pd.RangeIndex(T)
+        
+        # Initialize constant availability for generators if not using day profiles
+        if not self.use_day_profiles:
+            self.gen_p_max_pu = pd.DataFrame(index=self.snapshots)
+            for gen_id in self.generators.index:
+                self.gen_p_max_pu[gen_id] = [1.0] * self.T
         
     def add_bus(self, id, name, v_nom=1.0):
         """Add a bus to the network with numeric ID"""
@@ -80,8 +137,19 @@ class Network:
                 'name': name,
                 'bus_id': bus,
                 'capacity_mw': capacity,
-                'cost_mwh': cost
+                'cost_mwh': cost,
+                'type': gen_type
             }
+            
+            # Initialize availability factor if time series exists
+            if hasattr(self, 'gen_p_max_pu') and self.T > 0:
+                if gen_type == 'wind' and self.use_day_profiles:
+                    self.gen_p_max_pu[id] = self.day_profiles['wind'] / 100.0
+                elif gen_type == 'solar' and self.use_day_profiles:
+                    self.gen_p_max_pu[id] = self.day_profiles['solar'] / 100.0
+                else:
+                    self.gen_p_max_pu[id] = [1.0] * self.T
+                    
         return self
         
     def add_load(self, id, name, bus, p_mw):
@@ -98,7 +166,14 @@ class Network:
             # Make sure loads_t has an index
             if self.loads_t.empty:
                 self.loads_t = pd.DataFrame(index=range(self.T))
-            self.loads_t[id] = [p_mw] * self.T
+                
+            if self.use_day_profiles:
+                # Scale the load by the day profile
+                load_factors = self.day_profiles['load'] / 100.0
+                self.loads_t[id] = p_mw * load_factors
+            else:
+                # Use constant load
+                self.loads_t[id] = [p_mw] * self.T
                 
         return self
         
