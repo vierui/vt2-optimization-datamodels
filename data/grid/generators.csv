@@ -1,0 +1,3 @@
+id,name,bus_id,capacity_mw,cost_mwh
+1001,Generator 1,1,100,50
+1002,Generator 2,2,80,60 

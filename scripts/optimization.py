@@ -26,17 +26,17 @@ def create_dcopf_problem(network):
     f = {}
     
     # Phase angle variables for buses (voltage angles in DCOPF)
-    theta = {bus: cp.Variable(network.T) for bus in network.buses.index}
+    theta = {bus_id: cp.Variable(network.T) for bus_id in network.buses.index}
     
     # Create variables for generators
-    for gen_name in network.generators.index:
-        p_gen[gen_name] = cp.Variable(network.T, nonneg=True)
+    for gen_id in network.generators.index:
+        p_gen[gen_id] = cp.Variable(network.T, nonneg=True)
         
     # Create variables for storage units
-    for storage_name in network.storage_units.index:
-        p_charge[storage_name] = cp.Variable(network.T, nonneg=True)
-        p_discharge[storage_name] = cp.Variable(network.T, nonneg=True)
-        soc[storage_name] = cp.Variable(network.T, nonneg=True)
+    for storage_id in network.storage_units.index:
+        p_charge[storage_id] = cp.Variable(network.T, nonneg=True)
+        p_discharge[storage_id] = cp.Variable(network.T, nonneg=True)
+        soc[storage_id] = cp.Variable(network.T, nonneg=True)
         
     # Initialize constraints list
     constraints = []
@@ -47,81 +47,81 @@ def create_dcopf_problem(network):
         constraints += [theta[ref_bus] == 0]
     
     # Generator capacity constraints
-    for gen_name, gen_data in network.generators.iterrows():
-        constraints += [p_gen[gen_name] <= gen_data['capacity']]
+    for gen_id, gen_data in network.generators.iterrows():
+        constraints += [p_gen[gen_id] <= gen_data['capacity_mw']]
         
     # Storage constraints
-    for storage_name, storage_data in network.storage_units.iterrows():
+    for storage_id, storage_data in network.storage_units.iterrows():
         # Power limits
-        constraints += [p_charge[storage_name] <= storage_data['power']]
-        constraints += [p_discharge[storage_name] <= storage_data['power']]
+        constraints += [p_charge[storage_id] <= storage_data['p_mw']]
+        constraints += [p_discharge[storage_id] <= storage_data['p_mw']]
         
         # Energy capacity limits
-        constraints += [soc[storage_name] <= storage_data['energy']]
+        constraints += [soc[storage_id] <= storage_data['energy_mwh']]
         
         # Storage energy balance with initial SoC at 50%
-        soc_init = 0.5 * storage_data['energy']
+        soc_init = 0.5 * storage_data['energy_mwh']
         for t in range(network.T):
             if t == 0:
                 constraints += [
-                    soc[storage_name][t] == soc_init 
-                    + storage_data['charge_efficiency'] * p_charge[storage_name][t]
-                    - (1 / storage_data['discharge_efficiency']) * p_discharge[storage_name][t]
+                    soc[storage_id][t] == soc_init 
+                    + storage_data['efficiency_store'] * p_charge[storage_id][t]
+                    - (1 / storage_data['efficiency_dispatch']) * p_discharge[storage_id][t]
                 ]
             else:
                 constraints += [
-                    soc[storage_name][t] == soc[storage_name][t-1] 
-                    + storage_data['charge_efficiency'] * p_charge[storage_name][t]
-                    - (1 / storage_data['discharge_efficiency']) * p_discharge[storage_name][t]
+                    soc[storage_id][t] == soc[storage_id][t-1] 
+                    + storage_data['efficiency_store'] * p_charge[storage_id][t]
+                    - (1 / storage_data['efficiency_dispatch']) * p_discharge[storage_id][t]
                 ]
     
     # DC power flow constraints for each line
-    for line_name, line_data in network.lines.iterrows():
-        from_bus = line_data['from']
-        to_bus = line_data['to']
+    for line_id, line_data in network.lines.iterrows():
+        from_bus = line_data['bus_from']
+        to_bus = line_data['bus_to']
         susceptance = line_data['susceptance']
-        capacity = line_data['capacity']
+        capacity = line_data['capacity_mw']
         
         # Create flow variables
-        f[line_name] = cp.Variable(network.T)
+        f[line_id] = cp.Variable(network.T)
         
         # Flow equation based on susceptance and voltage angle difference
         for t in range(network.T):
             constraints += [
-                f[line_name][t] == susceptance * (theta[from_bus][t] - theta[to_bus][t])
+                f[line_id][t] == susceptance * (theta[from_bus][t] - theta[to_bus][t])
             ]
         
         # Transmission line flow limits
-        constraints += [f[line_name] <= capacity, f[line_name] >= -capacity]
+        constraints += [f[line_id] <= capacity, f[line_id] >= -capacity]
                 
     # Nodal power balance constraints
     for t in range(network.T):
-        for bus_name in network.buses.index:
+        for bus_id in network.buses.index:
             # Generator contribution
             gen_at_bus = [p_gen[g][t] for g in network.generators.index 
-                           if network.generators.loc[g, 'bus'] == bus_name]
+                           if network.generators.loc[g, 'bus_id'] == bus_id]
             gen_sum = sum(gen_at_bus) if gen_at_bus else 0
             
             # Storage contribution
             storage_at_bus = [p_discharge[s][t] - p_charge[s][t] for s in network.storage_units.index 
-                               if network.storage_units.loc[s, 'bus'] == bus_name]
+                               if network.storage_units.loc[s, 'bus_id'] == bus_id]
             storage_net = sum(storage_at_bus) if storage_at_bus else 0
             
             # Load at the bus
-            load = network.loads_t.loc[t, bus_name] if bus_name in network.loads_t.columns else 0
+            load = network.loads_t.loc[t, bus_id] if bus_id in network.loads_t.columns else 0
             
             # Line flows into and out of the bus
             flow_out = sum(f[l][t] for l, data in network.lines.iterrows() 
-                           if data['from'] == bus_name)
+                           if data['bus_from'] == bus_id)
             flow_in = sum(f[l][t] for l, data in network.lines.iterrows() 
-                          if data['to'] == bus_name)
+                          if data['bus_to'] == bus_id)
             
             # Power balance: generation + storage net + flow in = load + flow out
             constraints += [gen_sum + storage_net + flow_in == load + flow_out]
         
     # Objective function: minimize total generation cost
     objective = cp.Minimize(
-        sum(network.generators.loc[g, 'cost'] * cp.sum(p_gen[g]) for g in network.generators.index)
+        sum(network.generators.loc[g, 'cost_mwh'] * cp.sum(p_gen[g]) for g in network.generators.index)
     )
     
     # Return all problem components

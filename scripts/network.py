@@ -1,26 +1,32 @@
 import pandas as pd
 import numpy as np
 import cvxpy as cp
-from components import Bus, Generator, Load, Storage, Line
+from data import load_grid_data
 from optimization import create_dcopf_problem, solve_with_cplex, extract_results
 
 class Network:
     """
     Network class that holds all power system components and handles optimization
-    Similar in concept to PyPSA's Network class
+    Similar to PyPSA's Network class with numeric IDs for components
     """
-    def __init__(self):
-        """Initialize an empty network"""
+    def __init__(self, data_dir=None):
+        """
+        Initialize the network, optionally loading data from CSV files
+        
+        Args:
+            data_dir: Directory containing grid component CSV files
+        """
         # Time settings
         self.snapshots = None
         self.T = 0
         
-        # Static component DataFrames - columns defined explicitly
-        self.buses = pd.DataFrame(columns=['name'])
-        self.generators = pd.DataFrame(columns=['bus', 'capacity', 'cost'])
-        self.loads = pd.DataFrame(columns=['bus'])
-        self.storage_units = pd.DataFrame(columns=['bus', 'power', 'energy', 'charge_efficiency', 'discharge_efficiency'])
-        self.lines = pd.DataFrame(columns=['from', 'to', 'susceptance', 'capacity'])
+        # Static component DataFrames - now using numeric IDs
+        self.buses = pd.DataFrame(columns=['name', 'v_nom'])
+        self.generators = pd.DataFrame(columns=['name', 'bus_id', 'capacity_mw', 'cost_mwh'])
+        self.loads = pd.DataFrame(columns=['name', 'bus_id', 'p_mw'])
+        self.storage_units = pd.DataFrame(columns=['name', 'bus_id', 'p_mw', 'energy_mwh', 
+                                                 'efficiency_store', 'efficiency_dispatch'])
+        self.lines = pd.DataFrame(columns=['name', 'bus_from', 'bus_to', 'susceptance', 'capacity_mw'])
         
         # Time-series component DataFrames
         self.loads_t = pd.DataFrame()
@@ -30,67 +36,94 @@ class Network:
         self.storage_units_t = {}
         self.lines_t = {}
         self.buses_t = {}
+        
+        # Load data if directory provided
+        if data_dir:
+            self.import_from_csv(data_dir)
+            
+    def import_from_csv(self, data_dir="data/grid"):
+        """
+        Import network data from CSV files
+        
+        Args:
+            data_dir: Directory containing grid component CSV files
+        """
+        data = load_grid_data(data_dir)
+        
+        # Set component DataFrames
+        self.buses = data['buses']
+        self.generators = data['generators']
+        self.loads = data['loads']
+        self.storage_units = data['storage_units']
+        self.lines = data['lines']
+        self.loads_t = data['loads_t']
+        
+        # Set time horizon
+        self.T = data['T']
+        self.snapshots = pd.RangeIndex(self.T)
                 
     def set_snapshots(self, T):
         """Set the time snapshots for the model"""
         self.T = T
         self.snapshots = pd.RangeIndex(T)
         
-    def add_bus(self, name):
-        """Add a bus to the network"""
-        if name not in self.buses.index:
-            self.buses.loc[name] = {'name': name}
+    def add_bus(self, id, name, v_nom=1.0):
+        """Add a bus to the network with numeric ID"""
+        if id not in self.buses.index:
+            self.buses.loc[id] = {'name': name, 'v_nom': v_nom}
         return self
         
-    def add_generator(self, name, bus, capacity, cost):
-        """Add a generator to the network"""
-        if name not in self.generators.index:
-            self.generators.loc[name] = {
-                'bus': bus,
-                'capacity': capacity,
-                'cost': cost
+    def add_generator(self, id, name, bus, capacity, cost, gen_type='thermal'):
+        """Add a generator to the network with numeric ID"""
+        if id not in self.generators.index:
+            self.generators.loc[id] = {
+                'name': name,
+                'bus_id': bus,
+                'capacity_mw': capacity,
+                'cost_mwh': cost
             }
         return self
         
-    def add_load(self, bus, p_set):
-        """Add a load to the network"""
-        if bus not in self.loads.index:
-            self.loads.loc[bus] = {'bus': bus}
+    def add_load(self, id, name, bus, p_mw):
+        """Add a load to the network with numeric ID"""
+        if id not in self.loads.index:
+            self.loads.loc[id] = {
+                'name': name,
+                'bus_id': bus,
+                'p_mw': p_mw
+            }
             
         # Set or update the load time series
         if self.T > 0:
-            if isinstance(p_set, (int, float)):
-                # Make sure loads_t has an index
-                if self.loads_t.empty:
-                    self.loads_t = pd.DataFrame(index=range(self.T))
-                self.loads_t[bus] = [p_set] * self.T
-            else:
-                # Make sure loads_t has an index
-                if self.loads_t.empty:
-                    self.loads_t = pd.DataFrame(index=range(self.T))
-                self.loads_t[bus] = p_set
+            # Make sure loads_t has an index
+            if self.loads_t.empty:
+                self.loads_t = pd.DataFrame(index=range(self.T))
+            self.loads_t[id] = [p_mw] * self.T
+                
         return self
         
-    def add_storage(self, name, bus, power, energy, charge_eff=0.95, discharge_eff=0.95):
-        """Add a storage unit to the network"""
-        if name not in self.storage_units.index:
-            self.storage_units.loc[name] = {
-                'bus': bus,
-                'power': power,
-                'energy': energy,
-                'charge_efficiency': charge_eff,
-                'discharge_efficiency': discharge_eff
+    def add_storage(self, id, name, bus, p_mw, energy_mwh, charge_eff=0.95, discharge_eff=0.95):
+        """Add a storage unit to the network with numeric ID"""
+        if id not in self.storage_units.index:
+            self.storage_units.loc[id] = {
+                'name': name,
+                'bus_id': bus,
+                'p_mw': p_mw,
+                'energy_mwh': energy_mwh,
+                'efficiency_store': charge_eff,
+                'efficiency_dispatch': discharge_eff
             }
         return self
         
-    def add_line(self, name, bus_from, bus_to, susceptance, capacity):
-        """Add a transmission line to the network"""
-        if name not in self.lines.index:
-            self.lines.loc[name] = {
-                'from': bus_from,
-                'to': bus_to,
+    def add_line(self, id, name, bus_from, bus_to, susceptance, capacity):
+        """Add a transmission line to the network with numeric ID"""
+        if id not in self.lines.index:
+            self.lines.loc[id] = {
+                'name': name,
+                'bus_from': bus_from,
+                'bus_to': bus_to,
                 'susceptance': susceptance,
-                'capacity': capacity
+                'capacity_mw': capacity
             }
         return self
     
@@ -133,21 +166,21 @@ class Network:
             
         print("Optimal objective value (total cost):", self.objective_value)
         
-        print("\nGenerator dispatch:")
+        print("\nGenerator dispatch (MW):")
         print(self.generators_t['p'])
         
         if self.storage_units_t:
-            print("\nStorage charging power:")
+            print("\nStorage charging power (MW):")
             print(self.storage_units_t['p_charge'])
             
-            print("\nStorage discharging power:")
+            print("\nStorage discharging power (MW):")
             print(self.storage_units_t['p_discharge'])
             
-            print("\nStorage state of charge:")
+            print("\nStorage state of charge (MWh):")
             print(self.storage_units_t['state_of_charge'])
             
-        print("\nLine flows:")
+        print("\nLine flows (MW):")
         print(self.lines_t['p'])
         
-        print("\nBus voltage angles:")
+        print("\nBus voltage angles (rad):")
         print(self.buses_t['v_ang']) 

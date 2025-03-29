@@ -1,0 +1,2 @@
+id,name,bus_from,bus_to,susceptance,capacity_mw
+4001,Line 1-2,1,2,1.0,70 

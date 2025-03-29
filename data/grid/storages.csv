@@ -1,0 +1,2 @@
+id,name,bus_id,p_mw,energy_mwh,efficiency_store,efficiency_dispatch
+3001,Storage 1,1,50,100,0.95,0.95 
