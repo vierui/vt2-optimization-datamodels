@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import cvxpy as cp
-from data import load_grid_data
+from loader import load_grid_data
 from optimization import create_dcopf_problem, solve_with_cplex, extract_results
 
 class Network:
