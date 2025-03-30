@@ -91,6 +91,42 @@ def create_network_for_season(grid_data, season_profiles):
     # Set time horizon
     network.set_snapshots(season_profiles['hours'])
     
+    # Set planning horizon from analysis.json if available
+    if 'analysis' in grid_data and 'planning_horizon' in grid_data['analysis']:
+        try:
+            years = grid_data['analysis']['planning_horizon'].get('years', [])
+            absolute_years = grid_data['analysis']['planning_horizon'].get('absolute_years', [])
+            discount_rate = grid_data['analysis']['planning_horizon'].get('system_discount_rate', 0.05)
+            
+            if years:
+                print(f"Setting planning horizon with relative years: {years}")
+                if absolute_years:
+                    print(f"Corresponding to absolute years: {absolute_years}")
+                network.set_planning_horizon(years, discount_rate)
+                
+                # Store year mappings in the network for reference
+                network.year_mapping = grid_data['analysis']['planning_horizon'].get('year_mapping', {})
+                network.inverse_mapping = grid_data['analysis']['planning_horizon'].get('inverse_mapping', {})
+                network.base_year = grid_data['analysis']['planning_horizon'].get('base_year', 2023)
+                
+                # Apply load growth factors based on year position
+                if 'load_growth' in grid_data['analysis']:
+                    load_growth = grid_data['analysis']['load_growth']
+                    print(f"Applying load growth factors: {load_growth}")
+                    
+                    # Create a mapping of year to load factor
+                    year_to_load_factor = {}
+                    for year_str, factor in load_growth.items():
+                        if year_str.isdigit():
+                            year_to_load_factor[int(year_str)] = factor
+                    
+                    # Load growth adjustments will happen in the optimization module
+                    network.year_to_load_factor = year_to_load_factor
+        except Exception as e:
+            print(f"Warning: Failed to set planning horizon from analysis.json: {e}")
+            import traceback
+            traceback.print_exc()
+    
     # Set generator availability profiles
     if not season_profiles['generators'].empty:
         for gen_id in grid_data['generators']['id']:

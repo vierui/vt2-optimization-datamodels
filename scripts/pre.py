@@ -13,6 +13,7 @@ import pandas as pd
 import numpy as np
 import argparse
 from datetime import datetime, timedelta
+import json
 
 # Constants for representative seasons - centralized here
 SEASON_WEEKS = {
@@ -98,6 +99,83 @@ def load_grid_data(base_dir='data/grid'):
             components['storage_units'] = pd.read_csv(storage_path)
         except:
             print("No storage data found")
+    
+    # Load analysis data (planning horizon, etc.)
+    analysis_path = os.path.join(base_dir, 'analysis.json')
+    if os.path.exists(analysis_path):
+        try:
+            with open(analysis_path, 'r') as f:
+                analysis_data = json.load(f)
+            
+            # Convert absolute years to relative years
+            if 'planning_horizon' in analysis_data and 'years' in analysis_data['planning_horizon']:
+                absolute_years = analysis_data['planning_horizon']['years']
+                
+                # Use the first year as the base year
+                base_year = absolute_years[0] if absolute_years else 2023
+                
+                # Create relative years (1, 2, 3...) while preserving the original years
+                relative_years = list(range(1, len(absolute_years) + 1))
+                year_mapping = dict(zip(absolute_years, relative_years))
+                inverse_mapping = dict(zip(relative_years, absolute_years))
+                
+                # Replace absolute years with relative years
+                analysis_data['planning_horizon']['absolute_years'] = absolute_years.copy()
+                analysis_data['planning_horizon']['years'] = relative_years
+                analysis_data['planning_horizon']['base_year'] = base_year
+                analysis_data['planning_horizon']['year_mapping'] = year_mapping
+                analysis_data['planning_horizon']['inverse_mapping'] = inverse_mapping
+                
+                # Convert load growth factors to use relative years
+                if 'load_growth' in analysis_data:
+                    relative_load_growth = {}
+                    for year, factor in analysis_data['load_growth'].items():
+                        if year.isdigit() and int(year) in year_mapping:
+                            relative_load_growth[str(year_mapping[int(year)])] = factor
+                    
+                    # Preserve original absolute year mapping
+                    analysis_data['load_growth_absolute'] = analysis_data['load_growth'].copy()
+                    # Update with relative year mapping
+                    analysis_data['load_growth'] = relative_load_growth
+                
+                # Convert renewable availability factors to use relative years
+                if 'renewable_availability_factors' in analysis_data:
+                    for resource_type, factors in analysis_data['renewable_availability_factors'].items():
+                        if isinstance(factors, dict):
+                            relative_factors = {}
+                            for year, factor in factors.items():
+                                if year.isdigit() and int(year) in year_mapping:
+                                    relative_factors[str(year_mapping[int(year)])] = factor
+                            
+                            # Preserve original absolute year mapping
+                            analysis_data['renewable_availability_factors_absolute'] = \
+                                analysis_data['renewable_availability_factors'].copy()
+                            # Update with relative year mapping
+                            analysis_data['renewable_availability_factors'][resource_type] = relative_factors
+                
+                # Convert cost learning curves to use relative years
+                if 'cost_learning_curves' in analysis_data:
+                    for resource_type, curves in analysis_data['cost_learning_curves'].items():
+                        if isinstance(curves, dict):
+                            relative_curves = {}
+                            for year, factor in curves.items():
+                                if year.isdigit() and int(year) in year_mapping:
+                                    relative_curves[str(year_mapping[int(year)])] = factor
+                            
+                            # Preserve original absolute year mapping
+                            if 'cost_learning_curves_absolute' not in analysis_data:
+                                analysis_data['cost_learning_curves_absolute'] = \
+                                    analysis_data['cost_learning_curves'].copy()
+                            # Update with relative year mapping
+                            analysis_data['cost_learning_curves'][resource_type] = relative_curves
+            
+            components['analysis'] = analysis_data
+            print(f"Loaded and processed analysis data from {analysis_path}")
+            print(f"Using relative years instead of absolute years")
+        except Exception as e:
+            print(f"Error loading or processing analysis data: {e}")
+            import traceback
+            traceback.print_exc()
     
     return components
 

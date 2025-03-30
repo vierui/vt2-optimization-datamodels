@@ -205,7 +205,7 @@ def save_detailed_cost_report(network, output_file):
         # Calculate CAPEX for installed generators
         if hasattr(network, 'generators_installed'):
             for gen_id in network.generators.index:
-                if network.generators_installed.get(gen_id, 0) > 0.5:
+                if bool(network.generators_installed.get(gen_id, 0) > 0.5):
                     capacity = network.generators.loc[gen_id, 'capacity_mw']
                     # Use get() with default values to handle missing columns
                     capex_per_mw = network.generators.loc[gen_id].get('capex_per_mw', 0)
@@ -217,7 +217,7 @@ def save_detailed_cost_report(network, output_file):
         # Calculate CAPEX for installed storage
         if hasattr(network, 'storage_installed'):
             for storage_id in network.storage_units.index:
-                if network.storage_installed.get(storage_id, 0) > 0.5:
+                if bool(network.storage_installed.get(storage_id, 0) > 0.5):
                     capacity = network.storage_units.loc[storage_id, 'p_mw']
                     # Use get() with default values to handle missing columns
                     capex_per_mw = network.storage_units.loc[storage_id].get('capex_per_mw', 0)
@@ -296,11 +296,11 @@ def save_multi_year_cost_report(network, output_file):
                     installed = network.generators_installed_by_year[year][gen_id]
                     
                     # Only count CAPEX in the year when it's first installed
-                    is_newly_installed = installed > 0.5
+                    is_newly_installed = bool(installed > 0.5)
                     if year_idx > 0:
                         prev_year = years[year_idx-1]
                         prev_installed = network.generators_installed_by_year[prev_year][gen_id]
-                        is_newly_installed = installed > 0.5 and prev_installed < 0.5
+                        is_newly_installed = bool(installed > 0.5 and prev_installed < 0.5)
                     
                     if is_newly_installed:
                         capacity = network.generators.loc[gen_id, 'capacity_mw']
@@ -316,11 +316,11 @@ def save_multi_year_cost_report(network, output_file):
                     installed = network.storage_installed_by_year[year][storage_id]
                     
                     # Only count CAPEX in the year when it's first installed
-                    is_newly_installed = installed > 0.5
+                    is_newly_installed = bool(installed > 0.5)
                     if year_idx > 0:
                         prev_year = years[year_idx-1]
                         prev_installed = network.storage_installed_by_year[prev_year][storage_id]
-                        is_newly_installed = installed > 0.5 and prev_installed < 0.5
+                        is_newly_installed = bool(installed > 0.5 and prev_installed < 0.5)
                     
                     if is_newly_installed:
                         capacity = network.storage_units.loc[storage_id, 'p_mw']
@@ -344,9 +344,9 @@ def save_multi_year_cost_report(network, output_file):
                 'operational_costs_breakdown': operational_costs,
                 'capital_costs_breakdown': capex_costs,
                 'installations': {
-                    'generators': {g: network.generators_installed_by_year[year][g] > 0.5 
+                    'generators': {g: bool(network.generators_installed_by_year[year][g] > 0.5) 
                                    for g in network.generators.index},
-                    'storage': {s: network.storage_installed_by_year[year][s] > 0.5 
+                    'storage': {s: bool(network.storage_installed_by_year[year][s] > 0.5) 
                                for s in network.storage_units.index}
                 }
             }
@@ -356,7 +356,7 @@ def save_multi_year_cost_report(network, output_file):
         report['final_installations'] = {
             'generators': {
                 str(g): {
-                    'installed': network.generators_installed_by_year[last_year][g] > 0.5,
+                    'installed': bool(network.generators_installed_by_year[last_year][g] > 0.5),
                     'capacity_mw': network.generators.loc[g, 'capacity_mw'],
                     'annual_gen_mwh': network.generators_t_by_year[last_year]['p'][g].sum() 
                         if g in network.generators_t_by_year[last_year]['p'] else 0
@@ -364,7 +364,7 @@ def save_multi_year_cost_report(network, output_file):
             },
             'storage': {
                 str(s): {
-                    'installed': network.storage_installed_by_year[last_year][s] > 0.5,
+                    'installed': bool(network.storage_installed_by_year[last_year][s] > 0.5),
                     'capacity_mw': network.storage_units.loc[s, 'p_mw'],
                     'energy_capacity_mwh': network.storage_units.loc[s, 'energy_mwh'],
                     'annual_charge_mwh': network.storage_units_t_by_year[last_year]['p_charge'][s].sum()
@@ -374,6 +374,31 @@ def save_multi_year_cost_report(network, output_file):
                 } for s in network.storage_units.index
             }
         }
+        
+        # Add installation history if available
+        if hasattr(network, 'asset_installation_history'):
+            report['asset_installation_history'] = {
+                'generators': {str(g): history for g, history in network.asset_installation_history['generators'].items()},
+                'storage': {str(s): history for s, history in network.asset_installation_history['storage'].items()}
+            }
+            
+            # Map relative years to absolute years if available
+            if hasattr(network, 'inverse_mapping') and network.inverse_mapping:
+                # Create a utility function to convert years
+                def convert_years_in_history(history_list):
+                    for entry in history_list:
+                        rel_year = entry['installation_year']
+                        if rel_year in network.inverse_mapping:
+                            entry['relative_year'] = rel_year
+                            entry['absolute_year'] = network.inverse_mapping[rel_year]
+                    return history_list
+                
+                # Apply conversions
+                for g, history in report['asset_installation_history']['generators'].items():
+                    report['asset_installation_history']['generators'][g] = convert_years_in_history(history)
+                    
+                for s, history in report['asset_installation_history']['storage'].items():
+                    report['asset_installation_history']['storage'][s] = convert_years_in_history(history)
         
         # Save to file
         with open(output_file, 'w') as f:
