@@ -16,7 +16,7 @@ from datetime import datetime
 # Import local modules
 from network import Network
 from pre import process_data_for_optimization, SEASON_WEEKS, SEASON_WEIGHTS
-from post import calculate_annual_cost, save_annual_cost_report, save_detailed_cost_report
+from post import calculate_annual_cost, save_annual_cost_report, save_detailed_cost_report, generate_implementation_plan
 
 def create_network_for_season(grid_data, season_profiles):
     """
@@ -256,6 +256,17 @@ def calculate_and_report_annual_cost(season_results, output_dir=None):
         for season, result in season_results.items():
             detailed_report_path = os.path.join(output_dir, f"{season}_detailed_cost.json")
             save_detailed_cost_report(result['network'], detailed_report_path)
+            
+            # Generate implementation plan for each season
+            implementation_plan_path = os.path.join(output_dir, f"{season}_implementation_plan.json")
+            generate_implementation_plan(result['network'], implementation_plan_path)
+        
+        # Also generate a combined implementation plan using the winter season's network
+        # (since all seasons should have the same installation decisions)
+        if 'winter' in season_results:
+            combined_plan_path = os.path.join(output_dir, "implementation_plan.json")
+            generate_implementation_plan(season_results['winter']['network'], combined_plan_path)
+            print(f"Combined implementation plan saved to: {combined_plan_path}")
     
     return annual_cost
 

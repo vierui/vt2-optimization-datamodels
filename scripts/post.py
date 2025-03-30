@@ -413,6 +413,290 @@ def save_multi_year_cost_report(network, output_file):
         traceback.print_exc()
         return False
 
+def generate_implementation_plan(network, output_file):
+    """
+    Generate a detailed implementation plan showing which assets have been installed and when
+    
+    Args:
+        network: Network object with multi-year results
+        output_file: Path to save the implementation plan
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Check if we're dealing with multi-year results
+        if not (hasattr(network, 'years') and len(network.years) > 0):
+            print("Cannot generate implementation plan: no multi-year data found.")
+            return False
+        
+        years = network.years
+        
+        # Create a structure to track installation status and changes through years
+        implementation_plan = {
+            'base_year': getattr(network, 'base_year', min(network.years)),
+            'planning_horizon': {
+                'relative_years': years,
+                'absolute_years': [network.inverse_mapping.get(y, y) for y in years] 
+                    if hasattr(network, 'inverse_mapping') else years
+            },
+            'generators': {},
+            'storage_units': {},
+            'timeline': {},
+            'installation_plan': []
+        }
+        
+        # Initialize the timeline for each year
+        for year in years:
+            implementation_plan['timeline'][year] = {
+                'generators': {'new': [], 'active': [], 'decommissioned': []},
+                'storage': {'new': [], 'active': [], 'decommissioned': []},
+                'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year
+            }
+        
+        # Process generators
+        for gen_id in network.generators.index:
+            gen_info = {
+                'id': gen_id,
+                'name': network.generators.loc[gen_id, 'name'] if 'name' in network.generators.columns else f"Generator {gen_id}",
+                'type': network.generators.loc[gen_id, 'type'] if 'type' in network.generators.columns else "Unknown",
+                'capacity_mw': network.generators.loc[gen_id, 'capacity_mw'],
+                'years_active': [],
+                'installation_history': []
+            }
+            
+            # Track active years and installation details
+            prev_status = False
+            for year_idx, year in enumerate(years):
+                is_active = network.generators_installed_by_year[year][gen_id] > 0.5
+                
+                if is_active:
+                    gen_info['years_active'].append(year)
+                    implementation_plan['timeline'][year]['generators']['active'].append(gen_id)
+                
+                # Detect newly installed
+                is_new = is_active and (year_idx == 0 or network.generators_installed_by_year[years[year_idx-1]][gen_id] < 0.5)
+                
+                if is_new:
+                    installation_info = {
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'action': 'install',
+                        'reason': 'capacity_expansion'
+                    }
+                    gen_info['installation_history'].append(installation_info)
+                    
+                    # Add to timeline
+                    implementation_plan['timeline'][year]['generators']['new'].append(gen_id)
+                    
+                    # Add to installation plan chronology
+                    implementation_plan['installation_plan'].append({
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'asset_type': 'generator',
+                        'asset_id': gen_id,
+                        'asset_name': gen_info['name'],
+                        'action': 'install',
+                        'capacity_mw': gen_info['capacity_mw'],
+                        'asset_type_specific': gen_info['type']
+                    })
+                
+                # Detect decommissioned (previously active, now inactive)
+                is_decommissioned = not is_active and (year_idx > 0 and network.generators_installed_by_year[years[year_idx-1]][gen_id] > 0.5)
+                
+                if is_decommissioned:
+                    decommission_info = {
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'action': 'decommission'
+                    }
+                    gen_info['installation_history'].append(decommission_info)
+                    
+                    # Add to timeline
+                    implementation_plan['timeline'][year]['generators']['decommissioned'].append(gen_id)
+                    
+                    # Add to installation plan chronology
+                    implementation_plan['installation_plan'].append({
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'asset_type': 'generator',
+                        'asset_id': gen_id,
+                        'asset_name': gen_info['name'],
+                        'action': 'decommission',
+                        'capacity_mw': gen_info['capacity_mw'],
+                        'asset_type_specific': gen_info['type']
+                    })
+                
+                prev_status = is_active
+            
+            # Add detailed info from asset installation history if available
+            if hasattr(network, 'asset_installation_history') and 'generators' in network.asset_installation_history:
+                if gen_id in network.asset_installation_history['generators']:
+                    gen_info['detailed_installation_history'] = network.asset_installation_history['generators'][gen_id]
+            
+            # Add generator info to implementation plan
+            implementation_plan['generators'][gen_id] = gen_info
+        
+        # Process storage units
+        for storage_id in network.storage_units.index:
+            storage_info = {
+                'id': storage_id,
+                'name': network.storage_units.loc[storage_id, 'name'] if 'name' in network.storage_units.columns else f"Storage {storage_id}",
+                'p_mw': network.storage_units.loc[storage_id, 'p_mw'],
+                'energy_mwh': network.storage_units.loc[storage_id, 'energy_mwh'],
+                'years_active': [],
+                'installation_history': []
+            }
+            
+            # Track active years and installation details
+            prev_status = False
+            for year_idx, year in enumerate(years):
+                is_active = network.storage_installed_by_year[year][storage_id] > 0.5
+                
+                if is_active:
+                    storage_info['years_active'].append(year)
+                    implementation_plan['timeline'][year]['storage']['active'].append(storage_id)
+                
+                # Detect newly installed
+                is_new = is_active and (year_idx == 0 or network.storage_installed_by_year[years[year_idx-1]][storage_id] < 0.5)
+                
+                if is_new:
+                    installation_info = {
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'action': 'install',
+                        'reason': 'flexibility_requirement'
+                    }
+                    storage_info['installation_history'].append(installation_info)
+                    
+                    # Add to timeline
+                    implementation_plan['timeline'][year]['storage']['new'].append(storage_id)
+                    
+                    # Add to installation plan chronology
+                    implementation_plan['installation_plan'].append({
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'asset_type': 'storage',
+                        'asset_id': storage_id,
+                        'asset_name': storage_info['name'],
+                        'action': 'install',
+                        'capacity_mw': storage_info['p_mw'],
+                        'energy_capacity_mwh': storage_info['energy_mwh']
+                    })
+                
+                # Detect decommissioned (previously active, now inactive)
+                is_decommissioned = not is_active and (year_idx > 0 and network.storage_installed_by_year[years[year_idx-1]][storage_id] > 0.5)
+                
+                if is_decommissioned:
+                    decommission_info = {
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'action': 'decommission'
+                    }
+                    storage_info['installation_history'].append(decommission_info)
+                    
+                    # Add to timeline
+                    implementation_plan['timeline'][year]['storage']['decommissioned'].append(storage_id)
+                    
+                    # Add to installation plan chronology
+                    implementation_plan['installation_plan'].append({
+                        'year': year,
+                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
+                        'asset_type': 'storage',
+                        'asset_id': storage_id,
+                        'asset_name': storage_info['name'],
+                        'action': 'decommission',
+                        'capacity_mw': storage_info['p_mw'],
+                        'energy_capacity_mwh': storage_info['energy_mwh']
+                    })
+                
+                prev_status = is_active
+            
+            # Add detailed info from asset installation history if available
+            if hasattr(network, 'asset_installation_history') and 'storage' in network.asset_installation_history:
+                if storage_id in network.asset_installation_history['storage']:
+                    storage_info['detailed_installation_history'] = network.asset_installation_history['storage'][storage_id]
+            
+            # Add storage info to implementation plan
+            implementation_plan['storage_units'][storage_id] = storage_info
+        
+        # Sort the installation plan chronologically
+        implementation_plan['installation_plan'] = sorted(
+            implementation_plan['installation_plan'], 
+            key=lambda x: (x['year'], x['asset_type'], x['asset_id'])
+        )
+        
+        # Generate a human-readable summary
+        summary = ["# Implementation Plan Summary\n"]
+        summary.append(f"## Planning Horizon\n")
+        
+        # Add planning horizon details
+        abs_years = implementation_plan['planning_horizon']['absolute_years']
+        rel_years = implementation_plan['planning_horizon']['relative_years']
+        summary.append("| Relative Year | Absolute Year |\n")
+        summary.append("|--------------|---------------|\n")
+        for i in range(len(rel_years)):
+            summary.append(f"| {rel_years[i]} | {abs_years[i]} |\n")
+        
+        summary.append("\n## Installation Timeline\n")
+        for year in years:
+            abs_year = implementation_plan['timeline'][year]['absolute_year']
+            summary.append(f"\n### Year {year} (Absolute: {abs_year})\n")
+            
+            # New generators
+            new_gens = implementation_plan['timeline'][year]['generators']['new']
+            if new_gens:
+                summary.append("\n#### New Generators\n")
+                summary.append("| ID | Name | Type | Capacity (MW) |\n")
+                summary.append("|-------|------|------|-------------|\n")
+                for gen_id in new_gens:
+                    gen = implementation_plan['generators'][gen_id]
+                    summary.append(f"| {gen_id} | {gen['name']} | {gen['type']} | {gen['capacity_mw']} |\n")
+            
+            # New storage
+            new_storage = implementation_plan['timeline'][year]['storage']['new']
+            if new_storage:
+                summary.append("\n#### New Storage Units\n")
+                summary.append("| ID | Name | Power (MW) | Energy (MWh) |\n")
+                summary.append("|-------|------|-----------|-------------|\n")
+                for storage_id in new_storage:
+                    storage = implementation_plan['storage_units'][storage_id]
+                    summary.append(f"| {storage_id} | {storage['name']} | {storage['p_mw']} | {storage['energy_mwh']} |\n")
+            
+            # Decommissioned assets
+            decom_gens = implementation_plan['timeline'][year]['generators']['decommissioned']
+            decom_storage = implementation_plan['timeline'][year]['storage']['decommissioned']
+            
+            if decom_gens or decom_storage:
+                summary.append("\n#### Decommissioned Assets\n")
+                summary.append("| Type | ID | Name |\n")
+                summary.append("|------|-------|------|\n")
+                for gen_id in decom_gens:
+                    gen = implementation_plan['generators'][gen_id]
+                    summary.append(f"| Generator | {gen_id} | {gen['name']} |\n")
+                for storage_id in decom_storage:
+                    storage = implementation_plan['storage_units'][storage_id]
+                    summary.append(f"| Storage | {storage_id} | {storage['name']} |\n")
+        
+        # Save the implementation plan to JSON file
+        with open(output_file, 'w') as f:
+            json.dump(implementation_plan, f, indent=2)
+        
+        # Save the human-readable summary as markdown
+        summary_file = output_file.replace('.json', '.md')
+        with open(summary_file, 'w') as f:
+            f.writelines(summary)
+        
+        print(f"Implementation plan saved to: {output_file}")
+        print(f"Human-readable summary saved to: {summary_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Error generating implementation plan: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 if __name__ == "__main__":
     import argparse
     
