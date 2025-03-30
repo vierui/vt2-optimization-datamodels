@@ -1,44 +1,64 @@
 {
   "planning_horizon": {
-    "years": [2023, 2025, 2028, 2030, 2035],
+    "years": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     "system_discount_rate": 0.05,
-    "description": "Multi-year planning horizon with varying time steps"
+    "description": "Multi-year planning horizon with 10 relative years"
   },
   "load_growth": {
-    "2023": 1.0,
-    "2025": 1.08,
-    "2028": 1.18,
-    "2030": 1.25,
-    "2035": 1.40,
-    "description": "Load growth factors relative to base year (2023)"
+    "1": 1.0,
+    "2": 1.05,
+    "3": 1.10,
+    "4": 1.15,
+    "5": 1.20,
+    "6": 1.25,
+    "7": 1.30,
+    "8": 1.35,
+    "9": 1.40,
+    "10": 1.45,
+    "description": "Load growth factors relative to base year (Year 1)"
   },
   "renewable_availability_factors": {
     "wind": {
-      "2023": 1.0,
-      "2025": 1.02,
-      "2028": 1.05,
-      "2030": 1.08,
-      "2035": 1.12,
+      "1": 1.0,
+      "2": 1.02,
+      "3": 1.04,
+      "4": 1.06,
+      "5": 1.08,
+      "6": 1.10,
+      "7": 1.12,
+      "8": 1.14,
+      "9": 1.16,
+      "10": 1.18,
       "description": "Wind availability improvement factors due to better technology"
     },
     "solar": {
-      "2023": 1.0,
-      "2025": 1.03,
-      "2028": 1.07,
-      "2030": 1.10,
-      "2035": 1.15,
+      "1": 1.0,
+      "2": 1.03,
+      "3": 1.06,
+      "4": 1.09,
+      "5": 1.12,
+      "6": 1.15,
+      "7": 1.18,
+      "8": 1.21,
+      "9": 1.24,
+      "10": 1.27,
       "description": "Solar availability improvement factors due to better technology"
     }
   },
   "asset_lifetime_extensions": {
     "description": "Future assets may have longer lifetimes due to technological improvements",
     "installation_year_thresholds": {
-      "2030": {
+      "4": {
         "wind": 25,
         "solar": 35,
         "storage": 18
       },
-      "2025": {
+      "7": {
+        "wind": 28,
+        "solar": 38,
+        "storage": 20
+      },
+      "2": {
         "wind": 22,
         "solar": 32,
         "storage": 16
@@ -48,25 +68,41 @@
   "cost_learning_curves": {
     "description": "Capital cost reduction factors due to technology learning",
     "wind": {
-      "2023": 1.0,
-      "2025": 0.95,
-      "2028": 0.90,
-      "2030": 0.85,
-      "2035": 0.75
+      "1": 1.0,
+      "2": 0.95,
+      "3": 0.90,
+      "4": 0.85,
+      "5": 0.80,
+      "6": 0.75,
+      "7": 0.72,
+      "8": 0.70,
+      "9": 0.68,
+      "10": 0.65
     },
     "solar": {
-      "2023": 1.0,
-      "2025": 0.92,
-      "2028": 0.85,
-      "2030": 0.80,
-      "2035": 0.70
+      "1": 1.0,
+      "2": 0.92,
+      "3": 0.85,
+      "4": 0.80,
+      "5": 0.75,
+      "6": 0.70,
+      "7": 0.67,
+      "8": 0.65,
+      "9": 0.63,
+      "10": 0.60
     },
     "storage": {
-      "2023": 1.0,
-      "2025": 0.90,
-      "2028": 0.80,
-      "2030": 0.75,
-      "2035": 0.60
+      "1": 1.0,
+      "2": 0.90,
+      "3": 0.80,
+      "4": 0.75,
+      "5": 0.70,
+      "6": 0.65,
+      "7": 0.60,
+      "8": 0.57,
+      "9": 0.55,
+      "10": 0.52
     }
   }
-} 
+}
+ 
