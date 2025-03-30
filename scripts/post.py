@@ -7,6 +7,21 @@ import json
 import pandas as pd
 from datetime import datetime
 from pre import SEASON_WEIGHTS
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Custom JSON encoder to handle NumPy types
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.bool_):
+            return bool(obj)
+        return super(NumpyEncoder, self).default(obj)
 
 # Constants for annual calculation
 SEASON_WEIGHTS = {
@@ -73,11 +88,22 @@ def save_annual_cost_report(season_costs, output_file="annual_cost_report.json")
         'timestamp': datetime.now().isoformat()
     }
     
-    with open(output_file, 'w') as f:
-        json.dump(report, f, indent=2)
-    
-    print(f"Annual cost report saved to: {output_file}")
-    return output_file
+    try:
+        # Create output directory if it doesn't exist
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        
+        # Write to file
+        with open(output_file, 'w') as f:
+            json.dump(report, f, indent=2, cls=NumpyEncoder)
+        
+        # Generate plots
+        generate_cost_plots(report, output_file.replace('.json', '.png'))
+        
+        print(f"Annual cost report saved to: {output_file}")
+        return output_file
+    except Exception as e:
+        print(f"Error saving annual cost report: {e}")
+        return False
 
 def load_costs_from_files(input_files):
     """
@@ -237,7 +263,7 @@ def save_detailed_cost_report(network, output_file):
         
         # Save to file
         with open(output_file, 'w') as f:
-            json.dump(report, f, indent=2)
+            json.dump(report, f, indent=2, cls=NumpyEncoder)
             
         print(f"Detailed cost report saved to: {output_file}")
         return True
@@ -334,6 +360,20 @@ def save_multi_year_cost_report(network, output_file):
             year_total_cost = total_opex + total_capex
             year_discounted_cost = year_total_cost * discount_factor
             
+            # Track generation and load for this year
+            total_generation = 0
+            total_load = 0
+            
+            if hasattr(network, 'generators_t_by_year') and year in network.generators_t_by_year:
+                for gen_id in network.generators.index:
+                    if gen_id in network.generators_t_by_year[year]['p']:
+                        total_generation += network.generators_t_by_year[year]['p'][gen_id].sum()
+                        
+            if hasattr(network, 'loads_t_by_year') and year in network.loads_t_by_year:
+                for load_id in network.loads.index:
+                    if load_id in network.loads_t_by_year[year]['p']:
+                        total_load += network.loads_t_by_year[year]['p'][load_id].sum()
+            
             # Add year data to the report
             report['years_data'][year] = {
                 'total_cost': year_total_cost,
@@ -348,7 +388,21 @@ def save_multi_year_cost_report(network, output_file):
                                    for g in network.generators.index},
                     'storage': {s: bool(network.storage_installed_by_year[year][s] > 0.5) 
                                for s in network.storage_units.index}
-                }
+                },
+                'total_generation': total_generation,
+                'total_load': total_load,
+                'mismatch': total_generation - total_load
+            }
+            
+            # Store year summary in network for use in other functions
+            if not hasattr(network, 'year_summaries'):
+                network.year_summaries = {}
+            
+            network.year_summaries[year] = {
+                'total_generation': total_generation,
+                'total_load': total_load,
+                'total_cost': year_total_cost,
+                'discounted_cost': year_discounted_cost
             }
         
         # Add a summary of the cumulative installed capacity by the end of the planning horizon
@@ -402,7 +456,11 @@ def save_multi_year_cost_report(network, output_file):
         
         # Save to file
         with open(output_file, 'w') as f:
-            json.dump(report, f, indent=2)
+            json.dump(report, f, indent=2, cls=NumpyEncoder)
+            
+        # Generate generation-load mismatch plot
+        plot_file = output_file.replace('.json', '_mismatch.png')
+        plot_generation_load_mismatch(network, plot_file)
             
         print(f"Multi-year cost report saved to: {output_file}")
         return True
@@ -449,8 +507,8 @@ def generate_implementation_plan(network, output_file):
         # Initialize the timeline for each year
         for year in years:
             implementation_plan['timeline'][year] = {
-                'generators': {'new': [], 'active': [], 'decommissioned': []},
-                'storage': {'new': [], 'active': [], 'decommissioned': []},
+                'generators': {'new': [], 'active': [], 'decommissioned': [], 'replaced': []},
+                'storage': {'new': [], 'active': [], 'decommissioned': [], 'replaced': []},
                 'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year
             }
         
@@ -469,25 +527,34 @@ def generate_implementation_plan(network, output_file):
             prev_status = False
             for year_idx, year in enumerate(years):
                 is_active = network.generators_installed_by_year[year][gen_id] > 0.5
+                is_newly_installed = network.generators_first_install_by_year[year][gen_id] > 0.5
+                
+                # Check if this is a replacement
+                is_replacement = False
+                if hasattr(network, 'generators_replacement_by_year') and year in network.generators_replacement_by_year:
+                    if gen_id in network.generators_replacement_by_year[year]:
+                        replacement_val = network.generators_replacement_by_year[year][gen_id]
+                        is_replacement = replacement_val is not None and replacement_val > 0.5
                 
                 if is_active:
                     gen_info['years_active'].append(year)
                     implementation_plan['timeline'][year]['generators']['active'].append(gen_id)
                 
-                # Detect newly installed
-                is_new = is_active and (year_idx == 0 or network.generators_installed_by_year[years[year_idx-1]][gen_id] < 0.5)
-                
-                if is_new:
+                if is_newly_installed:
                     installation_info = {
                         'year': year,
                         'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
                         'action': 'install',
-                        'reason': 'capacity_expansion'
+                        'reason': 'replacement' if is_replacement else 'capacity_expansion',
+                        'is_replacement': is_replacement
                     }
                     gen_info['installation_history'].append(installation_info)
                     
-                    # Add to timeline
-                    implementation_plan['timeline'][year]['generators']['new'].append(gen_id)
+                    # Add to timeline in the appropriate category
+                    if is_replacement:
+                        implementation_plan['timeline'][year]['generators']['replaced'].append(gen_id)
+                    else:
+                        implementation_plan['timeline'][year]['generators']['new'].append(gen_id)
                     
                     # Add to installation plan chronology
                     implementation_plan['installation_plan'].append({
@@ -496,23 +563,15 @@ def generate_implementation_plan(network, output_file):
                         'asset_type': 'generator',
                         'asset_id': gen_id,
                         'asset_name': gen_info['name'],
-                        'action': 'install',
+                        'action': 'replace' if is_replacement else 'install',
                         'capacity_mw': gen_info['capacity_mw'],
-                        'asset_type_specific': gen_info['type']
+                        'type': gen_info['type'],
+                        'cost': network.generators.loc[gen_id].get('capex_per_mw', 0) * gen_info['capacity_mw'],
+                        'lifetime_years': network.generators.loc[gen_id].get('lifetime_years', 25)
                     })
                 
-                # Detect decommissioned (previously active, now inactive)
-                is_decommissioned = not is_active and (year_idx > 0 and network.generators_installed_by_year[years[year_idx-1]][gen_id] > 0.5)
-                
-                if is_decommissioned:
-                    decommission_info = {
-                        'year': year,
-                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
-                        'action': 'decommission'
-                    }
-                    gen_info['installation_history'].append(decommission_info)
-                    
-                    # Add to timeline
+                # Detect decommissioned generators (were active in previous year but not in current year)
+                if year_idx > 0 and not is_active and network.generators_installed_by_year[years[year_idx-1]][gen_id] > 0.5:
                     implementation_plan['timeline'][year]['generators']['decommissioned'].append(gen_id)
                     
                     # Add to installation plan chronology
@@ -524,53 +583,54 @@ def generate_implementation_plan(network, output_file):
                         'asset_name': gen_info['name'],
                         'action': 'decommission',
                         'capacity_mw': gen_info['capacity_mw'],
-                        'asset_type_specific': gen_info['type']
+                        'type': gen_info['type']
                     })
-                
-                prev_status = is_active
             
-            # Add detailed info from asset installation history if available
-            if hasattr(network, 'asset_installation_history') and 'generators' in network.asset_installation_history:
-                if gen_id in network.asset_installation_history['generators']:
-                    gen_info['detailed_installation_history'] = network.asset_installation_history['generators'][gen_id]
-            
-            # Add generator info to implementation plan
-            implementation_plan['generators'][gen_id] = gen_info
+            # Add to generators list
+            implementation_plan['generators'][str(gen_id)] = gen_info
         
         # Process storage units
         for storage_id in network.storage_units.index:
             storage_info = {
                 'id': storage_id,
                 'name': network.storage_units.loc[storage_id, 'name'] if 'name' in network.storage_units.columns else f"Storage {storage_id}",
-                'p_mw': network.storage_units.loc[storage_id, 'p_mw'],
-                'energy_mwh': network.storage_units.loc[storage_id, 'energy_mwh'],
+                'capacity_mw': network.storage_units.loc[storage_id, 'p_mw'],
+                'energy_capacity_mwh': network.storage_units.loc[storage_id, 'energy_mwh'],
                 'years_active': [],
                 'installation_history': []
             }
             
             # Track active years and installation details
-            prev_status = False
             for year_idx, year in enumerate(years):
                 is_active = network.storage_installed_by_year[year][storage_id] > 0.5
+                is_newly_installed = network.storage_first_install_by_year[year][storage_id] > 0.5
+                
+                # Check if this is a replacement
+                is_replacement = False
+                if hasattr(network, 'storage_replacement_by_year') and year in network.storage_replacement_by_year:
+                    if storage_id in network.storage_replacement_by_year[year]:
+                        replacement_val = network.storage_replacement_by_year[year][storage_id]
+                        is_replacement = replacement_val is not None and replacement_val > 0.5
                 
                 if is_active:
                     storage_info['years_active'].append(year)
                     implementation_plan['timeline'][year]['storage']['active'].append(storage_id)
                 
-                # Detect newly installed
-                is_new = is_active and (year_idx == 0 or network.storage_installed_by_year[years[year_idx-1]][storage_id] < 0.5)
-                
-                if is_new:
+                if is_newly_installed:
                     installation_info = {
                         'year': year,
                         'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
                         'action': 'install',
-                        'reason': 'flexibility_requirement'
+                        'reason': 'replacement' if is_replacement else 'capacity_expansion',
+                        'is_replacement': is_replacement
                     }
                     storage_info['installation_history'].append(installation_info)
                     
-                    # Add to timeline
-                    implementation_plan['timeline'][year]['storage']['new'].append(storage_id)
+                    # Add to timeline in the appropriate category
+                    if is_replacement:
+                        implementation_plan['timeline'][year]['storage']['replaced'].append(storage_id)
+                    else:
+                        implementation_plan['timeline'][year]['storage']['new'].append(storage_id)
                     
                     # Add to installation plan chronology
                     implementation_plan['installation_plan'].append({
@@ -579,23 +639,15 @@ def generate_implementation_plan(network, output_file):
                         'asset_type': 'storage',
                         'asset_id': storage_id,
                         'asset_name': storage_info['name'],
-                        'action': 'install',
-                        'capacity_mw': storage_info['p_mw'],
-                        'energy_capacity_mwh': storage_info['energy_mwh']
+                        'action': 'replace' if is_replacement else 'install',
+                        'capacity_mw': storage_info['capacity_mw'],
+                        'energy_capacity_mwh': storage_info['energy_capacity_mwh'],
+                        'cost': network.storage_units.loc[storage_id].get('capex_per_mw', 0) * storage_info['capacity_mw'],
+                        'lifetime_years': network.storage_units.loc[storage_id].get('lifetime_years', 15)
                     })
                 
-                # Detect decommissioned (previously active, now inactive)
-                is_decommissioned = not is_active and (year_idx > 0 and network.storage_installed_by_year[years[year_idx-1]][storage_id] > 0.5)
-                
-                if is_decommissioned:
-                    decommission_info = {
-                        'year': year,
-                        'absolute_year': network.inverse_mapping.get(year, year) if hasattr(network, 'inverse_mapping') else year,
-                        'action': 'decommission'
-                    }
-                    storage_info['installation_history'].append(decommission_info)
-                    
-                    # Add to timeline
+                # Detect decommissioned storage units
+                if year_idx > 0 and not is_active and network.storage_installed_by_year[years[year_idx-1]][storage_id] > 0.5:
                     implementation_plan['timeline'][year]['storage']['decommissioned'].append(storage_id)
                     
                     # Add to installation plan chronology
@@ -606,29 +658,49 @@ def generate_implementation_plan(network, output_file):
                         'asset_id': storage_id,
                         'asset_name': storage_info['name'],
                         'action': 'decommission',
-                        'capacity_mw': storage_info['p_mw'],
-                        'energy_capacity_mwh': storage_info['energy_mwh']
+                        'capacity_mw': storage_info['capacity_mw'],
+                        'energy_capacity_mwh': storage_info['energy_capacity_mwh']
                     })
-                
-                prev_status = is_active
             
-            # Add detailed info from asset installation history if available
-            if hasattr(network, 'asset_installation_history') and 'storage' in network.asset_installation_history:
-                if storage_id in network.asset_installation_history['storage']:
-                    storage_info['detailed_installation_history'] = network.asset_installation_history['storage'][storage_id]
-            
-            # Add storage info to implementation plan
-            implementation_plan['storage_units'][storage_id] = storage_info
+            # Add to storage units list
+            implementation_plan['storage_units'][str(storage_id)] = storage_info
         
-        # Sort the installation plan chronologically
-        implementation_plan['installation_plan'] = sorted(
-            implementation_plan['installation_plan'], 
-            key=lambda x: (x['year'], x['asset_type'], x['asset_id'])
-        )
+        # Sort installation plan by year
+        implementation_plan['installation_plan'].sort(key=lambda x: (x['year'], x['asset_type'], x['asset_id']))
+        
+        # Save to file
+        with open(output_file, 'w') as f:
+            json.dump(implementation_plan, f, indent=2, cls=NumpyEncoder)
         
         # Generate a human-readable summary
+        summary_file = output_file.replace('.json', '.md')
+        generate_plan_summary(implementation_plan, summary_file)
+        
+        print(f"Implementation plan saved to: {output_file}")
+        print(f"Human-readable summary saved to: {summary_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Error generating implementation plan: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def generate_plan_summary(implementation_plan, output_file):
+    """
+    Generate a human-readable markdown summary of the implementation plan
+    
+    Args:
+        implementation_plan: Implementation plan dictionary
+        output_file: Path to save the summary
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Generate markdown summary
         summary = ["# Implementation Plan Summary\n"]
-        summary.append(f"## Planning Horizon\n")
+        summary.append("## Planning Horizon\n")
         
         # Add planning horizon details
         abs_years = implementation_plan['planning_horizon']['absolute_years']
@@ -639,7 +711,7 @@ def generate_implementation_plan(network, output_file):
             summary.append(f"| {rel_years[i]} | {abs_years[i]} |\n")
         
         summary.append("\n## Installation Timeline\n")
-        for year in years:
+        for year in rel_years:
             abs_year = implementation_plan['timeline'][year]['absolute_year']
             summary.append(f"\n### Year {year} (Absolute: {abs_year})\n")
             
@@ -647,21 +719,65 @@ def generate_implementation_plan(network, output_file):
             new_gens = implementation_plan['timeline'][year]['generators']['new']
             if new_gens:
                 summary.append("\n#### New Generators\n")
-                summary.append("| ID | Name | Type | Capacity (MW) |\n")
-                summary.append("|-------|------|------|-------------|\n")
+                summary.append("| ID | Name | Type | Capacity (MW) | Cost |\n")
+                summary.append("|-------|------|------|-------------|------|\n")
                 for gen_id in new_gens:
-                    gen = implementation_plan['generators'][gen_id]
-                    summary.append(f"| {gen_id} | {gen['name']} | {gen['type']} | {gen['capacity_mw']} |\n")
+                    gen = implementation_plan['generators'][str(gen_id)]
+                    cost = 0
+                    # Find the cost from the installation plan
+                    for item in implementation_plan['installation_plan']:
+                        if item['year'] == year and item['asset_type'] == 'generator' and item['asset_id'] == gen_id:
+                            cost = item.get('cost', 0)
+                            break
+                    summary.append(f"| {gen_id} | {gen['name']} | {gen['type']} | {gen['capacity_mw']} | {cost:,.0f} |\n")
+            
+            # Replaced generators
+            replaced_gens = implementation_plan['timeline'][year]['generators']['replaced']
+            if replaced_gens:
+                summary.append("\n#### Replaced Generators\n")
+                summary.append("| ID | Name | Type | Capacity (MW) | Cost |\n")
+                summary.append("|-------|------|------|-------------|------|\n")
+                for gen_id in replaced_gens:
+                    gen = implementation_plan['generators'][str(gen_id)]
+                    cost = 0
+                    # Find the cost from the installation plan
+                    for item in implementation_plan['installation_plan']:
+                        if item['year'] == year and item['asset_type'] == 'generator' and item['asset_id'] == gen_id:
+                            cost = item.get('cost', 0)
+                            break
+                    summary.append(f"| {gen_id} | {gen['name']} | {gen['type']} | {gen['capacity_mw']} | {cost:,.0f} |\n")
             
             # New storage
             new_storage = implementation_plan['timeline'][year]['storage']['new']
             if new_storage:
                 summary.append("\n#### New Storage Units\n")
-                summary.append("| ID | Name | Power (MW) | Energy (MWh) |\n")
-                summary.append("|-------|------|-----------|-------------|\n")
+                summary.append("| ID | Name | Power (MW) | Energy (MWh) | Cost |\n")
+                summary.append("|-------|------|-----------|-------------|------|\n")
                 for storage_id in new_storage:
-                    storage = implementation_plan['storage_units'][storage_id]
-                    summary.append(f"| {storage_id} | {storage['name']} | {storage['p_mw']} | {storage['energy_mwh']} |\n")
+                    storage = implementation_plan['storage_units'][str(storage_id)]
+                    cost = 0
+                    # Find the cost from the installation plan
+                    for item in implementation_plan['installation_plan']:
+                        if item['year'] == year and item['asset_type'] == 'storage' and item['asset_id'] == storage_id:
+                            cost = item.get('cost', 0)
+                            break
+                    summary.append(f"| {storage_id} | {storage['name']} | {storage['capacity_mw']} | {storage['energy_capacity_mwh']} | {cost:,.0f} |\n")
+            
+            # Replaced storage
+            replaced_storage = implementation_plan['timeline'][year]['storage']['replaced']
+            if replaced_storage:
+                summary.append("\n#### Replaced Storage Units\n")
+                summary.append("| ID | Name | Power (MW) | Energy (MWh) | Cost |\n")
+                summary.append("|-------|------|-----------|-------------|------|\n")
+                for storage_id in replaced_storage:
+                    storage = implementation_plan['storage_units'][str(storage_id)]
+                    cost = 0
+                    # Find the cost from the installation plan
+                    for item in implementation_plan['installation_plan']:
+                        if item['year'] == year and item['asset_type'] == 'storage' and item['asset_id'] == storage_id:
+                            cost = item.get('cost', 0)
+                            break
+                    summary.append(f"| {storage_id} | {storage['name']} | {storage['capacity_mw']} | {storage['energy_capacity_mwh']} | {cost:,.0f} |\n")
             
             # Decommissioned assets
             decom_gens = implementation_plan['timeline'][year]['generators']['decommissioned']
@@ -669,30 +785,203 @@ def generate_implementation_plan(network, output_file):
             
             if decom_gens or decom_storage:
                 summary.append("\n#### Decommissioned Assets\n")
-                summary.append("| Type | ID | Name |\n")
-                summary.append("|------|-------|------|\n")
+                summary.append("| Type | ID | Name | Reason |\n")
+                summary.append("|------|-------|------|-------|\n")
                 for gen_id in decom_gens:
-                    gen = implementation_plan['generators'][gen_id]
-                    summary.append(f"| Generator | {gen_id} | {gen['name']} |\n")
+                    gen = implementation_plan['generators'][str(gen_id)]
+                    # Try to find the decommissioning reason
+                    reason = "End of lifetime"
+                    for item in implementation_plan['installation_plan']:
+                        if item['year'] == year and item['asset_type'] == 'generator' and item['asset_id'] == gen_id and item['action'] == 'decommission':
+                            reason = item.get('reason', "End of lifetime")
+                            break
+                    summary.append(f"| Generator | {gen_id} | {gen['name']} | {reason} |\n")
                 for storage_id in decom_storage:
-                    storage = implementation_plan['storage_units'][storage_id]
-                    summary.append(f"| Storage | {storage_id} | {storage['name']} |\n")
+                    storage = implementation_plan['storage_units'][str(storage_id)]
+                    # Try to find the decommissioning reason
+                    reason = "End of lifetime"
+                    for item in implementation_plan['installation_plan']:
+                        if item['year'] == year and item['asset_type'] == 'storage' and item['asset_id'] == storage_id and item['action'] == 'decommission':
+                            reason = item.get('reason', "End of lifetime")
+                            break
+                    summary.append(f"| Storage | {storage_id} | {storage['name']} | {reason} |\n")
         
-        # Save the implementation plan to JSON file
+        # Add summary of active assets at the end of planning horizon
+        summary.append("\n## End of Planning Horizon\n")
+        last_year = rel_years[-1]
+        summary.append(f"\n### Active Assets in Year {last_year}\n")
+        
+        # Active generators
+        active_gens = implementation_plan['timeline'][last_year]['generators']['active']
+        if active_gens:
+            summary.append("\n#### Generators\n")
+            summary.append("| ID | Name | Type | Capacity (MW) | Installation Year(s) |\n")
+            summary.append("|-------|------|------|-------------|--------------------|\n")
+            for gen_id in active_gens:
+                gen = implementation_plan['generators'][str(gen_id)]
+                install_years = [str(history['year']) for history in gen['installation_history']]
+                summary.append(f"| {gen_id} | {gen['name']} | {gen['type']} | {gen['capacity_mw']} | {', '.join(install_years)} |\n")
+        
+        # Active storage
+        active_storage = implementation_plan['timeline'][last_year]['storage']['active']
+        if active_storage:
+            summary.append("\n#### Storage Units\n")
+            summary.append("| ID | Name | Power (MW) | Energy (MWh) | Installation Year(s) |\n")
+            summary.append("|-------|------|-----------|-------------|--------------------|\n")
+            for storage_id in active_storage:
+                storage = implementation_plan['storage_units'][str(storage_id)]
+                install_years = [str(history['year']) for history in storage['installation_history']]
+                summary.append(f"| {storage_id} | {storage['name']} | {storage['capacity_mw']} | {storage['energy_capacity_mwh']} | {', '.join(install_years)} |\n")
+        
+        # Save the summary to a markdown file
         with open(output_file, 'w') as f:
-            json.dump(implementation_plan, f, indent=2)
-        
-        # Save the human-readable summary as markdown
-        summary_file = output_file.replace('.json', '.md')
-        with open(summary_file, 'w') as f:
             f.writelines(summary)
         
-        print(f"Implementation plan saved to: {output_file}")
-        print(f"Human-readable summary saved to: {summary_file}")
         return True
         
     except Exception as e:
-        print(f"Error generating implementation plan: {e}")
+        print(f"Error generating plan summary: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def generate_cost_plots(report, output_file):
+    """
+    Generate cost breakdown plots for a cost report
+    
+    Args:
+        report: Cost report dictionary
+        output_file: Path to save the plot
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Create figure with multiple subplots
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+        
+        # Plot 1: Season cost breakdown
+        season_costs = []
+        season_names = []
+        
+        for season, data in report['calculation'].items():
+            season_costs.append(data['subtotal'])
+            season_names.append(season.capitalize())
+        
+        ax1.bar(season_names, season_costs)
+        ax1.set_title('Cost by Season')
+        ax1.set_ylabel('Cost')
+        ax1.set_ylim(bottom=0)
+        
+        # Add cost values on top of bars
+        for i, cost in enumerate(season_costs):
+            ax1.text(i, cost + (max(season_costs) * 0.01), f"{cost:.2f}", 
+                    ha='center', va='bottom', fontsize=9)
+        
+        # Plot 2: Pie chart of relative costs
+        ax2.pie(season_costs, labels=season_names, autopct='%1.1f%%')
+        ax2.set_title('Relative Cost Distribution')
+        
+        # Add total cost as text
+        fig.text(0.5, 0.01, f"Total Annual Cost: {report['annual_cost']:.2f}", ha='center', fontsize=12)
+        
+        # Save the figure
+        plt.tight_layout()
+        plt.savefig(output_file)
+        plt.close(fig)
+        
+        return True
+    except Exception as e:
+        print(f"Error generating cost plots: {e}")
+        return False
+
+def plot_generation_load_mismatch(network, output_file):
+    """
+    Create a visualization of generation vs load and mismatch across the planning horizon
+    
+    Args:
+        network: Network object with multi-year results
+        output_file: Path to save the plot
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        if not hasattr(network, 'years') or len(network.years) == 0:
+            print("Cannot generate mismatch plot: no multi-year data found.")
+            return False
+        
+        years = network.years
+        
+        # Collect data
+        generation = []
+        load = []
+        mismatch = []
+        
+        for year in years:
+            # If the network has year summary data, use it
+            if hasattr(network, 'year_summaries') and year in network.year_summaries:
+                gen = network.year_summaries[year].get('total_generation', 0)
+                ld = network.year_summaries[year].get('total_load', 0)
+                
+                generation.append(gen)
+                load.append(ld)
+                mismatch.append(gen - ld)
+            # Otherwise calculate from time series if available
+            elif hasattr(network, 'generators_t_by_year') and year in network.generators_t_by_year:
+                # Sum up generation across all generators
+                gen_total = sum(network.generators_t_by_year[year]['p'][gen_id].sum() 
+                              for gen_id in network.generators.index 
+                              if gen_id in network.generators_t_by_year[year]['p'])
+                
+                # Sum up load across all load components
+                load_total = 0
+                if hasattr(network, 'loads_t_by_year') and year in network.loads_t_by_year:
+                    load_total = sum(network.loads_t_by_year[year]['p'][load_id].sum() 
+                                   for load_id in network.loads.index 
+                                   if load_id in network.loads_t_by_year[year]['p'])
+                
+                generation.append(gen_total)
+                load.append(load_total)
+                mismatch.append(gen_total - load_total)
+            else:
+                # Skip this year if we don't have data
+                continue
+        
+        # Create the plots
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 10))
+        
+        # Plot 1: Generation vs Load
+        ax1.bar(years, generation, label='Generation', alpha=0.7, color='green')
+        ax1.bar(years, load, label='Load', alpha=0.7, color='blue')
+        ax1.set_title('Generation vs Load by Year')
+        ax1.set_xlabel('Year')
+        ax1.set_ylabel('Energy (MWh)')
+        ax1.legend()
+        ax1.grid(True, linestyle='--', alpha=0.7)
+        
+        # Plot 2: Mismatch
+        ax2.bar(years, mismatch, label='Mismatch (Gen-Load)', 
+                color=['green' if m >= 0 else 'red' for m in mismatch])
+        ax2.set_title('Generation-Load Mismatch by Year')
+        ax2.set_xlabel('Year')
+        ax2.set_ylabel('Energy Mismatch (MWh)')
+        ax2.axhline(y=0, color='black', linestyle='-', alpha=0.5)
+        ax2.grid(True, linestyle='--', alpha=0.7)
+        
+        # Add the mismatch percentage
+        for i, m in enumerate(mismatch):
+            percentage = (m / load[i]) * 100 if load[i] > 0 else 0
+            ax2.text(years[i], m + (max(mismatch) * 0.05 if m >= 0 else min(mismatch) * 0.05), 
+                    f"{percentage:.1f}%", ha='center', va='center', fontsize=9)
+        
+        plt.tight_layout()
+        plt.savefig(output_file)
+        plt.close(fig)
+        
+        return True
+    except Exception as e:
+        print(f"Error generating generation-load mismatch plot: {e}")
         import traceback
         traceback.print_exc()
         return False

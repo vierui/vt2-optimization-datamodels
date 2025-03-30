@@ -60,25 +60,92 @@ def create_dcopf_problem(network):
         storage_first_install = {(s, y): cp.Variable(boolean=True)
                                 for s in network.storage_units.index for y in years}
         
-        # Asset continuity: once installed they remain installed
+        # Track generator installations specifically for replacements
+        gen_replacement = {(g, y): cp.Variable(boolean=True)
+                         for g in network.generators.index for y in years}
+        storage_replacement = {(s, y): cp.Variable(boolean=True)
+                             for s in network.storage_units.index for y in years}
+        
+        # FIXED: Setup lifetime tracking for each asset to ensure they remain installed for their full lifetime
+        for g in network.generators.index:
+            # Get generator lifetime
+            lifetime = network.generators.loc[g].get('lifetime_years', 25)
+            
+            for y_idx, y in enumerate(years):
+                # Find the decommissioning year index, if within planning horizon
+                decomm_y_idx = y_idx + lifetime
+                if decomm_y_idx < len(years):
+                    decomm_y = years[decomm_y_idx]
+                    
+                    # For each installation year, create a constraint ensuring 
+                    # that the asset is either replaced or decommissioned by its end of life
+                    constraints += [
+                        # If asset is installed in year y, by decomm_y it must either be replaced or decommissioned
+                        gen_replacement[(g, decomm_y)] >= gen_first_install[(g, y)]
+                    ]
+                
+                # ADDED: For each year after installation but before lifetime expires, enforce that the asset remains installed
+                # This prevents unnecessary reinstallations
+                for future_idx in range(y_idx + 1, min(y_idx + lifetime, len(years))):
+                    future_y = years[future_idx]
+                    constraints += [
+                        # If installed in year y, it must remain installed in future years until replacement or lifetime ends
+                        gen_installed[(g, future_y)] >= gen_first_install[(g, y)] - sum(gen_replacement[(g, years[i])] for i in range(y_idx + 1, future_idx + 1) if i < len(years))
+                    ]
+        
+        # Same for storage
+        for s in network.storage_units.index:
+            # Get storage lifetime
+            lifetime = network.storage_units.loc[s].get('lifetime_years', 15)
+            
+            for y_idx, y in enumerate(years):
+                # Find the decommissioning year index, if within planning horizon
+                decomm_y_idx = y_idx + lifetime
+                if decomm_y_idx < len(years):
+                    decomm_y = years[decomm_y_idx]
+                    
+                    # Create constraint for decommissioning or replacement
+                    constraints += [
+                        # If asset is installed in year y, by decomm_y it must either be replaced or decommissioned
+                        storage_replacement[(s, decomm_y)] >= storage_first_install[(s, y)]
+                    ]
+                
+                # ADDED: For each year after installation but before lifetime expires, enforce that the asset remains installed
+                for future_idx in range(y_idx + 1, min(y_idx + lifetime, len(years))):
+                    future_y = years[future_idx]
+                    constraints += [
+                        # If installed in year y, it must remain installed in future years until replacement or lifetime ends
+                        storage_installed[(s, future_y)] >= storage_first_install[(s, y)] - sum(storage_replacement[(s, years[i])] for i in range(y_idx + 1, future_idx + 1) if i < len(years))
+                    ]
+        
+        # MODIFIED: Asset continuity - if an asset is marked for replacement, it remains active
         for g in network.generators.index:
             for y_idx in range(1, len(years)):
-                constraints += [gen_installed[(g, years[y_idx])] >= gen_installed[(g, years[y_idx-1])]]
+                # CHANGED: Asset continuity now ensures asset remains installed until it needs replacement
+                # But we don't force continuity for assets that were never installed
+                constraints += [
+                    # Asset installed status carries forward unless it needs replacement
+                    gen_installed[(g, years[y_idx])] >= (gen_installed[(g, years[y_idx-1])] - gen_replacement[(g, years[y_idx])])
+                ]
         
         for s in network.storage_units.index:
             for y_idx in range(1, len(years)):
-                constraints += [storage_installed[(s, years[y_idx])] >= storage_installed[(s, years[y_idx-1])]]
+                constraints += [
+                    # Asset installed status carries forward unless it needs replacement
+                    storage_installed[(s, years[y_idx])] >= (storage_installed[(s, years[y_idx-1])] - storage_replacement[(s, years[y_idx])])
+                ]
         
-        # First installation happens when asset goes from not installed to installed
+        # MODIFIED: First installation happens when asset goes from not installed to installed
         for g in network.generators.index:
             # First year is a special case
             constraints += [gen_first_install[(g, years[0])] == gen_installed[(g, years[0])]]
             
-            # For subsequent years, it's first installed if it wasn't installed before but is now
+            # For subsequent years, it's first installed if it wasn't installed before but is now,
+            # OR if it was marked for replacement
             for y_idx in range(1, len(years)):
                 constraints += [
                     gen_first_install[(g, years[y_idx])] == (
-                        gen_installed[(g, years[y_idx])] - gen_installed[(g, years[y_idx-1])]
+                        (gen_installed[(g, years[y_idx])] - gen_installed[(g, years[y_idx-1])]) + gen_replacement[(g, years[y_idx])]
                     )
                 ]
         
@@ -87,13 +154,30 @@ def create_dcopf_problem(network):
             # First year is a special case
             constraints += [storage_first_install[(s, years[0])] == storage_installed[(s, years[0])]]
             
-            # For subsequent years, it's first installed if it wasn't installed before but is now
+            # For subsequent years, first installed if it wasn't installed before but is now,
+            # OR if it was marked for replacement
             for y_idx in range(1, len(years)):
                 constraints += [
                     storage_first_install[(s, years[y_idx])] == (
-                        storage_installed[(s, years[y_idx])] - storage_installed[(s, years[y_idx-1])]
+                        (storage_installed[(s, years[y_idx])] - storage_installed[(s, years[y_idx-1])]) + storage_replacement[(s, years[y_idx])]
                     )
                 ]
+            
+        # NEW: Add a budget constraint to limit installations per year
+        # Force diversification of installations over time
+        max_gen_installations_per_year = max(1, len(network.generators) // 2)  # At most half the generators in one year
+        max_storage_installations_per_year = max(1, len(network.storage_units) // 2)  # At most half the storage in one year
+            
+        for y in years:
+            # Limit generator installations per year
+            constraints += [
+                sum(gen_first_install[(g, y)] for g in network.generators.index) <= max_gen_installations_per_year
+            ]
+            
+            # Limit storage installations per year
+            constraints += [
+                sum(storage_first_install[(s, y)] for s in network.storage_units.index) <= max_storage_installations_per_year
+            ]
     else:
         # If only one year, installed is same as first install
         gen_first_install = gen_installed
@@ -273,13 +357,35 @@ def create_dcopf_problem(network):
             
             # Only count CAPEX when generator is first installed in a year
             capex = gen_data.get('capex_per_mw', 0) * gen_data['capacity_mw']
-            annual_capex = capex / gen_data.get('lifetime_years', 25)
             
-            # Use the first_install variable if we're tracking it
+            # FIXED: Only apply annual CAPEX amortization if the asset is newly installed or replaced
+            # Get correct lifetime
+            lifetime = gen_data.get('lifetime_years', 25)
+            annual_capex = capex / lifetime  # Annualized capex
+            
+            # Apply different learning curves based on technology type
+            tech_type = gen_data.get('type', 'unknown')
+            learning_factor = 1.0  # Default no learning
+            
+            # Apply different learning curves based on technology type
+            if tech_type == 'wind':
+                learning_factor = max(0.7, 1.0 - (0.03 * y_idx))  # Wind costs decrease by 3% per year
+            elif tech_type == 'solar':
+                learning_factor = max(0.6, 1.0 - (0.04 * y_idx))  # Solar costs decrease by 4% per year
+            elif tech_type == 'storage':
+                learning_factor = max(0.5, 1.0 - (0.05 * y_idx))  # Storage costs decrease by 5% per year
+            
+            # Cost increases for thermal generators (carbon taxes or fuel costs)
+            elif tech_type == 'thermal':
+                learning_factor = min(1.5, 1.0 + (0.02 * y_idx))  # Thermal costs increase by 2% per year
+            
+            # FIXED: Apply CAPEX only at first installation or replacement, not every year the asset is installed
             if 'gen_first_install' in locals():
-                capital_costs.append(discount_factor * annual_capex * gen_first_install[(gen_id, y)])
+                yearly_capex = discount_factor * annual_capex * learning_factor * gen_first_install[(gen_id, y)]
+                capital_costs.append(yearly_capex)
             else:
-                capital_costs.append(discount_factor * annual_capex * gen_installed[(gen_id, y)])
+                yearly_capex = discount_factor * annual_capex * learning_factor * gen_installed[(gen_id, y)]
+                capital_costs.append(yearly_capex)
     
     # Storage CAPEX
     for y_idx, y in enumerate(years):
@@ -290,13 +396,21 @@ def create_dcopf_problem(network):
             
             # Only count CAPEX when storage is first installed in a year
             capex = storage_data.get('capex_per_mw', 0) * storage_data['p_mw']
-            annual_capex = capex / storage_data.get('lifetime_years', 15)
             
-            # Use the first_install variable if we're tracking it
+            # FIXED: Use correct lifetime and only apply CAPEX when newly installed or replaced
+            lifetime = storage_data.get('lifetime_years', 15)
+            annual_capex = capex / lifetime
+            
+            # Apply learning factor for storage technology
+            learning_factor = max(0.5, 1.0 - (0.05 * y_idx))  # Storage costs decrease by 5% per year
+            
+            # FIXED: Apply CAPEX only at first installation or replacement, not every year the asset is installed
             if 'storage_first_install' in locals():
-                capital_costs.append(discount_factor * annual_capex * storage_first_install[(storage_id, y)])
+                yearly_capex = discount_factor * annual_capex * learning_factor * storage_first_install[(storage_id, y)]
+                capital_costs.append(yearly_capex)
             else:
-                capital_costs.append(discount_factor * annual_capex * storage_installed[(storage_id, y)])
+                yearly_capex = discount_factor * annual_capex * learning_factor * storage_installed[(storage_id, y)]
+                capital_costs.append(yearly_capex)
     
     # Total objective: sum of operational and capital costs
     objective = cp.Minimize(sum(operational_costs) + sum(capital_costs))
@@ -311,7 +425,11 @@ def create_dcopf_problem(network):
             'f': f,
             'theta': theta,
             'gen_installed': gen_installed,
-            'storage_installed': storage_installed
+            'storage_installed': storage_installed,
+            'gen_first_install': gen_first_install,
+            'storage_first_install': storage_first_install,
+            'gen_replacement': gen_replacement if len(years) > 1 else None,
+            'storage_replacement': storage_replacement if len(years) > 1 else None
         },
         'constraints': constraints,
         'objective': objective,
@@ -379,6 +497,14 @@ def extract_results(network, problem, solution):
     gen_installed = problem['variables']['gen_installed']
     storage_installed = problem['variables']['storage_installed']
     
+    # Get optional variables
+    gen_first_install = problem['variables'].get('gen_first_install', gen_installed)
+    storage_first_install = problem['variables'].get('storage_first_install', storage_installed)
+    
+    # Get replacement variables if they exist in the problem
+    gen_replacement = problem['variables'].get('gen_replacement', None)
+    storage_replacement = problem['variables'].get('storage_replacement', None)
+    
     # Get years from the problem
     years = problem['years']
     print(f"\nExtracting results for {len(years)} years...")
@@ -392,10 +518,28 @@ def extract_results(network, problem, solution):
     network.generators_installed_by_year = {year: {} for year in years}
     network.storage_installed_by_year = {year: {} for year in years}
     
-    # Track first installation years - when asset was installed for the first time
-    if 'gen_first_install' in locals() and 'storage_first_install' in locals():
-        network.generators_first_install_by_year = {year: {} for year in years}
-        network.storage_first_install_by_year = {year: {} for year in years}
+    # Track first installation years 
+    network.generators_first_install_by_year = {year: {} for year in years}
+    network.storage_first_install_by_year = {year: {} for year in years}
+    
+    # Store replacement information if available
+    if gen_replacement is not None:
+        network.generators_replacement_by_year = {year: {} for year in years}
+        for year in years:
+            for g in network.generators.index:
+                network.generators_replacement_by_year[year][g] = gen_replacement[(g, year)].value
+    else:
+        # Initialize empty to avoid attribute errors
+        network.generators_replacement_by_year = {year: {g: 0.0 for g in network.generators.index} for year in years}
+    
+    if storage_replacement is not None:
+        network.storage_replacement_by_year = {year: {} for year in years}
+        for year in years:
+            for s in network.storage_units.index:
+                network.storage_replacement_by_year[year][s] = storage_replacement[(s, year)].value
+    else:
+        # Initialize empty to avoid attribute errors
+        network.storage_replacement_by_year = {year: {s: 0.0 for s in network.storage_units.index} for year in years}
     
     # Create dictionaries to store asset installation history
     network.asset_installation_history = {
@@ -418,22 +562,31 @@ def extract_results(network, problem, solution):
         for g in network.generators.index:
             network.generators_t_by_year[year]['p'][g] = p_gen[(g, year)].value
             network.generators_installed_by_year[year][g] = gen_installed[(g, year)].value
+            network.generators_first_install_by_year[year][g] = gen_first_install[(g, year)].value
             
-            # Track first installations if available
-            if hasattr(network, 'generators_first_install_by_year'):
-                if 'gen_first_install' in locals():
-                    network.generators_first_install_by_year[year][g] = gen_first_install[(g, year)].value
-                    
-                    # Add to installation history if first installed in this year
-                    if gen_first_install[(g, year)].value > 0.5:
-                        if g not in network.asset_installation_history['generators']:
-                            network.asset_installation_history['generators'][g] = []
-                        network.asset_installation_history['generators'][g].append({
-                            'installation_year': year,
-                            'capacity_mw': network.generators.loc[g, 'capacity_mw'],
-                            'capex_per_mw': network.generators.loc[g].get('capex_per_mw', 0),
-                            'lifetime_years': network.generators.loc[g].get('lifetime_years', 25),
-                        })
+            # Store replacement information if available
+            if gen_replacement is not None:
+                network.generators_replacement_by_year[year][g] = gen_replacement[(g, year)].value
+            
+            # Determine if this is a replacement
+            is_replacement = False
+            if hasattr(network, 'generators_replacement_by_year') and year in network.generators_replacement_by_year:
+                if g in network.generators_replacement_by_year[year]:
+                    replacement_val = network.generators_replacement_by_year[year][g]
+                    is_replacement = replacement_val is not None and replacement_val > 0.5
+            
+            # Add to installation history if first installed in this year
+            if gen_first_install[(g, year)].value > 0.5:
+                if g not in network.asset_installation_history['generators']:
+                    network.asset_installation_history['generators'][g] = []
+                
+                network.asset_installation_history['generators'][g].append({
+                    'installation_year': year,
+                    'capacity_mw': network.generators.loc[g, 'capacity_mw'],
+                    'capex_per_mw': network.generators.loc[g].get('capex_per_mw', 0),
+                    'lifetime_years': network.generators.loc[g].get('lifetime_years', 25),
+                    'is_replacement': is_replacement
+                })
         
         # Storage units
         for s in network.storage_units.index:
@@ -441,23 +594,32 @@ def extract_results(network, problem, solution):
             network.storage_units_t_by_year[year]['p_discharge'][s] = p_discharge[(s, year)].value
             network.storage_units_t_by_year[year]['state_of_charge'][s] = soc[(s, year)].value
             network.storage_installed_by_year[year][s] = storage_installed[(s, year)].value
+            network.storage_first_install_by_year[year][s] = storage_first_install[(s, year)].value
             
-            # Track first installations if available
-            if hasattr(network, 'storage_first_install_by_year'):
-                if 'storage_first_install' in locals():
-                    network.storage_first_install_by_year[year][s] = storage_first_install[(s, year)].value
-                    
-                    # Add to installation history if first installed in this year
-                    if storage_first_install[(s, year)].value > 0.5:
-                        if s not in network.asset_installation_history['storage']:
-                            network.asset_installation_history['storage'][s] = []
-                        network.asset_installation_history['storage'][s].append({
-                            'installation_year': year,
-                            'capacity_mw': network.storage_units.loc[s, 'p_mw'],
-                            'energy_capacity_mwh': network.storage_units.loc[s, 'energy_mwh'],
-                            'capex_per_mw': network.storage_units.loc[s].get('capex_per_mw', 0),
-                            'lifetime_years': network.storage_units.loc[s].get('lifetime_years', 15),
-                        })
+            # Store replacement information if available
+            if storage_replacement is not None:
+                network.storage_replacement_by_year[year][s] = storage_replacement[(s, year)].value
+            
+            # Determine if this is a replacement
+            is_replacement = False
+            if hasattr(network, 'storage_replacement_by_year') and year in network.storage_replacement_by_year:
+                if s in network.storage_replacement_by_year[year]:
+                    replacement_val = network.storage_replacement_by_year[year][s]
+                    is_replacement = replacement_val is not None and replacement_val > 0.5
+            
+            # Add to installation history if first installed in this year
+            if storage_first_install[(s, year)].value > 0.5:
+                if s not in network.asset_installation_history['storage']:
+                    network.asset_installation_history['storage'][s] = []
+                
+                network.asset_installation_history['storage'][s].append({
+                    'installation_year': year,
+                    'capacity_mw': network.storage_units.loc[s, 'p_mw'],
+                    'energy_capacity_mwh': network.storage_units.loc[s, 'energy_mwh'],
+                    'capex_per_mw': network.storage_units.loc[s].get('capex_per_mw', 0),
+                    'lifetime_years': network.storage_units.loc[s].get('lifetime_years', 15),
+                    'is_replacement': is_replacement
+                })
         
         # Lines
         for l in network.lines.index:
@@ -491,6 +653,21 @@ def extract_results(network, problem, solution):
     # Results summary for each year
     total_discounted_cost = 0
     
+    # ADDED: Track asset lifetimes and replacement history
+    lifetime_expirations = {
+        'generators': {},
+        'storage': {}
+    }
+    
+    # Initialize lifetime tracking
+    for g in network.generators.index:
+        lifetime = network.generators.loc[g].get('lifetime_years', 25)
+        lifetime_expirations['generators'][g] = lifetime
+    
+    for s in network.storage_units.index:
+        lifetime = network.storage_units.loc[s].get('lifetime_years', 15)
+        lifetime_expirations['storage'][s] = lifetime
+    
     for year_idx, year in enumerate(years):
         # Apply discount factor to calculations
         default_discount_rate = getattr(network, 'discount_rate', 0.05)  # Default 5% if not specified
@@ -510,18 +687,20 @@ def extract_results(network, problem, solution):
             op_cost = gen_cost * gen_sum
             operational_cost += op_cost
             
-            # Calculate CAPEX if generator is installed this year
+            # Get installation status
             installed = network.generators_installed_by_year[year][g]
-            capex = 0
+            is_first_install = network.generators_first_install_by_year[year][g] > 0.5
             
-            # Only count CAPEX in the year when it's first installed
-            is_newly_installed = installed > 0.5
-            if year_idx > 0:
-                prev_year = years[year_idx-1]
-                prev_installed = network.generators_installed_by_year[prev_year][g]
-                is_newly_installed = installed > 0.5 and prev_installed < 0.5
-                
-            if is_newly_installed:
+            # Determine if this is a replacement
+            is_replacement = False
+            if hasattr(network, 'generators_replacement_by_year') and year in network.generators_replacement_by_year:
+                if g in network.generators_replacement_by_year[year]:
+                    replacement_val = network.generators_replacement_by_year[year][g]
+                    is_replacement = replacement_val is not None and replacement_val > 0.5
+            
+            # Calculate CAPEX if generator is first installed or replaced in this year
+            capex = 0
+            if is_first_install:
                 capacity = network.generators.loc[g, 'capacity_mw']
                 capex_per_mw = network.generators.loc[g].get('capex_per_mw', 0)
                 lifetime = network.generators.loc[g].get('lifetime_years', 25)
@@ -534,24 +713,35 @@ def extract_results(network, problem, solution):
             discounted_op_cost = op_cost * discount_factor
             discounted_capex = capex * discount_factor
             
-            print(f"Generator {g}: Installed = {installed > 0.5}, Total dispatch = {gen_sum:.2f} MWh, "
+            # IMPROVED: Display clearer installation status information
+            installation_status = "Not installed"
+            if installed > 0.5:
+                if is_first_install:
+                    installation_status = "Newly installed" if not is_replacement else "Replaced"
+                else:
+                    installation_status = "Active"
+            
+            print(f"Generator {g}: Status = {installation_status}, Total dispatch = {gen_sum:.2f} MWh, "
                   f"Operational cost = {op_cost:.2f}, Annual CAPEX = {capex:.2f}, "
                   f"Discount rate = {gen_discount_rate:.1%}, Discounted cost = {(discounted_op_cost + discounted_capex):.2f}")
         
         # Calculate storage costs
         print("\nStorage installation decisions:")
         for s in network.storage_units.index:
+            # Get installation status
             installed = network.storage_installed_by_year[year][s]
-            capex = 0
+            is_first_install = network.storage_first_install_by_year[year][s] > 0.5
             
-            # Only count CAPEX in the year when it's first installed
-            is_newly_installed = installed > 0.5
-            if year_idx > 0:
-                prev_year = years[year_idx-1]
-                prev_installed = network.storage_installed_by_year[prev_year][s]
-                is_newly_installed = installed > 0.5 and prev_installed < 0.5
-                
-            if is_newly_installed:
+            # Determine if this is a replacement
+            is_replacement = False
+            if hasattr(network, 'storage_replacement_by_year') and year in network.storage_replacement_by_year:
+                if s in network.storage_replacement_by_year[year]:
+                    replacement_val = network.storage_replacement_by_year[year][s]
+                    is_replacement = replacement_val is not None and replacement_val > 0.5
+            
+            # Calculate CAPEX if storage is first installed or replaced in this year
+            capex = 0
+            if is_first_install:
                 capacity = network.storage_units.loc[s, 'p_mw']
                 capex_per_mw = network.storage_units.loc[s].get('capex_per_mw', 0)
                 lifetime = network.storage_units.loc[s].get('lifetime_years', 15)
@@ -566,16 +756,73 @@ def extract_results(network, problem, solution):
             charge_sum = network.storage_units_t_by_year[year]['p_charge'][s].sum()
             discharge_sum = network.storage_units_t_by_year[year]['p_discharge'][s].sum()
             
-            print(f"Storage {s}: Installed = {installed > 0.5}, "
+            # IMPROVED: Display clearer installation status information
+            installation_status = "Not installed"
+            if installed > 0.5:
+                if is_first_install:
+                    installation_status = "Newly installed" if not is_replacement else "Replaced"
+                else:
+                    installation_status = "Active"
+            
+            print(f"Storage {s}: Status = {installation_status}, "
                   f"Total charging = {charge_sum:.2f} MWh, Total discharging = {discharge_sum:.2f} MWh, "
                   f"Annual CAPEX = {capex:.2f}, Discount rate = {storage_discount_rate:.1%}, "
                   f"Discounted CAPEX = {discounted_capex:.2f}")
         
+        # ADDED: Track and report assets approaching end of lifetime
+        if year_idx > 0:
+            print("\nAssets approaching end of lifetime:")
+            approaching_eol = False
+            for g in network.generators.index:
+                if network.generators_installed_by_year[year][g] > 0.5:
+                    # Look ahead to see if this asset will need replacement in the next 2 years
+                    lifetime = network.generators.loc[g].get('lifetime_years', 25)
+                    # Find the most recent installation year
+                    installation_years = [y for y in range(year_idx+1) if 
+                                          y < len(years) and 
+                                          network.generators_first_install_by_year[years[y]][g] > 0.5]
+                    if installation_years:
+                        most_recent = years[max(installation_years)]
+                        years_active = year_idx - max(installation_years) + 1
+                        years_remaining = lifetime - years_active
+                        if 0 < years_remaining <= 2:
+                            approaching_eol = True
+                            print(f"Generator {g}: Installed in Year {most_recent}, "
+                                  f"Active for {years_active} years, "
+                                  f"Lifetime: {lifetime} years, "
+                                  f"Years remaining: {years_remaining}")
+            
+            for s in network.storage_units.index:
+                if network.storage_installed_by_year[year][s] > 0.5:
+                    # Look ahead to see if this asset will need replacement in the next 2 years
+                    lifetime = network.storage_units.loc[s].get('lifetime_years', 15)
+                    # Find the most recent installation year
+                    installation_years = [y for y in range(year_idx+1) if 
+                                          y < len(years) and 
+                                          network.storage_first_install_by_year[years[y]][s] > 0.5]
+                    if installation_years:
+                        most_recent = years[max(installation_years)]
+                        years_active = year_idx - max(installation_years) + 1
+                        years_remaining = lifetime - years_active
+                        if 0 < years_remaining <= 2:
+                            approaching_eol = True
+                            print(f"Storage {s}: Installed in Year {most_recent}, "
+                                  f"Active for {years_active} years, "
+                                  f"Lifetime: {lifetime} years, "
+                                  f"Years remaining: {years_remaining}")
+            
+            if not approaching_eol:
+                print("None")
+        
         # Calculate load for this year
         total_load = 0
+        load_growth_factor = 1.0
+        if hasattr(network, 'year_to_load_factor') and year in network.year_to_load_factor:
+            load_growth_factor = network.year_to_load_factor[year]
+            
         for load_id in network.loads.index:
             if load_id in network.loads_t.columns:
-                load_sum = network.loads_t[load_id].sum() 
+                load_sum = network.loads_t[load_id].sum() * load_growth_factor
                 total_load += load_sum
         
         # Calculate weighted year costs using default discount rate for totals
