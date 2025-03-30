@@ -4,6 +4,7 @@ This module handles the mathematical optimization aspects of the model
 """
 import cvxpy as cp
 import pandas as pd
+import numpy as np
 
 def create_dcopf_problem(network):
     """
@@ -18,6 +19,8 @@ def create_dcopf_problem(network):
     Returns:
         Dictionary with variables, constraints, and objective
     """
+    print("\nCreating DCOPF problem...")
+    
     # Initialize optimization variables
     p_gen = {}
     p_charge = {}
@@ -46,6 +49,7 @@ def create_dcopf_problem(network):
         ref_bus = network.buses.index[0]
         constraints += [theta[ref_bus] == 0]
     
+    print(f"Setting up generator constraints for {len(network.generators)} generators...")
     # Generator capacity constraints
     for gen_id, gen_data in network.generators.iterrows():
         # Get generator capacity
@@ -55,11 +59,13 @@ def create_dcopf_problem(network):
         if hasattr(network, 'gen_p_max_pu') and gen_id in network.gen_p_max_pu:
             # Time-dependent constraint
             for t in range(network.T):
-                constraints += [p_gen[gen_id][t] <= capacity * network.gen_p_max_pu[gen_id][t]]
+                max_capacity = capacity * network.gen_p_max_pu[gen_id][t]
+                constraints += [p_gen[gen_id][t] <= max_capacity]
         else:
             # Static capacity constraint
             constraints += [p_gen[gen_id] <= capacity]
-        
+    
+    print(f"Setting up storage constraints for {len(network.storage_units)} storage units...")
     # Storage constraints
     for storage_id, storage_data in network.storage_units.iterrows():
         # Power limits
@@ -84,7 +90,11 @@ def create_dcopf_problem(network):
                     + storage_data['efficiency_store'] * p_charge[storage_id][t]
                     - (1 / storage_data['efficiency_dispatch']) * p_discharge[storage_id][t]
                 ]
+        
+        # Add constraint to ensure final SoC equals initial SoC
+        constraints += [soc[storage_id][network.T-1] == soc_init]
     
+    print(f"Setting up line flow constraints for {len(network.lines)} lines...")
     # DC power flow constraints for each line
     for line_id, line_data in network.lines.iterrows():
         from_bus = line_data['bus_from']
@@ -103,7 +113,38 @@ def create_dcopf_problem(network):
         
         # Transmission line flow limits
         constraints += [f[line_id] <= capacity, f[line_id] >= -capacity]
-                
+    
+    # Pre-calculate load values per bus
+    print("Pre-calculating loads per bus...")
+    bus_load = {}
+    for bus_id in network.buses.index:
+        bus_load[bus_id] = np.zeros(network.T)
+    
+    # Map loads to buses
+    # First create a mapping from load index to bus ID
+    load_to_bus_map = {}
+    for load_id in network.loads.index:
+        load_to_bus_map[load_id] = network.loads.at[load_id, 'bus_id']
+    
+    # Print the load to bus mapping
+    print(f"Load to bus mapping: {load_to_bus_map}")
+    
+    # Now map loads to buses using the mapping
+    for t in range(network.T):
+        for load_id in network.loads_t.columns:
+            if t < len(network.loads_t):
+                bus_id = load_to_bus_map.get(load_id)
+                if bus_id in bus_load:
+                    bus_load[bus_id][t] += network.loads_t.iloc[t][load_id]
+    
+    # Debug total system load
+    total_load = np.zeros(network.T)
+    for bus_id in network.buses.index:
+        total_load += bus_load[bus_id]
+    
+    print(f"Total system load: min={total_load.min():.2f}, max={total_load.max():.2f}, avg={total_load.mean():.2f}")
+    
+    print(f"Setting up power balance constraints for {len(network.buses)} buses...")
     # Nodal power balance constraints
     for t in range(network.T):
         for bus_id in network.buses.index:
@@ -117,8 +158,8 @@ def create_dcopf_problem(network):
                                if network.storage_units.loc[s, 'bus_id'] == bus_id]
             storage_net = sum(storage_at_bus) if storage_at_bus else 0
             
-            # Load at the bus
-            load = network.loads_t.loc[t, bus_id] if bus_id in network.loads_t.columns else 0
+            # Load at the bus - use pre-calculated value
+            load = bus_load[bus_id][t]
             
             # Line flows into and out of the bus
             flow_out = sum(f[l][t] for l, data in network.lines.iterrows() 
@@ -129,10 +170,22 @@ def create_dcopf_problem(network):
             # Power balance: generation + storage net + flow in = load + flow out
             constraints += [gen_sum + storage_net + flow_in == load + flow_out]
         
+        # Print debug info for first and last hour
+        if t == 0 or t == network.T-1:
+            print(f"Hour {t} loads: {[(bus_id, bus_load[bus_id][t]) for bus_id in sorted(network.buses.index)]}")
+    
     # Objective function: minimize total generation cost
-    objective = cp.Minimize(
-        sum(network.generators.loc[g, 'cost_mwh'] * cp.sum(p_gen[g]) for g in network.generators.index)
-    )
+    # Make sure to correctly apply the cost to each time period's generation
+    objective_terms = []
+    for gen_id in network.generators.index:
+        # Get cost per MWh
+        cost_per_mwh = network.generators.loc[gen_id, 'cost_mwh']
+        
+        # Add cost for each hour's generation
+        for t in range(network.T):
+            objective_terms.append(cost_per_mwh * p_gen[gen_id][t])
+    
+    objective = cp.Minimize(sum(objective_terms))
     
     # Return all problem components
     return {
@@ -164,7 +217,9 @@ def solve_with_cplex(problem):
     try:
         # Always use CPLEX - no fallbacks
         print("Solving with CPLEX...")
-        prob.solve(solver=cp.CPLEX)
+        prob.solve(solver=cp.CPLEX, verbose=True)
+        print(f"Problem status: {prob.status}")
+        print(f"Objective value: {prob.value}")
     except Exception as e:
         print(f"CPLEX optimization failed: {e}")
         return {'status': 'failed', 'success': False, 'value': None}
@@ -232,4 +287,27 @@ def extract_results(network, problem, solution):
         network.buses_t['v_ang'][b] = theta[b].value
     
     # Store objective value
-    network.objective_value = solution['value'] 
+    network.objective_value = solution['value']
+    
+    # Print summary of generation
+    total_gen = 0
+    for g in network.generators.index:
+        gen_sum = network.generators_t['p'][g].sum()
+        total_gen += gen_sum
+        gen_cost = network.generators.loc[g, 'cost_mwh']
+        print(f"Generator {g}: Total dispatch = {gen_sum:.2f} MWh, Cost = {gen_cost * gen_sum:.2f}")
+    
+    print(f"Total generation: {total_gen:.2f} MWh")
+    
+    # Calculate total load
+    total_load = 0
+    for load_id in network.loads.index:
+        if load_id in network.loads_t.columns:
+            load_sum = network.loads_t[load_id].sum() 
+            total_load += load_sum
+            print(f"Load {load_id}: {load_sum:.2f} MWh")
+    
+    print(f"Total load: {total_load:.2f} MWh")
+    
+    if abs(total_gen - total_load) > 0.01:
+        print(f"WARNING: Generation-load mismatch! Difference: {total_gen - total_load:.2f} MWh") 
