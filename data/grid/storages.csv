@@ -1,2 +1,3 @@
-id,name,bus_id,p_mw,energy_mwh,efficiency_store,efficiency_dispatch
-3001,Storage 1,1,50,100,0.95,0.95 
+id,name,bus_id,p_mw,energy_mwh,efficiency_store,efficiency_dispatch,capex_per_mw,lifetime_years
+3001,Storage 1,2,1.0,4.0,0.9,0.9,700000,15
+3002,Storage 2,3,1.0,4.0,0.9,0.9,700000,15

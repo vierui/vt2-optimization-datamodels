@@ -404,6 +404,145 @@ def plot_dispatch_by_generator_type(networks, output_dir):
         
         print(f"Created dispatch by generator type plot for {season}")
 
+def plot_installation_decisions(networks, output_dir):
+    """
+    Plot the installation decisions for generators and storage units
+    
+    Args:
+        networks: Dictionary with network models for each season
+        output_dir: Directory to save plots
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Plot for each season
+    for season, network in networks.items():
+        if not hasattr(network, 'generators_installed'):
+            print(f"No installation decisions for {season}")
+            continue
+            
+        # Create plot with two subplots: one for generators, one for costs
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 8))
+        
+        # Plot generator installation decisions
+        gen_names = []
+        gen_installed = []
+        gen_colors = []
+        
+        for gen_id in network.generators.index:
+            installed = network.generators_installed.get(gen_id, 0) > 0.5
+            gen_type = network.generators.at[gen_id, 'type'] if 'type' in network.generators.columns else 'unknown'
+            
+            # Get generator name
+            gen_name = f"Gen {gen_id}"
+            if 'name' in network.generators.columns:
+                gen_name = network.generators.at[gen_id, 'name']
+            
+            gen_names.append(gen_name)
+            gen_installed.append(1 if installed else 0)
+            
+            # Set color based on generator type
+            if gen_type == 'wind':
+                gen_colors.append('blue')
+            elif gen_type == 'solar':
+                gen_colors.append('orange')
+            else:  # thermal
+                gen_colors.append('red')
+        
+        # Add storage units if present
+        storage_names = []
+        storage_installed = []
+        
+        if hasattr(network, 'storage_installed'):
+            for storage_id in network.storage_units.index:
+                installed = network.storage_installed.get(storage_id, 0) > 0.5
+                
+                # Get storage name
+                storage_name = f"Storage {storage_id}"
+                if 'name' in network.storage_units.columns:
+                    storage_name = network.storage_units.at[storage_id, 'name']
+                
+                storage_names.append(storage_name)
+                storage_installed.append(1 if installed else 0)
+        
+        # Combine generators and storage for plotting
+        all_names = gen_names + storage_names
+        all_installed = gen_installed + storage_installed
+        all_colors = gen_colors + ['green'] * len(storage_names)
+        
+        # Plot installation decisions as horizontal bar chart
+        y_pos = range(len(all_names))
+        ax1.barh(y_pos, all_installed, color=all_colors)
+        ax1.set_yticks(y_pos)
+        ax1.set_yticklabels(all_names)
+        ax1.set_xlabel('Installed (1) or Not Installed (0)')
+        ax1.set_title(f'Installation Decisions - {SEASON_NAMES[season]}')
+        
+        # Plot cost breakdown
+        # Operational costs
+        operational_costs = {}
+        for gen_id in network.generators.index:
+            gen_name = f"Gen {gen_id}"
+            if 'name' in network.generators.columns:
+                gen_name = network.generators.at[gen_id, 'name']
+            
+            if gen_id in network.generators_t['p'].columns:
+                gen_sum = network.generators_t['p'][gen_id].sum()
+                gen_cost = network.generators.loc[gen_id, 'cost_mwh']
+                operational_costs[gen_name] = gen_cost * gen_sum
+        
+        # CAPEX costs
+        capex_costs = {}
+        for gen_id in network.generators.index:
+            if network.generators_installed.get(gen_id, 0) > 0.5:
+                gen_name = f"Gen {gen_id}"
+                if 'name' in network.generators.columns:
+                    gen_name = network.generators.at[gen_id, 'name']
+                
+                capacity = network.generators.loc[gen_id, 'capacity_mw']
+                capex_per_mw = network.generators.loc[gen_id, 'capex_per_mw']
+                lifetime = network.generators.loc[gen_id, 'lifetime_years']
+                capex_costs[gen_name] = (capex_per_mw * capacity) / lifetime
+        
+        for storage_id in network.storage_units.index:
+            if hasattr(network, 'storage_installed') and network.storage_installed.get(storage_id, 0) > 0.5:
+                storage_name = f"Storage {storage_id}"
+                if 'name' in network.storage_units.columns:
+                    storage_name = network.storage_units.at[storage_id, 'name']
+                
+                capacity = network.storage_units.loc[storage_id, 'p_mw']
+                capex_per_mw = network.storage_units.loc[storage_id, 'capex_per_mw']
+                lifetime = network.storage_units.loc[storage_id, 'lifetime_years']
+                capex_costs[storage_name] = (capex_per_mw * capacity) / lifetime
+        
+        # Create bar chart for costs
+        cost_names = list(operational_costs.keys()) + list(capex_costs.keys())
+        cost_values = list(operational_costs.values()) + list(capex_costs.values())
+        cost_types = ['OPEX'] * len(operational_costs) + ['CAPEX'] * len(capex_costs)
+        cost_colors = ['blue'] * len(operational_costs) + ['red'] * len(capex_costs)
+        
+        # Plot cost breakdown
+        y_pos = range(len(cost_names))
+        ax2.barh(y_pos, cost_values, color=cost_colors)
+        ax2.set_yticks(y_pos)
+        ax2.set_yticklabels(cost_names)
+        ax2.set_xlabel('Cost (EUR)')
+        ax2.set_title(f'Cost Breakdown - {SEASON_NAMES[season]}')
+        
+        # Add legend
+        from matplotlib.patches import Patch
+        legend_elements = [
+            Patch(facecolor='blue', label='OPEX'),
+            Patch(facecolor='red', label='CAPEX')
+        ]
+        ax2.legend(handles=legend_elements, loc='upper right')
+        
+        # Adjust layout and save
+        plt.tight_layout()
+        plt.savefig(os.path.join(output_dir, f"{season}_installation_decisions.png"))
+        plt.close()
+        
+        print(f"Created installation decisions plot for {season}")
+
 def main():
     """
     Main function to create plots from optimization results
@@ -431,6 +570,7 @@ def main():
     plot_load_profiles(networks, plots_dir)
     plot_generation_vs_load(networks, plots_dir)
     plot_dispatch_by_generator_type(networks, plots_dir)
+    plot_installation_decisions(networks, plots_dir)
     
     print(f"All plots have been saved to: {plots_dir}")
 

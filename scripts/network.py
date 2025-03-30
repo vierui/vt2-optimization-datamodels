@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import cvxpy as cp
+import pickle
 from loader import load_grid_data, load_day_profiles
 from optimization import create_dcopf_problem, solve_with_cplex, extract_results
 
@@ -114,15 +115,33 @@ class Network:
             self.snapshots = pd.RangeIndex(self.T)
                 
     def set_snapshots(self, T):
-        """Set the time snapshots for the model"""
+        """
+        Set the time snapshots for the optimization
+        
+        This initializes the time dimension of the network and creates
+        the necessary time series data structures (gen_p_max_pu and loads_t).
+        
+        Args:
+            T: Number of time steps
+            
+        Returns:
+            None
+        """
         self.T = T
         self.snapshots = pd.RangeIndex(T)
         
-        # Initialize constant availability for generators if not using day profiles
-        if not self.use_day_profiles:
-            self.gen_p_max_pu = pd.DataFrame(index=self.snapshots)
+        # Initialize generator availability
+        self.gen_p_max_pu = pd.DataFrame(index=self.snapshots)
+        if not self.generators.empty:
             for gen_id in self.generators.index:
-                self.gen_p_max_pu[gen_id] = [1.0] * self.T
+                self.gen_p_max_pu[gen_id] = [1.0] * T
+        
+        # Initialize loads
+        if self.loads_t.empty and not self.loads.empty:
+            self.loads_t = pd.DataFrame(index=self.snapshots)
+            for load_id in self.loads.index:
+                load_p = self.loads.loc[load_id, 'p_mw']
+                self.loads_t[load_id] = [load_p] * T
         
     def add_bus(self, id, name, v_nom=1.0):
         """Add a bus to the network with numeric ID"""
@@ -130,7 +149,7 @@ class Network:
             self.buses.loc[id] = {'name': name, 'v_nom': v_nom}
         return self
         
-    def add_generator(self, id, name, bus, capacity, cost, gen_type='thermal'):
+    def add_generator(self, id, name, bus, capacity, cost, gen_type='thermal', capex_per_mw=0, lifetime_years=25):
         """Add a generator to the network with numeric ID"""
         if id not in self.generators.index:
             self.generators.loc[id] = {
@@ -138,7 +157,9 @@ class Network:
                 'bus_id': bus,
                 'capacity_mw': capacity,
                 'cost_mwh': cost,
-                'type': gen_type
+                'type': gen_type,
+                'capex_per_mw': capex_per_mw,
+                'lifetime_years': lifetime_years
             }
             
             # Initialize availability factor if time series exists
@@ -177,7 +198,7 @@ class Network:
                 
         return self
         
-    def add_storage(self, id, name, bus, p_mw, energy_mwh, charge_eff=0.95, discharge_eff=0.95):
+    def add_storage(self, id, name, bus, p_mw, energy_mwh, charge_eff=0.95, discharge_eff=0.95, capex_per_mw=0, lifetime_years=15):
         """Add a storage unit to the network with numeric ID"""
         if id not in self.storage_units.index:
             self.storage_units.loc[id] = {
@@ -186,7 +207,9 @@ class Network:
                 'p_mw': p_mw,
                 'energy_mwh': energy_mwh,
                 'efficiency_store': charge_eff,
-                'efficiency_dispatch': discharge_eff
+                'efficiency_dispatch': discharge_eff,
+                'capex_per_mw': capex_per_mw,
+                'lifetime_years': lifetime_years
             }
         return self
         
@@ -204,28 +227,50 @@ class Network:
     
     def dcopf(self):
         """
-        DC Optimal Power Flow - solves the optimization problem with DC power flow
+        Run DC optimal power flow and extract results
         
-        This method uses the external optimization module to create and solve
-        the DC Optimal Power Flow problem with CPLEX.
-            
         Returns:
-            bool: True if optimization was successful, False otherwise
+            True if optimization successful, False otherwise
         """
-        if self.T == 0:
-            raise ValueError("No time snapshots defined. Use set_snapshots() first.")
-                
-        # 1. Create the optimization problem
-        problem = create_dcopf_problem(self)
+        # Ensure we have time settings
+        if self.T <= 0:
+            print("Error: Time horizon not set. Call set_snapshots() first.")
+            return False
         
-        # 2. Solve the problem with CPLEX
+        # Ensure we have all required data
+        if self.buses.empty:
+            print("Error: No buses defined.")
+            return False
+        
+        if self.generators.empty:
+            print("Error: No generators defined.")
+            return False
+        
+        if self.loads.empty or self.loads_t.empty:
+            print("Error: No loads defined or no load time series.")
+            return False
+        
+        if self.lines.empty:
+            print("Error: No lines defined.")
+            return False
+        
+        # Ensure gen_p_max_pu is properly initialized
+        if self.gen_p_max_pu.empty:
+            self.gen_p_max_pu = pd.DataFrame(index=self.snapshots)
+            for gen_id in self.generators.index:
+                self.gen_p_max_pu[gen_id] = [1.0] * self.T
+        
+        # Create and solve the problem
+        print("Solving with CPLEX...")
+        problem = create_dcopf_problem(self)
         solution = solve_with_cplex(problem)
         
-        # 3. Extract and format the results
         if solution['success']:
+            # Extract results
             extract_results(self, problem, solution)
             return True
         else:
+            print("Optimization failed!")
             return False
     
     # Keep lopf as an alias for dcopf for backward compatibility
@@ -258,4 +303,57 @@ class Network:
         print(self.lines_t['p'])
         
         print("\nBus voltage angles (rad):")
-        print(self.buses_t['v_ang']) 
+        print(self.buses_t['v_ang'])
+        
+    def save_to_pickle(self, filepath):
+        """
+        Save the network object to a pickle file
+        
+        Args:
+            filepath: Path to save the pickle file
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        import pickle
+        import os
+        
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            
+            # Save the network to pickle
+            with open(filepath, 'wb') as f:
+                pickle.dump(self, f)
+            
+            return True
+        except Exception as e:
+            print(f"Error saving network to pickle: {e}")
+            return False
+    
+    @staticmethod
+    def load_from_pickle(filepath):
+        """
+        Load a network object from a pickle file
+        
+        Args:
+            filepath: Path to the pickle file
+            
+        Returns:
+            Network object or None if loading fails
+        """
+        import pickle
+        import os
+        
+        if not os.path.exists(filepath):
+            print(f"Error: Pickle file not found: {filepath}")
+            return None
+            
+        try:
+            with open(filepath, 'rb') as f:
+                network = pickle.load(f)
+            
+            return network
+        except Exception as e:
+            print(f"Error loading network from pickle: {e}")
+            return None 
