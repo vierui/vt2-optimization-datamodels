@@ -21,108 +21,123 @@ def create_dcopf_problem(network):
     """
     print("\nCreating DCOPF problem...")
     
-    # Initialize optimization variables
-    p_gen = {}
-    p_charge = {}
-    p_discharge = {}
-    soc = {}
-    f = {}
-    
-    # Binary installation variables for generators and storage
-    gen_installed = {}
-    storage_installed = {}
-    
-    # Phase angle variables for buses (voltage angles in DCOPF)
-    theta = {bus_id: cp.Variable(network.T) for bus_id in network.buses.index}
-    
-    # Create variables for generators
-    for gen_id in network.generators.index:
-        p_gen[gen_id] = cp.Variable(network.T, nonneg=True)
-        # Binary variable: 1 if generator is installed, 0 otherwise
-        gen_installed[gen_id] = cp.Variable(boolean=True)
-        
-    # Create variables for storage units
-    for storage_id in network.storage_units.index:
-        p_charge[storage_id] = cp.Variable(network.T, nonneg=True)
-        p_discharge[storage_id] = cp.Variable(network.T, nonneg=True)
-        soc[storage_id] = cp.Variable(network.T, nonneg=True)
-        # Binary variable: 1 if storage is installed, 0 otherwise
-        storage_installed[storage_id] = cp.Variable(boolean=True)
-        
     # Initialize constraints list
     constraints = []
     
-    # Choose a reference bus and fix its voltage angle to zero
+    # Ensure we have at least one year for planning
+    if not hasattr(network, 'years') or len(network.years) == 0:
+        # Default to a single year if not specified
+        network.years = [0]  # Use 0 as default year index
+        network.year_weights = {0: 1.0}
+        network.discount_rate = 0.05
+        print("No planning years specified, defaulting to a single year")
+    
+    years = network.years
+    print(f"Setting up planning problem with {len(years)} years...")
+    
+    # Initialize variables with year dimension
+    p_gen = {(g, y): cp.Variable(network.T, nonneg=True) 
+            for g in network.generators.index for y in years}
+    p_charge = {(s, y): cp.Variable(network.T, nonneg=True)
+               for s in network.storage_units.index for y in years}
+    p_discharge = {(s, y): cp.Variable(network.T, nonneg=True)
+                  for s in network.storage_units.index for y in years}
+    soc = {(s, y): cp.Variable(network.T, nonneg=True)
+          for s in network.storage_units.index for y in years}
+    
+    # Installation decision variables
+    gen_installed = {(g, y): cp.Variable(boolean=True) 
+                     for g in network.generators.index for y in years}
+    storage_installed = {(s, y): cp.Variable(boolean=True)
+                        for s in network.storage_units.index for y in years}
+    
+    # If we have more than one year, assets once installed remain installed
+    if len(years) > 1:
+        for g in network.generators.index:
+            for y_idx in range(1, len(years)):
+                constraints += [gen_installed[(g, years[y_idx])] >= gen_installed[(g, years[y_idx-1])]]
+        
+        for s in network.storage_units.index:
+            for y_idx in range(1, len(years)):
+                constraints += [storage_installed[(s, years[y_idx])] >= storage_installed[(s, years[y_idx-1])]]
+    
+    # Phase angle variables for buses
+    # These are specific to each year and time period
+    theta = {(b, y): cp.Variable(network.T) 
+            for b in network.buses.index for y in years}
+    
+    # Line flow variables
+    f = {(l, y): cp.Variable(network.T)
+        for l in network.lines.index for y in years}
+    
+    # Set reference buses for each year
     if not network.buses.empty:
         ref_bus = network.buses.index[0]
-        constraints += [theta[ref_bus] == 0]
+        for y in years:
+            constraints += [theta[(ref_bus, y)] == 0]
     
     print(f"Setting up generator constraints for {len(network.generators)} generators...")
     # Generator capacity constraints
-    for gen_id, gen_data in network.generators.iterrows():
-        # Get generator capacity
-        capacity = gen_data['capacity_mw']
-        
-        # Check if we have time-dependent availability (p_max_pu)
-        if hasattr(network, 'gen_p_max_pu') and gen_id in network.gen_p_max_pu:
-            # Time-dependent constraint
-            for t in range(network.T):
-                max_capacity = capacity * network.gen_p_max_pu[gen_id][t]
-                # Generator can only dispatch if installed
-                constraints += [p_gen[gen_id][t] <= max_capacity * gen_installed[gen_id]]
-        else:
-            # Static capacity constraint
-            # Generator can only dispatch if installed
-            constraints += [p_gen[gen_id] <= capacity * gen_installed[gen_id]]
+    for y in years:
+        for gen_id, gen_data in network.generators.iterrows():
+            capacity = gen_data['capacity_mw']
+            
+            if hasattr(network, 'gen_p_max_pu') and gen_id in network.gen_p_max_pu:
+                # Time-dependent constraint
+                for t in range(network.T):
+                    max_capacity = capacity * network.gen_p_max_pu[gen_id][t]
+                    constraints += [p_gen[(gen_id, y)][t] <= max_capacity * gen_installed[(gen_id, y)]]
+            else:
+                # Static capacity constraint
+                constraints += [p_gen[(gen_id, y)] <= capacity * gen_installed[(gen_id, y)]]
     
     print(f"Setting up storage constraints for {len(network.storage_units)} storage units...")
     # Storage constraints
-    for storage_id, storage_data in network.storage_units.iterrows():
-        # Power limits - storage can only charge/discharge if installed
-        constraints += [p_charge[storage_id] <= storage_data['p_mw'] * storage_installed[storage_id]]
-        constraints += [p_discharge[storage_id] <= storage_data['p_mw'] * storage_installed[storage_id]]
-        
-        # Energy capacity limits - storage can only store energy if installed
-        constraints += [soc[storage_id] <= storage_data['energy_mwh'] * storage_installed[storage_id]]
-        
-        # Storage energy balance with initial SoC at 50%
-        soc_init = 0.5 * storage_data['energy_mwh']
-        for t in range(network.T):
-            if t == 0:
-                constraints += [
-                    soc[storage_id][t] == soc_init * storage_installed[storage_id] 
-                    + storage_data['efficiency_store'] * p_charge[storage_id][t]
-                    - (1 / storage_data['efficiency_dispatch']) * p_discharge[storage_id][t]
-                ]
-            else:
-                constraints += [
-                    soc[storage_id][t] == soc[storage_id][t-1] 
-                    + storage_data['efficiency_store'] * p_charge[storage_id][t]
-                    - (1 / storage_data['efficiency_dispatch']) * p_discharge[storage_id][t]
-                ]
-        
-        # Add constraint to ensure final SoC equals initial SoC
-        constraints += [soc[storage_id][network.T-1] == soc_init * storage_installed[storage_id]]
+    for y in years:
+        for storage_id, storage_data in network.storage_units.iterrows():
+            # Power limits
+            constraints += [p_charge[(storage_id, y)] <= storage_data['p_mw'] * storage_installed[(storage_id, y)]]
+            constraints += [p_discharge[(storage_id, y)] <= storage_data['p_mw'] * storage_installed[(storage_id, y)]]
+            
+            # Energy capacity limits
+            constraints += [soc[(storage_id, y)] <= storage_data['energy_mwh'] * storage_installed[(storage_id, y)]]
+            
+            # Storage energy balance with initial SoC at 50%
+            soc_init = 0.5 * storage_data['energy_mwh']
+            for t in range(network.T):
+                if t == 0:
+                    constraints += [
+                        soc[(storage_id, y)][t] == soc_init * storage_installed[(storage_id, y)] 
+                        + storage_data['efficiency_store'] * p_charge[(storage_id, y)][t]
+                        - (1 / storage_data['efficiency_dispatch']) * p_discharge[(storage_id, y)][t]
+                    ]
+                else:
+                    constraints += [
+                        soc[(storage_id, y)][t] == soc[(storage_id, y)][t-1] 
+                        + storage_data['efficiency_store'] * p_charge[(storage_id, y)][t]
+                        - (1 / storage_data['efficiency_dispatch']) * p_discharge[(storage_id, y)][t]
+                    ]
+            
+            # Final SoC equals initial SoC
+            constraints += [soc[(storage_id, y)][network.T-1] == soc_init * storage_installed[(storage_id, y)]]
     
     print(f"Setting up line flow constraints for {len(network.lines)} lines...")
     # DC power flow constraints for each line
-    for line_id, line_data in network.lines.iterrows():
-        from_bus = line_data['bus_from']
-        to_bus = line_data['bus_to']
-        susceptance = line_data['susceptance']
-        capacity = line_data['capacity_mw']
-        
-        # Create flow variables
-        f[line_id] = cp.Variable(network.T)
-        
-        # Flow equation based on susceptance and voltage angle difference
-        for t in range(network.T):
-            constraints += [
-                f[line_id][t] == susceptance * (theta[from_bus][t] - theta[to_bus][t])
-            ]
-        
-        # Transmission line flow limits
-        constraints += [f[line_id] <= capacity, f[line_id] >= -capacity]
+    for y in years:
+        for line_id, line_data in network.lines.iterrows():
+            from_bus = line_data['bus_from']
+            to_bus = line_data['bus_to']
+            susceptance = line_data['susceptance']
+            capacity = line_data['capacity_mw']
+            
+            # Flow equation based on susceptance and voltage angle difference
+            for t in range(network.T):
+                constraints += [
+                    f[(line_id, y)][t] == susceptance * (theta[(from_bus, y)][t] - theta[(to_bus, y)][t])
+                ]
+            
+            # Transmission line flow limits
+            constraints += [f[(line_id, y)] <= capacity, f[(line_id, y)] >= -capacity]
     
     # Pre-calculate load values per bus
     print("Pre-calculating loads per bus...")
@@ -156,66 +171,88 @@ def create_dcopf_problem(network):
     
     print(f"Setting up power balance constraints for {len(network.buses)} buses...")
     # Nodal power balance constraints
-    for t in range(network.T):
-        for bus_id in network.buses.index:
-            # Generator contribution
-            gen_at_bus = [p_gen[g][t] for g in network.generators.index 
-                           if network.generators.loc[g, 'bus_id'] == bus_id]
-            gen_sum = sum(gen_at_bus) if gen_at_bus else 0
-            
-            # Storage contribution
-            storage_at_bus = [p_discharge[s][t] - p_charge[s][t] for s in network.storage_units.index 
-                               if network.storage_units.loc[s, 'bus_id'] == bus_id]
-            storage_net = sum(storage_at_bus) if storage_at_bus else 0
-            
-            # Load at the bus - use pre-calculated value
-            load = bus_load[bus_id][t]
-            
-            # Line flows into and out of the bus
-            flow_out = sum(f[l][t] for l, data in network.lines.iterrows() 
-                           if data['bus_from'] == bus_id)
-            flow_in = sum(f[l][t] for l, data in network.lines.iterrows() 
-                          if data['bus_to'] == bus_id)
-            
-            # Power balance: generation + storage net + flow in = load + flow out
-            constraints += [gen_sum + storage_net + flow_in == load + flow_out]
-        
-        # Print debug info for first and last hour
-        if t == 0 or t == network.T-1:
-            print(f"Hour {t} loads: {[(bus_id, bus_load[bus_id][t]) for bus_id in sorted(network.buses.index)]}")
+    for y in years:
+        for t in range(network.T):
+            for bus_id in network.buses.index:
+                # Generator contribution
+                gen_at_bus = [p_gen[(g, y)][t] for g in network.generators.index 
+                            if network.generators.loc[g, 'bus_id'] == bus_id]
+                gen_sum = sum(gen_at_bus) if gen_at_bus else 0
+                
+                # Storage contribution
+                storage_at_bus = [p_discharge[(s, y)][t] - p_charge[(s, y)][t] for s in network.storage_units.index 
+                                if network.storage_units.loc[s, 'bus_id'] == bus_id]
+                storage_net = sum(storage_at_bus) if storage_at_bus else 0
+                
+                # Load at the bus - use pre-calculated value
+                load = bus_load[bus_id][t]
+                
+                # Line flows into and out of the bus
+                flow_out = sum(f[(l, y)][t] for l, data in network.lines.iterrows() 
+                            if data['bus_from'] == bus_id)
+                flow_in = sum(f[(l, y)][t] for l, data in network.lines.iterrows() 
+                            if data['bus_to'] == bus_id)
+                
+                # Power balance: generation + storage net + flow in = load + flow out
+                constraints += [gen_sum + storage_net + flow_in == load + flow_out]
+    
+    # Print debug info for first and last hour
+    for t in [0, network.T-1]:
+        print(f"Hour {t} loads: {[(bus_id, bus_load[bus_id][t]) for bus_id in sorted(network.buses.index)]}")
     
     # Objective function: minimize total cost (operation + capital)
     
+    # Apply discount rate to costs
+    default_discount_rate = getattr(network, 'discount_rate', 0.05)  # Default 5% if not specified
+    
     # 1. Operational costs: generation cost per MWh * generation
     operational_costs = []
-    for gen_id in network.generators.index:
-        # Get cost per MWh
-        cost_per_mwh = network.generators.loc[gen_id, 'cost_mwh']
-        
-        # Add cost for each hour's generation
-        for t in range(network.T):
-            operational_costs.append(cost_per_mwh * p_gen[gen_id][t])
+    for y_idx, y in enumerate(years):
+        for gen_id in network.generators.index:
+            # Use generator-specific discount rate if available, otherwise use default
+            gen_discount_rate = network.generators.loc[gen_id].get('discount_rate', default_discount_rate)
+            discount_factor = 1 / ((1 + gen_discount_rate) ** y_idx)
+            
+            cost_per_mwh = network.generators.loc[gen_id, 'cost_mwh']
+            for t in range(network.T):
+                operational_costs.append(discount_factor * cost_per_mwh * p_gen[(gen_id, y)][t])
     
     # 2. Capital costs: CAPEX / lifetime * binary installation variable
     capital_costs = []
     
     # Generator CAPEX
-    for gen_id, gen_data in network.generators.iterrows():
-        if 'capex_per_mw' in gen_data and 'lifetime_years' in gen_data:
-            capex = gen_data['capex_per_mw'] * gen_data['capacity_mw']
-            lifetime = gen_data['lifetime_years']
-            # Annual CAPEX cost
-            annual_capex = capex / lifetime
-            capital_costs.append(annual_capex * gen_installed[gen_id])
+    for y_idx, y in enumerate(years):
+        for gen_id, gen_data in network.generators.iterrows():
+            # Use generator-specific discount rate if available, otherwise use default
+            gen_discount_rate = gen_data.get('discount_rate', default_discount_rate)
+            discount_factor = 1 / ((1 + gen_discount_rate) ** y_idx)
+            
+            # Only count CAPEX in the year when it's first installed
+            if y_idx > 0:
+                installation_this_year = gen_installed[(gen_id, y)] - gen_installed[(gen_id, years[y_idx-1])]
+            else:
+                installation_this_year = gen_installed[(gen_id, y)]
+            
+            capex = gen_data.get('capex_per_mw', 0) * gen_data['capacity_mw']
+            annual_capex = capex / gen_data.get('lifetime_years', 25)
+            capital_costs.append(discount_factor * annual_capex * installation_this_year)
     
     # Storage CAPEX
-    for storage_id, storage_data in network.storage_units.iterrows():
-        if 'capex_per_mw' in storage_data and 'lifetime_years' in storage_data:
-            capex = storage_data['capex_per_mw'] * storage_data['p_mw']
-            lifetime = storage_data['lifetime_years']
-            # Annual CAPEX cost
-            annual_capex = capex / lifetime
-            capital_costs.append(annual_capex * storage_installed[storage_id])
+    for y_idx, y in enumerate(years):
+        for storage_id, storage_data in network.storage_units.iterrows():
+            # Use storage-specific discount rate if available, otherwise use default
+            storage_discount_rate = storage_data.get('discount_rate', default_discount_rate)
+            discount_factor = 1 / ((1 + storage_discount_rate) ** y_idx)
+            
+            # Only count CAPEX in the year when it's first installed
+            if y_idx > 0:
+                installation_this_year = storage_installed[(storage_id, y)] - storage_installed[(storage_id, years[y_idx-1])]
+            else:
+                installation_this_year = storage_installed[(storage_id, y)]
+            
+            capex = storage_data.get('capex_per_mw', 0) * storage_data['p_mw']
+            annual_capex = capex / storage_data.get('lifetime_years', 15)
+            capital_costs.append(discount_factor * annual_capex * installation_this_year)
     
     # Total objective: sum of operational and capital costs
     objective = cp.Minimize(sum(operational_costs) + sum(capital_costs))
@@ -233,7 +270,9 @@ def create_dcopf_problem(network):
             'storage_installed': storage_installed
         },
         'constraints': constraints,
-        'objective': objective
+        'objective': objective,
+        'multi_year': True,
+        'years': years
     }
 
 def solve_with_cplex(problem):
@@ -296,102 +335,182 @@ def extract_results(network, problem, solution):
     gen_installed = problem['variables']['gen_installed']
     storage_installed = problem['variables']['storage_installed']
     
-    # Initialize result dataframes with proper indexes
-    network.generators_t['p'] = pd.DataFrame(index=range(network.T))
-    network.storage_units_t['p_charge'] = pd.DataFrame(index=range(network.T))
-    network.storage_units_t['p_discharge'] = pd.DataFrame(index=range(network.T))
-    network.storage_units_t['state_of_charge'] = pd.DataFrame(index=range(network.T))
-    network.lines_t['p'] = pd.DataFrame(index=range(network.T))
-    network.buses_t['v_ang'] = pd.DataFrame(index=range(network.T))
+    # Get years from the problem
+    years = problem['years']
+    print(f"\nExtracting results for {len(years)} years...")
     
-    # Store installation decisions
-    network.generators_installed = {}
-    network.storage_installed = {}
+    # Initialize dictionaries to store results by year
+    network.generators_t_by_year = {year: {} for year in years}
+    network.storage_units_t_by_year = {year: {} for year in years}
+    network.lines_t_by_year = {year: {} for year in years}
+    network.buses_t_by_year = {year: {} for year in years}
     
-    # Populate results
-    # Generators
-    for g in network.generators.index:
-        network.generators_t['p'][g] = p_gen[g].value
-        network.generators_installed[g] = gen_installed[g].value
+    network.generators_installed_by_year = {year: {} for year in years}
+    network.storage_installed_by_year = {year: {} for year in years}
     
-    # Storage units
-    for s in network.storage_units.index:
-        network.storage_units_t['p_charge'][s] = p_charge[s].value
-        network.storage_units_t['p_discharge'][s] = p_discharge[s].value
-        network.storage_units_t['state_of_charge'][s] = soc[s].value
-        network.storage_installed[s] = storage_installed[s].value
+    # Extract results for each year
+    for year in years:
+        # Initialize DataFrames for this year
+        network.generators_t_by_year[year]['p'] = pd.DataFrame(index=range(network.T))
+        network.storage_units_t_by_year[year]['p_charge'] = pd.DataFrame(index=range(network.T))
+        network.storage_units_t_by_year[year]['p_discharge'] = pd.DataFrame(index=range(network.T))
+        network.storage_units_t_by_year[year]['state_of_charge'] = pd.DataFrame(index=range(network.T))
+        network.lines_t_by_year[year]['p'] = pd.DataFrame(index=range(network.T))
+        network.buses_t_by_year[year]['v_ang'] = pd.DataFrame(index=range(network.T))
+        
+        # Populate results for this year
+        # Generators
+        for g in network.generators.index:
+            network.generators_t_by_year[year]['p'][g] = p_gen[(g, year)].value
+            network.generators_installed_by_year[year][g] = gen_installed[(g, year)].value
+        
+        # Storage units
+        for s in network.storage_units.index:
+            network.storage_units_t_by_year[year]['p_charge'][s] = p_charge[(s, year)].value
+            network.storage_units_t_by_year[year]['p_discharge'][s] = p_discharge[(s, year)].value
+            network.storage_units_t_by_year[year]['state_of_charge'][s] = soc[(s, year)].value
+            network.storage_installed_by_year[year][s] = storage_installed[(s, year)].value
+        
+        # Lines
+        for l in network.lines.index:
+            network.lines_t_by_year[year]['p'][l] = f[(l, year)].value
+        
+        # Bus voltage angles
+        for b in network.buses.index:
+            network.buses_t_by_year[year]['v_ang'][b] = theta[(b, year)].value
     
-    # Lines
-    for l in network.lines.index:
-        network.lines_t['p'][l] = f[l].value
+    # Also populate the regular result containers with the last year's results
+    # (for backward compatibility)
+    last_year = years[-1]
+    network.generators_t = {'p': network.generators_t_by_year[last_year]['p'].copy()}
+    network.storage_units_t = {
+        'p_charge': network.storage_units_t_by_year[last_year]['p_charge'].copy(),
+        'p_discharge': network.storage_units_t_by_year[last_year]['p_discharge'].copy(),
+        'state_of_charge': network.storage_units_t_by_year[last_year]['state_of_charge'].copy()
+    }
+    network.lines_t = {'p': network.lines_t_by_year[last_year]['p'].copy()}
+    network.buses_t = {'v_ang': network.buses_t_by_year[last_year]['v_ang'].copy()}
     
-    # Bus voltage angles
-    for b in network.buses.index:
-        network.buses_t['v_ang'][b] = theta[b].value
+    network.generators_installed = network.generators_installed_by_year[last_year]
+    network.storage_installed = network.storage_installed_by_year[last_year]
     
     # Store objective value
     network.objective_value = solution['value']
     
     # Print summary of generation and installation decisions
-    total_gen = 0
-    operational_cost = 0
-    capex_cost = 0
+    print("\nSUMMARY OF OPTIMIZATION RESULTS")
     
-    print("\nGenerator installation and dispatch decisions:")
-    for g in network.generators.index:
-        gen_sum = network.generators_t['p'][g].sum()
-        total_gen += gen_sum
-        gen_cost = network.generators.loc[g, 'cost_mwh']
-        op_cost = gen_cost * gen_sum
-        operational_cost += op_cost
+    # Results summary for each year
+    total_discounted_cost = 0
+    
+    for year_idx, year in enumerate(years):
+        # Apply discount factor to calculations
+        default_discount_rate = getattr(network, 'discount_rate', 0.05)  # Default 5% if not specified
         
-        # Calculate CAPEX if generator is installed
-        installed = network.generators_installed[g]
-        capex = 0
-        if installed > 0.5:  # Binary variable might have small numerical issues
-            capacity = network.generators.loc[g, 'capacity_mw']
-            # Use get() with default values to handle missing columns
-            capex_per_mw = network.generators.loc[g].get('capex_per_mw', 0)
-            lifetime = network.generators.loc[g].get('lifetime_years', 25)
-            capex = (capex_per_mw * capacity) / lifetime
-            capex_cost += capex
+        total_gen = 0
+        operational_cost = 0
+        capex_cost = 0
         
-        print(f"Generator {g}: Installed = {installed > 0.5}, Total dispatch = {gen_sum:.2f} MWh, "
-              f"Operational cost = {op_cost:.2f}, Annual CAPEX = {capex:.2f}")
-    
-    print("\nStorage installation decisions:")
-    for s in network.storage_units.index:
-        installed = network.storage_installed[s]
-        capex = 0
-        if installed > 0.5:  # Binary variable might have small numerical issues
-            capacity = network.storage_units.loc[s, 'p_mw']
-            # Use get() with default values to handle missing columns
-            capex_per_mw = network.storage_units.loc[s].get('capex_per_mw', 0)
-            lifetime = network.storage_units.loc[s].get('lifetime_years', 15)
-            capex = (capex_per_mw * capacity) / lifetime
-            capex_cost += capex
+        print(f"\n----- YEAR {year} -----")
         
-        charge_sum = network.storage_units_t['p_charge'][s].sum()
-        discharge_sum = network.storage_units_t['p_discharge'][s].sum()
+        # Calculate generator costs and dispatch
+        print("\nGenerator installation and dispatch decisions:")
+        for g in network.generators.index:
+            gen_sum = network.generators_t_by_year[year]['p'][g].sum()
+            total_gen += gen_sum
+            gen_cost = network.generators.loc[g, 'cost_mwh']
+            op_cost = gen_cost * gen_sum
+            operational_cost += op_cost
+            
+            # Calculate CAPEX if generator is installed this year
+            installed = network.generators_installed_by_year[year][g]
+            capex = 0
+            
+            # Only count CAPEX in the year when it's first installed
+            is_newly_installed = installed > 0.5
+            if year_idx > 0:
+                prev_year = years[year_idx-1]
+                prev_installed = network.generators_installed_by_year[prev_year][g]
+                is_newly_installed = installed > 0.5 and prev_installed < 0.5
+                
+            if is_newly_installed:
+                capacity = network.generators.loc[g, 'capacity_mw']
+                capex_per_mw = network.generators.loc[g].get('capex_per_mw', 0)
+                lifetime = network.generators.loc[g].get('lifetime_years', 25)
+                capex = (capex_per_mw * capacity) / lifetime
+                capex_cost += capex
+            
+            # Use asset-specific discount rate if available
+            gen_discount_rate = network.generators.loc[g].get('discount_rate', default_discount_rate)
+            discount_factor = 1 / ((1 + gen_discount_rate) ** year_idx)
+            discounted_op_cost = op_cost * discount_factor
+            discounted_capex = capex * discount_factor
+            
+            print(f"Generator {g}: Installed = {installed > 0.5}, Total dispatch = {gen_sum:.2f} MWh, "
+                  f"Operational cost = {op_cost:.2f}, Annual CAPEX = {capex:.2f}, "
+                  f"Discount rate = {gen_discount_rate:.1%}, Discounted cost = {(discounted_op_cost + discounted_capex):.2f}")
         
-        print(f"Storage {s}: Installed = {installed > 0.5}, "
-              f"Total charging = {charge_sum:.2f} MWh, Total discharging = {discharge_sum:.2f} MWh, "
-              f"Annual CAPEX = {capex:.2f}")
+        # Calculate storage costs
+        print("\nStorage installation decisions:")
+        for s in network.storage_units.index:
+            installed = network.storage_installed_by_year[year][s]
+            capex = 0
+            
+            # Only count CAPEX in the year when it's first installed
+            is_newly_installed = installed > 0.5
+            if year_idx > 0:
+                prev_year = years[year_idx-1]
+                prev_installed = network.storage_installed_by_year[prev_year][s]
+                is_newly_installed = installed > 0.5 and prev_installed < 0.5
+                
+            if is_newly_installed:
+                capacity = network.storage_units.loc[s, 'p_mw']
+                capex_per_mw = network.storage_units.loc[s].get('capex_per_mw', 0)
+                lifetime = network.storage_units.loc[s].get('lifetime_years', 15)
+                capex = (capex_per_mw * capacity) / lifetime
+                capex_cost += capex
+            
+            # Use asset-specific discount rate if available
+            storage_discount_rate = network.storage_units.loc[s].get('discount_rate', default_discount_rate)
+            discount_factor = 1 / ((1 + storage_discount_rate) ** year_idx)
+            discounted_capex = capex * discount_factor
+            
+            charge_sum = network.storage_units_t_by_year[year]['p_charge'][s].sum()
+            discharge_sum = network.storage_units_t_by_year[year]['p_discharge'][s].sum()
+            
+            print(f"Storage {s}: Installed = {installed > 0.5}, "
+                  f"Total charging = {charge_sum:.2f} MWh, Total discharging = {discharge_sum:.2f} MWh, "
+                  f"Annual CAPEX = {capex:.2f}, Discount rate = {storage_discount_rate:.1%}, "
+                  f"Discounted CAPEX = {discounted_capex:.2f}")
+        
+        # Calculate load for this year
+        total_load = 0
+        for load_id in network.loads.index:
+            if load_id in network.loads_t.columns:
+                load_sum = network.loads_t[load_id].sum() 
+                total_load += load_sum
+        
+        # Calculate weighted year costs using default discount rate for totals
+        discount_factor = 1 / ((1 + default_discount_rate) ** year_idx)
+        year_total_cost = operational_cost + capex_cost
+        discounted_cost = year_total_cost * discount_factor
+        total_discounted_cost += discounted_cost
+        
+        print(f"\nYear {year} Summary:")
+        print(f"Total generation: {total_gen:.2f} MWh")
+        print(f"Total load: {total_load:.2f} MWh")
+        print(f"Total operational cost: {operational_cost:.2f}")
+        print(f"Total annual CAPEX: {capex_cost:.2f}")
+        print(f"Total cost for year {year}: {year_total_cost:.2f}")
+        print(f"System discount rate: {default_discount_rate:.1%}")
+        print(f"Discounted cost (using system rate): {discounted_cost:.2f}")
+        
+        if abs(total_gen - total_load) > 0.01:
+            print(f"WARNING: Generation-load mismatch! Difference: {total_gen - total_load:.2f} MWh")
     
-    print(f"\nTotal generation: {total_gen:.2f} MWh")
-    print(f"Total operational cost: {operational_cost:.2f}")
-    print(f"Total annual CAPEX: {capex_cost:.2f}")
-    print(f"Total cost (operational + CAPEX): {operational_cost + capex_cost:.2f}")
+    # Print overall summary for the entire planning horizon
+    print("\n----- OVERALL PLANNING HORIZON SUMMARY -----")
+    print(f"Total discounted cost across planning horizon: {total_discounted_cost:.2f}")
     
-    # Calculate total load
-    total_load = 0
-    for load_id in network.loads.index:
-        if load_id in network.loads_t.columns:
-            load_sum = network.loads_t[load_id].sum() 
-            total_load += load_sum
-            print(f"Load {load_id}: {load_sum:.2f} MWh")
-    
-    print(f"Total load: {total_load:.2f} MWh")
-    
-    if abs(total_gen - total_load) > 0.01:
-        print(f"WARNING: Generation-load mismatch! Difference: {total_gen - total_load:.2f} MWh") 
+    # Store the total discounted cost
+    network.total_discounted_cost = total_discounted_cost 

@@ -23,6 +23,11 @@ class Network:
         self.snapshots = None
         self.T = 0
         
+        # Multi-year planning attributes
+        self.years = []  # Years for multi-year planning, e.g., [2023, 2024, 2025]
+        self.year_weights = {}  # Weights for each year (e.g., for representing different lengths)
+        self.discount_rate = 0.05  # Default discount rate of 5%
+        
         # Static component DataFrames - now using numeric IDs
         self.buses = pd.DataFrame(columns=['name', 'v_nom'])
         self.generators = pd.DataFrame(columns=['name', 'bus_id', 'capacity_mw', 'cost_mwh'])
@@ -149,7 +154,7 @@ class Network:
             self.buses.loc[id] = {'name': name, 'v_nom': v_nom}
         return self
         
-    def add_generator(self, id, name, bus, capacity, cost, gen_type='thermal', capex_per_mw=0, lifetime_years=25):
+    def add_generator(self, id, name, bus, capacity, cost, gen_type='thermal', capex_per_mw=0, lifetime_years=25, discount_rate=None):
         """Add a generator to the network with numeric ID"""
         if id not in self.generators.index:
             self.generators.loc[id] = {
@@ -159,7 +164,8 @@ class Network:
                 'cost_mwh': cost,
                 'type': gen_type,
                 'capex_per_mw': capex_per_mw,
-                'lifetime_years': lifetime_years
+                'lifetime_years': lifetime_years,
+                'discount_rate': discount_rate  # Asset-specific discount rate
             }
             
             # Initialize availability factor if time series exists
@@ -198,7 +204,7 @@ class Network:
                 
         return self
         
-    def add_storage(self, id, name, bus, p_mw, energy_mwh, charge_eff=0.95, discharge_eff=0.95, capex_per_mw=0, lifetime_years=15):
+    def add_storage(self, id, name, bus, p_mw, energy_mwh, charge_eff=0.95, discharge_eff=0.95, capex_per_mw=0, lifetime_years=15, discount_rate=None):
         """Add a storage unit to the network with numeric ID"""
         if id not in self.storage_units.index:
             self.storage_units.loc[id] = {
@@ -209,7 +215,8 @@ class Network:
                 'efficiency_store': charge_eff,
                 'efficiency_dispatch': discharge_eff,
                 'capex_per_mw': capex_per_mw,
-                'lifetime_years': lifetime_years
+                'lifetime_years': lifetime_years,
+                'discount_rate': discount_rate  # Asset-specific discount rate
             }
         return self
         
@@ -356,4 +363,42 @@ class Network:
             return network
         except Exception as e:
             print(f"Error loading network from pickle: {e}")
-            return None 
+            return None
+
+    def set_planning_horizon(self, years, discount_rate=0.05):
+        """
+        Set up multi-year planning horizon
+        
+        Args:
+            years: List of years in the planning horizon, e.g., [2023, 2024, 2025]
+            discount_rate: Discount rate for future costs (default: 5%)
+            
+        Returns:
+            Self for method chaining
+        """
+        self.years = years
+        self.year_weights = {year: 1.0 for year in years}  # Default equal weights
+        self.discount_rate = discount_rate
+        print(f"Set up planning horizon with {len(years)} years, discount rate: {discount_rate:.1%}")
+        return self
+        
+    def set_year_weights(self, weights):
+        """
+        Set weights for each year in the planning horizon
+        
+        Args:
+            weights: Dictionary mapping years to weights
+            
+        Returns:
+            Self for method chaining
+        """
+        if not self.years:
+            print("Warning: Planning horizon not set. Call set_planning_horizon() first.")
+            return self
+            
+        for year, weight in weights.items():
+            if year in self.years:
+                self.year_weights[year] = weight
+                
+        print(f"Set year weights: {self.year_weights}")
+        return self 

@@ -1,7 +1,7 @@
-id,name,bus_id,capacity_mw,cost_mwh,type,capex_per_mw,lifetime_years
-1001,Thermal Generator 1,1,1.0,80,thermal,1000000,25
-1002,Wind Generator 1,2,1.0,20,wind,1500000,20
-1003,Solar Generator 1,1,1.0,30,solar,1200000,30
-1004,Thermal Generator 2,3,1.0,75,thermal,900000,25
-1005,Wind Generator 2,4,1.0,15,wind,1500000,20
-1006,Solar Generator 2,3,1.0,25,solar,950000,25 
+id,name,bus_id,capacity_mw,cost_mwh,type,capex_per_mw,lifetime_years,discount_rate
+1001,Thermal Generator 1,1,1.0,80,thermal,1000000,25,0.08
+1002,Wind Generator 1,2,1.0,20,wind,1500000,20,0.04
+1003,Solar Generator 1,1,1.0,30,solar,1200000,30,0.035
+1004,Thermal Generator 2,3,1.0,75,thermal,900000,25,0.075
+1005,Wind Generator 2,4,1.0,15,wind,1500000,20,0.04
+1006,Solar Generator 2,3,1.0,25,solar,950000,25,0.035 

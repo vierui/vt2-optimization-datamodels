@@ -179,6 +179,14 @@ def save_detailed_cost_report(network, output_file):
         True if successful, False otherwise
     """
     try:
+        # Check if we're dealing with multi-year results
+        multi_year = hasattr(network, 'years') and len(network.years) > 0
+        
+        if multi_year:
+            # Handle multi-year planning results
+            return save_multi_year_cost_report(network, output_file)
+        
+        # Single-year planning (original implementation)
         # Initialize cost components
         operational_costs = {}
         capex_costs = {}
@@ -236,6 +244,148 @@ def save_detailed_cost_report(network, output_file):
         
     except Exception as e:
         print(f"Error saving detailed cost report: {e}")
+        return False
+
+def save_multi_year_cost_report(network, output_file):
+    """
+    Save a detailed cost report for multi-year planning with OPEX and CAPEX breakdown
+    
+    Args:
+        network: Network object with multi-year results
+        output_file: Path to save the report
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        years = network.years
+        discount_rate = getattr(network, 'discount_rate', 0.05)  # Default 5% if not specified
+        
+        # Initialize the report structure
+        report = {
+            'planning_horizon': {
+                'years': years,
+                'discount_rate': discount_rate
+            },
+            'total_discounted_cost': getattr(network, 'total_discounted_cost', 0),
+            'years_data': {}
+        }
+        
+        # Process each year's data
+        for year_idx, year in enumerate(years):
+            discount_factor = 1 / ((1 + discount_rate) ** year_idx)
+            
+            # Initialize cost components for this year
+            operational_costs = {}
+            capex_costs = {}
+            total_opex = 0
+            total_capex = 0
+            
+            # Calculate operational costs for generators
+            if hasattr(network, 'generators_t_by_year') and year in network.generators_t_by_year:
+                for gen_id in network.generators.index:
+                    gen_sum = network.generators_t_by_year[year]['p'][gen_id].sum()
+                    gen_cost = network.generators.loc[gen_id, 'cost_mwh']
+                    opex = gen_cost * gen_sum
+                    total_opex += opex
+                    operational_costs[f'generator_{gen_id}'] = opex
+            
+            # Calculate CAPEX for generators installed in this year
+            if hasattr(network, 'generators_installed_by_year') and year in network.generators_installed_by_year:
+                for gen_id in network.generators.index:
+                    installed = network.generators_installed_by_year[year][gen_id]
+                    
+                    # Only count CAPEX in the year when it's first installed
+                    is_newly_installed = installed > 0.5
+                    if year_idx > 0:
+                        prev_year = years[year_idx-1]
+                        prev_installed = network.generators_installed_by_year[prev_year][gen_id]
+                        is_newly_installed = installed > 0.5 and prev_installed < 0.5
+                    
+                    if is_newly_installed:
+                        capacity = network.generators.loc[gen_id, 'capacity_mw']
+                        capex_per_mw = network.generators.loc[gen_id].get('capex_per_mw', 0)
+                        lifetime = network.generators.loc[gen_id].get('lifetime_years', 25)
+                        capex = (capex_per_mw * capacity) / lifetime
+                        total_capex += capex
+                        capex_costs[f'generator_{gen_id}'] = capex
+            
+            # Calculate CAPEX for storage installed in this year
+            if hasattr(network, 'storage_installed_by_year') and year in network.storage_installed_by_year:
+                for storage_id in network.storage_units.index:
+                    installed = network.storage_installed_by_year[year][storage_id]
+                    
+                    # Only count CAPEX in the year when it's first installed
+                    is_newly_installed = installed > 0.5
+                    if year_idx > 0:
+                        prev_year = years[year_idx-1]
+                        prev_installed = network.storage_installed_by_year[prev_year][storage_id]
+                        is_newly_installed = installed > 0.5 and prev_installed < 0.5
+                    
+                    if is_newly_installed:
+                        capacity = network.storage_units.loc[storage_id, 'p_mw']
+                        capex_per_mw = network.storage_units.loc[storage_id].get('capex_per_mw', 0)
+                        lifetime = network.storage_units.loc[storage_id].get('lifetime_years', 15)
+                        capex = (capex_per_mw * capacity) / lifetime
+                        total_capex += capex
+                        capex_costs[f'storage_{storage_id}'] = capex
+            
+            # Calculate total year costs and discounted costs
+            year_total_cost = total_opex + total_capex
+            year_discounted_cost = year_total_cost * discount_factor
+            
+            # Add year data to the report
+            report['years_data'][year] = {
+                'total_cost': year_total_cost,
+                'discounted_cost': year_discounted_cost,
+                'discount_factor': discount_factor,
+                'operational_cost': total_opex,
+                'capital_cost': total_capex,
+                'operational_costs_breakdown': operational_costs,
+                'capital_costs_breakdown': capex_costs,
+                'installations': {
+                    'generators': {g: network.generators_installed_by_year[year][g] > 0.5 
+                                   for g in network.generators.index},
+                    'storage': {s: network.storage_installed_by_year[year][s] > 0.5 
+                               for s in network.storage_units.index}
+                }
+            }
+        
+        # Add a summary of the cumulative installed capacity by the end of the planning horizon
+        last_year = years[-1]
+        report['final_installations'] = {
+            'generators': {
+                str(g): {
+                    'installed': network.generators_installed_by_year[last_year][g] > 0.5,
+                    'capacity_mw': network.generators.loc[g, 'capacity_mw'],
+                    'annual_gen_mwh': network.generators_t_by_year[last_year]['p'][g].sum() 
+                        if g in network.generators_t_by_year[last_year]['p'] else 0
+                } for g in network.generators.index
+            },
+            'storage': {
+                str(s): {
+                    'installed': network.storage_installed_by_year[last_year][s] > 0.5,
+                    'capacity_mw': network.storage_units.loc[s, 'p_mw'],
+                    'energy_capacity_mwh': network.storage_units.loc[s, 'energy_mwh'],
+                    'annual_charge_mwh': network.storage_units_t_by_year[last_year]['p_charge'][s].sum()
+                        if s in network.storage_units_t_by_year[last_year]['p_charge'] else 0,
+                    'annual_discharge_mwh': network.storage_units_t_by_year[last_year]['p_discharge'][s].sum()
+                        if s in network.storage_units_t_by_year[last_year]['p_discharge'] else 0
+                } for s in network.storage_units.index
+            }
+        }
+        
+        # Save to file
+        with open(output_file, 'w') as f:
+            json.dump(report, f, indent=2)
+            
+        print(f"Multi-year cost report saved to: {output_file}")
+        return True
+        
+    except Exception as e:
+        print(f"Error saving multi-year cost report: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 if __name__ == "__main__":
