@@ -7,7 +7,7 @@ This project represents the second specialization project in my Master's studies
 The new platform creates an advanced mathematical modeling toolset for electrical energy system investment optimization. Using sophisticated analytics and forecasting techniques, the goal is to provide comprehensive decision support for energy market stakeholders and business decisions.
 
 ### Methodologies to be implemented
-- Switch from Linear Programming (LP) to Mixed Integer Linear Programming (MIP) featuring binary decision variables
+- Switch from Linear Programming (LP) to Mixed Integer Linear Programming (MIP) to incorporate capital investment (CAPEX) with binary decision variables, enabling optimal asset portfolio selection based on actual availability.
 - Forecasting time-series models (unsure if this will be based on predictive modeling or machine learning)
 - Stochastic Programming & Risk Assessment for electricity contracts on spot markets
 - Data Validation Against Real-World Measurements
