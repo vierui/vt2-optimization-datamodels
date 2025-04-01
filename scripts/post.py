@@ -471,6 +471,153 @@ def save_multi_year_cost_report(network, output_file):
         traceback.print_exc()
         return False
 
+def plot_implementation_plan(implementation_plan, output_file):
+    """
+    Generate a visual representation of the implementation plan showing asset installations, 
+    replacements, and decommissionings over the planning horizon
+    
+    Args:
+        implementation_plan: Implementation plan dictionary or path to implementation plan JSON file
+        output_file: Path to save the plot
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # If a file path is provided, load the implementation plan
+        if isinstance(implementation_plan, str):
+            with open(implementation_plan, 'r') as f:
+                implementation_plan = json.load(f)
+        
+        # Extract years and assets
+        rel_years = implementation_plan['planning_horizon']['relative_years']
+        abs_years = implementation_plan['planning_horizon']['absolute_years']
+        
+        # Get all generators and storage units
+        generators = list(implementation_plan['generators'].keys())
+        storage_units = list(implementation_plan['storage_units'].keys())
+        
+        # Prepare data for plotting
+        all_assets = generators + storage_units
+        asset_y_positions = {asset: i for i, asset in enumerate(all_assets)}
+        
+        # Create figure and axis
+        fig = plt.figure(figsize=(12, max(8, len(all_assets) * 0.4)), dpi=100)
+        ax = fig.add_subplot(111)
+        
+        # Set up plot parameters
+        ax.set_title("Implementation Plan - Asset Timeline", fontsize=14, fontweight='bold')
+        ax.set_xlabel("Year", fontsize=12)
+        ax.set_ylabel("Assets", fontsize=12)
+        
+        # Set y-axis labels
+        ax.set_yticks(list(range(len(all_assets))))
+        
+        # Create labels with asset type prefix
+        y_labels = []
+        for asset in all_assets:
+            if asset in generators:
+                asset_info = implementation_plan['generators'][asset]
+                label = f"G: {asset_info['name']} ({asset_info['type']})"
+            else:
+                asset_info = implementation_plan['storage_units'][asset]
+                label = f"S: {asset_info['name']}"
+            y_labels.append(label)
+            
+        ax.set_yticklabels(y_labels)
+        
+        # Create x-axis with relative and absolute years
+        ax.set_xticks(rel_years)
+        if rel_years != abs_years:
+            ax.set_xticklabels([f"{rel}\n({abs})" for rel, abs in zip(rel_years, abs_years)])
+        
+        # Draw active asset periods
+        for asset in all_assets:
+            if asset in generators:
+                asset_info = implementation_plan['generators'][asset]
+                color = 'lightgreen'
+            else:
+                asset_info = implementation_plan['storage_units'][asset]
+                color = 'lightblue'
+            
+            active_years = asset_info['years_active']
+            
+            if active_years:
+                # Group consecutive years
+                year_groups = []
+                current_group = [active_years[0]]
+                
+                for year in active_years[1:]:
+                    if year == current_group[-1] + 1:
+                        current_group.append(year)
+                    else:
+                        year_groups.append(current_group)
+                        current_group = [year]
+                
+                year_groups.append(current_group)
+                
+                # Draw rectangles for active periods
+                for group in year_groups:
+                    ax.add_patch(plt.Rectangle(
+                        (min(group) - 0.4, asset_y_positions[asset] - 0.3),
+                        len(group), 0.6, alpha=0.7, color=color
+                    ))
+        
+        # Mark installation and replacement events
+        for item in implementation_plan['installation_plan']:
+            year = item['year']
+            asset_type = item['asset_type']
+            asset_id = str(item['asset_id'])
+            action = item['action']
+            
+            y_pos = asset_y_positions[asset_id]
+            
+            if action == 'install':
+                is_replacement = 'is_replacement' in item and item['is_replacement']
+                if is_replacement:
+                    # Replacement: add diamond marker
+                    ax.scatter([year], [y_pos], marker='D', s=120, color='orange', 
+                              zorder=10, label='Replacement' if y_pos == 0 else "")
+                else:
+                    # New installation: add triangle marker
+                    ax.scatter([year], [y_pos], marker='^', s=120, color='green', 
+                              zorder=10, label='New Installation' if y_pos == 0 else "")
+            
+            elif action == 'decommission':
+                # Decommissioning: add X marker
+                ax.scatter([year], [y_pos], marker='x', s=120, color='red', 
+                          zorder=10, label='Decommission' if y_pos == 0 else "")
+        
+        # Add grid and legend
+        ax.grid(True, linestyle='--', alpha=0.6)
+        
+        # Create a custom legend
+        handles = [
+            plt.Rectangle((0, 0), 1, 1, color='lightgreen', alpha=0.7),
+            plt.Rectangle((0, 0), 1, 1, color='lightblue', alpha=0.7),
+            plt.Line2D([0], [0], marker='^', color='white', markerfacecolor='green', markersize=12),
+            plt.Line2D([0], [0], marker='D', color='white', markerfacecolor='orange', markersize=12),
+            plt.Line2D([0], [0], marker='x', color='red', markersize=12)
+        ]
+        labels = ['Generator Active', 'Storage Active', 'New Installation', 'Replacement', 'Decommission']
+        
+        # Place legend outside plot area
+        plt.legend(handles, labels, loc='upper center', bbox_to_anchor=(0.5, -0.05), 
+                 shadow=True, ncol=5)
+        
+        plt.tight_layout()
+        plt.savefig(output_file, bbox_inches='tight')
+        plt.close(fig)
+        
+        print(f"Implementation plan visualization saved to: {output_file}")
+        return True
+    
+    except Exception as e:
+        print(f"Error generating implementation plan visualization: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
 def generate_implementation_plan(network, output_file):
     """
     Generate a detailed implementation plan showing which assets have been installed and when
@@ -563,7 +710,8 @@ def generate_implementation_plan(network, output_file):
                         'asset_type': 'generator',
                         'asset_id': gen_id,
                         'asset_name': gen_info['name'],
-                        'action': 'replace' if is_replacement else 'install',
+                        'action': 'install',
+                        'is_replacement': is_replacement,
                         'capacity_mw': gen_info['capacity_mw'],
                         'type': gen_info['type'],
                         'cost': network.generators.loc[gen_id].get('capex_per_mw', 0) * gen_info['capacity_mw'],
@@ -639,7 +787,8 @@ def generate_implementation_plan(network, output_file):
                         'asset_type': 'storage',
                         'asset_id': storage_id,
                         'asset_name': storage_info['name'],
-                        'action': 'replace' if is_replacement else 'install',
+                        'action': 'install',
+                        'is_replacement': is_replacement,
                         'capacity_mw': storage_info['capacity_mw'],
                         'energy_capacity_mwh': storage_info['energy_capacity_mwh'],
                         'cost': network.storage_units.loc[storage_id].get('capex_per_mw', 0) * storage_info['capacity_mw'],
@@ -676,8 +825,13 @@ def generate_implementation_plan(network, output_file):
         summary_file = output_file.replace('.json', '.md')
         generate_plan_summary(implementation_plan, summary_file)
         
+        # Generate a visual implementation plan
+        plot_file = output_file.replace('.json', '_visual.png')
+        plot_implementation_plan(implementation_plan, plot_file)
+        
         print(f"Implementation plan saved to: {output_file}")
         print(f"Human-readable summary saved to: {summary_file}")
+        print(f"Visual implementation plan saved to: {plot_file}")
         return True
         
     except Exception as e:

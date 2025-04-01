@@ -132,42 +132,24 @@ def load_grid_data(base_dir='data/grid'):
                     for year, factor in analysis_data['load_growth'].items():
                         if year.isdigit() and int(year) in year_mapping:
                             relative_load_growth[str(year_mapping[int(year)])] = factor
+                        elif year != "description":  # Skip description field
+                            # Handle case where the year is already in relative form
+                            relative_load_growth[year] = factor
                     
                     # Preserve original absolute year mapping
                     analysis_data['load_growth_absolute'] = analysis_data['load_growth'].copy()
                     # Update with relative year mapping
                     analysis_data['load_growth'] = relative_load_growth
                 
-                # Convert renewable availability factors to use relative years
+                # Remove unused features
                 if 'renewable_availability_factors' in analysis_data:
-                    for resource_type, factors in analysis_data['renewable_availability_factors'].items():
-                        if isinstance(factors, dict):
-                            relative_factors = {}
-                            for year, factor in factors.items():
-                                if year.isdigit() and int(year) in year_mapping:
-                                    relative_factors[str(year_mapping[int(year)])] = factor
-                            
-                            # Preserve original absolute year mapping
-                            analysis_data['renewable_availability_factors_absolute'] = \
-                                analysis_data['renewable_availability_factors'].copy()
-                            # Update with relative year mapping
-                            analysis_data['renewable_availability_factors'][resource_type] = relative_factors
+                    print("Note: 'renewable_availability_factors' in analysis.json is not being used")
                 
-                # Convert cost learning curves to use relative years
+                if 'asset_lifetime_extensions' in analysis_data:
+                    print("Note: 'asset_lifetime_extensions' in analysis.json is not being used")
+                    
                 if 'cost_learning_curves' in analysis_data:
-                    for resource_type, curves in analysis_data['cost_learning_curves'].items():
-                        if isinstance(curves, dict):
-                            relative_curves = {}
-                            for year, factor in curves.items():
-                                if year.isdigit() and int(year) in year_mapping:
-                                    relative_curves[str(year_mapping[int(year)])] = factor
-                            
-                            # Preserve original absolute year mapping
-                            if 'cost_learning_curves_absolute' not in analysis_data:
-                                analysis_data['cost_learning_curves_absolute'] = \
-                                    analysis_data['cost_learning_curves'].copy()
-                            # Update with relative year mapping
-                            analysis_data['cost_learning_curves'][resource_type] = relative_curves
+                    print("Note: 'cost_learning_curves' in analysis.json is not being used")
             
             components['analysis'] = analysis_data
             print(f"Loaded and processed analysis data from {analysis_path}")
@@ -353,13 +335,14 @@ def prepare_load_profiles(grid_data, season_data, processed_data):
     
     return load_profiles
 
-def process_data_for_optimization(grid_dir='data/grid', processed_dir='data/processed'):
+def process_data_for_optimization(grid_dir='data/grid', processed_dir='data/processed', planning_years=10):
     """
     Main function to process data for optimization
     
     Args:
         grid_dir: Directory with grid component data
         processed_dir: Directory with processed time series data
+        planning_years: Number of years in the planning horizon (default: 10)
         
     Returns:
         Dictionary with data structures ready for optimization
@@ -369,6 +352,63 @@ def process_data_for_optimization(grid_dir='data/grid', processed_dir='data/proc
     # Load grid data
     print(f"Loading grid data from {grid_dir}...")
     grid_data = load_grid_data(grid_dir)
+    
+    # Customize the planning horizon based on the specified number of years
+    if 'analysis' in grid_data:
+        if 'planning_horizon' not in grid_data['analysis']:
+            grid_data['analysis']['planning_horizon'] = {}
+        
+        # Create or update the years list - ensure we respect the full planning horizon
+        relative_years = list(range(1, planning_years + 1))
+        grid_data['analysis']['planning_horizon']['years'] = relative_years
+        
+        # If no absolute years mapping exists, create one
+        if 'absolute_years' not in grid_data['analysis']['planning_horizon']:
+            base_year = grid_data['analysis'].get('base_year', 2023)
+            absolute_years = [base_year + i - 1 for i in relative_years]
+            grid_data['analysis']['planning_horizon']['absolute_years'] = absolute_years
+            
+            # Create mappings
+            year_mapping = dict(zip(absolute_years, relative_years))
+            inverse_mapping = dict(zip(relative_years, absolute_years))
+            grid_data['analysis']['planning_horizon']['year_mapping'] = year_mapping
+            grid_data['analysis']['planning_horizon']['inverse_mapping'] = inverse_mapping
+        else:
+            # Trim or extend the existing absolute years list
+            existing_abs_years = grid_data['analysis']['planning_horizon']['absolute_years']
+            base_year = existing_abs_years[0] if existing_abs_years else 2023
+            
+            if len(existing_abs_years) < planning_years:
+                # Extend the list
+                last_year = existing_abs_years[-1] if existing_abs_years else base_year
+                for i in range(len(existing_abs_years) + 1, planning_years + 1):
+                    existing_abs_years.append(last_year + i - len(existing_abs_years))
+            
+            # Trim if needed
+            absolute_years = existing_abs_years[:planning_years]
+            grid_data['analysis']['planning_horizon']['absolute_years'] = absolute_years
+            
+            # Update mappings
+            year_mapping = dict(zip(absolute_years, relative_years))
+            inverse_mapping = dict(zip(relative_years, absolute_years))
+            grid_data['analysis']['planning_horizon']['year_mapping'] = year_mapping
+            grid_data['analysis']['planning_horizon']['inverse_mapping'] = inverse_mapping
+        
+        # Ensure load growth factors are specified for all years
+        if 'load_growth' not in grid_data['analysis']:
+            grid_data['analysis']['load_growth'] = {}
+        
+        load_growth = grid_data['analysis']['load_growth']
+        for i, year in enumerate(relative_years):
+            year_str = str(year)
+            if year_str not in load_growth and year_str.isdigit():
+                # Default to 5% annual growth
+                load_growth[year_str] = 1.0 + (i * 0.05)
+        
+        print(f"Planning horizon set to {planning_years} years")
+        print(f"Relative years: {relative_years}")
+        print(f"Absolute years: {grid_data['analysis']['planning_horizon']['absolute_years']}")
+        print(f"Load growth factors: {load_growth}")
     
     # Load processed data
     print(f"Loading processed time series data from {processed_dir}...")

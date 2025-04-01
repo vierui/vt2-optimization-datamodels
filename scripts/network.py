@@ -30,10 +30,12 @@ class Network:
         
         # Static component DataFrames - now using numeric IDs
         self.buses = pd.DataFrame(columns=['name', 'v_nom'])
-        self.generators = pd.DataFrame(columns=['name', 'bus_id', 'capacity_mw', 'cost_mwh'])
+        self.generators = pd.DataFrame(columns=['name', 'bus_id', 'capacity_mw', 'cost_mwh', 'type', 
+                                               'capex_per_mw', 'lifetime_years', 'discount_rate'])
         self.loads = pd.DataFrame(columns=['name', 'bus_id', 'p_mw'])
         self.storage_units = pd.DataFrame(columns=['name', 'bus_id', 'p_mw', 'energy_mwh', 
-                                                 'efficiency_store', 'efficiency_dispatch'])
+                                                 'efficiency_store', 'efficiency_dispatch', 
+                                                 'capex_per_mw', 'lifetime_years', 'discount_rate'])
         self.lines = pd.DataFrame(columns=['name', 'bus_from', 'bus_to', 'susceptance', 'capacity_mw'])
         
         # Time-series component DataFrames
@@ -154,8 +156,12 @@ class Network:
             self.buses.loc[id] = {'name': name, 'v_nom': v_nom}
         return self
         
-    def add_generator(self, id, name, bus, capacity, cost, gen_type='thermal', capex_per_mw=0, lifetime_years=25, discount_rate=None):
-        """Add a generator to the network with numeric ID"""
+    def add_generator(self, id, name, bus, capacity, cost, gen_type, capex_per_mw, lifetime_years, discount_rate=None):
+        """
+        Add a generator to the network with numeric ID
+        
+        All parameters must be explicitly provided except discount_rate
+        """
         if id not in self.generators.index:
             self.generators.loc[id] = {
                 'name': name,
@@ -204,8 +210,12 @@ class Network:
                 
         return self
         
-    def add_storage(self, id, name, bus, p_mw, energy_mwh, charge_eff=0.95, discharge_eff=0.95, capex_per_mw=0, lifetime_years=15, discount_rate=None):
-        """Add a storage unit to the network with numeric ID"""
+    def add_storage(self, id, name, bus, p_mw, energy_mwh, charge_eff, discharge_eff, capex_per_mw, lifetime_years, discount_rate=None):
+        """
+        Add a storage unit to the network with numeric ID
+        
+        All parameters must be explicitly provided except discount_rate
+        """
         if id not in self.storage_units.index:
             self.storage_units.loc[id] = {
                 'name': name,

@@ -12,6 +12,7 @@ import os
 import argparse
 import json
 from datetime import datetime
+import pandas as pd
 
 # Import local modules
 from network import Network
@@ -32,6 +33,23 @@ def create_network_for_season(grid_data, season_profiles):
     # Create an empty network
     network = Network()
     
+    # Debug the grid_data state
+    if 'generators' in grid_data:
+        print("\nDebugging generator data:")
+        print(f"Generators DataFrame columns: {grid_data['generators'].columns.tolist()}")
+        if 'lifetime_years' in grid_data['generators'].columns:
+            print(f"Generator lifetime_years values: {grid_data['generators']['lifetime_years'].tolist()}")
+        else:
+            print("WARNING: 'lifetime_years' column not found in generators DataFrame")
+    
+    if 'storage_units' in grid_data:
+        print("\nDebugging storage data:")
+        print(f"Storage DataFrame columns: {grid_data['storage_units'].columns.tolist()}")
+        if 'lifetime_years' in grid_data['storage_units'].columns:
+            print(f"Storage lifetime_years values: {grid_data['storage_units']['lifetime_years'].tolist()}")
+        else:
+            print("WARNING: 'lifetime_years' column not found in storage_units DataFrame")
+    
     # Add buses
     if 'buses' in grid_data:
         for _, bus in grid_data['buses'].iterrows():
@@ -40,6 +58,19 @@ def create_network_for_season(grid_data, season_profiles):
     # Add generators
     if 'generators' in grid_data:
         for _, gen in grid_data['generators'].iterrows():
+            # Check for required fields
+            required_fields = ['id', 'name', 'bus_id', 'capacity_mw', 'cost_mwh', 'type', 'capex_per_mw', 'lifetime_years']
+            missing_fields = [field for field in required_fields if field not in gen or pd.isna(gen[field])]
+            
+            if missing_fields:
+                print(f"Generator {gen.get('id', 'unknown')} is missing fields: {missing_fields}")
+                print(f"Generator row data: {gen.to_dict()}")
+                # CHANGED: Now raising an error for missing fields instead of fallbacks
+                raise ValueError(f"Generator {gen.get('id', 'unknown')} is missing required fields: {missing_fields}. Please provide all required values.")
+            
+            # Debug the generator data before adding it
+            print(f"Adding generator {gen['id']} with lifetime: {gen['lifetime_years']} (type: {type(gen['lifetime_years'])})")
+                
             network.add_generator(
                 gen['id'], 
                 gen['name'], 
@@ -47,13 +78,21 @@ def create_network_for_season(grid_data, season_profiles):
                 gen['capacity_mw'], 
                 gen['cost_mwh'], 
                 gen_type=gen['type'],
-                capex_per_mw=gen.get('capex_per_mw', 0),
-                lifetime_years=gen.get('lifetime_years', 25)
+                capex_per_mw=gen['capex_per_mw'],
+                lifetime_years=float(gen['lifetime_years'])  # Ensure it's a float
             )
     
     # Add loads
     if 'loads' in grid_data:
         for _, load in grid_data['loads'].iterrows():
+            # Check for required fields
+            required_fields = ['id', 'name', 'bus_id', 'p_mw']
+            missing_fields = [field for field in required_fields if field not in load or pd.isna(load[field])]
+            
+            if missing_fields:
+                print(f"WARNING: Load {load.get('id', 'unknown')} is missing required fields: {missing_fields}")
+                continue
+                
             network.add_load(
                 load['id'],
                 load['name'],
@@ -64,16 +103,30 @@ def create_network_for_season(grid_data, season_profiles):
     # Add storage units
     if 'storage_units' in grid_data:
         for _, storage in grid_data['storage_units'].iterrows():
+            # Check for required fields
+            required_fields = ['id', 'name', 'bus_id', 'p_mw', 'energy_mwh', 'efficiency_store', 
+                              'efficiency_dispatch', 'capex_per_mw', 'lifetime_years']
+            missing_fields = [field for field in required_fields if field not in storage or pd.isna(storage[field])]
+            
+            if missing_fields:
+                print(f"Storage {storage.get('id', 'unknown')} is missing fields: {missing_fields}")
+                print(f"Storage row data: {storage.to_dict()}")
+                # CHANGED: Now raising an error for missing fields instead of fallbacks
+                raise ValueError(f"Storage {storage.get('id', 'unknown')} is missing required fields: {missing_fields}. Please provide all required values.")
+            
+            # Debug the storage data before adding it
+            print(f"Adding storage {storage['id']} with lifetime: {storage['lifetime_years']} (type: {type(storage['lifetime_years'])})")
+                
             network.add_storage(
                 storage['id'],
                 storage['name'],
                 storage['bus_id'],
                 storage['p_mw'],
                 storage['energy_mwh'],
-                storage.get('efficiency_store', 0.95),
-                storage.get('efficiency_dispatch', 0.95),
-                capex_per_mw=storage.get('capex_per_mw', 0),
-                lifetime_years=storage.get('lifetime_years', 15)
+                storage['efficiency_store'],
+                storage['efficiency_dispatch'],
+                capex_per_mw=storage['capex_per_mw'],
+                lifetime_years=float(storage['lifetime_years'])  # Ensure it's a float
             )
     
     # Add lines
@@ -287,6 +340,8 @@ def main():
                             help="Directory containing processed time series data")
         parser.add_argument("--output-dir", type=str, default=os.path.join(project_root, "results/annual"),
                             help="Directory to store results")
+        parser.add_argument("--planning-years", type=int, default=None,
+                            help="Number of years in the planning horizon (default: use value from analysis.json)")
         args = parser.parse_args()
         
         # Validate directories
@@ -294,6 +349,24 @@ def main():
             if not os.path.exists(directory):
                 print(f"Error: Directory not found: {directory}")
                 return False
+        
+        # Check if analysis.json exists and read planning years if not specified
+        if args.planning_years is None:
+            analysis_path = os.path.join(args.grid_dir, 'analysis.json')
+            if os.path.exists(analysis_path):
+                try:
+                    with open(analysis_path, 'r') as f:
+                        analysis_data = json.load(f)
+                    if 'planning_horizon' in analysis_data and 'years' in analysis_data['planning_horizon']:
+                        args.planning_years = len(analysis_data['planning_horizon']['years'])
+                        print(f"Using planning horizon of {args.planning_years} years from analysis.json")
+                except Exception as e:
+                    print(f"Error reading analysis.json: {e}")
+            
+            # If still None, default to 10
+            if args.planning_years is None:
+                args.planning_years = 10
+                print(f"Defaulting to planning horizon of {args.planning_years} years")
                 
         # Create output directory
         os.makedirs(args.output_dir, exist_ok=True)
@@ -301,7 +374,7 @@ def main():
         # Step 1: Process data for optimization
         print("Processing data for optimization...")
         try:
-            data = process_data_for_optimization(args.grid_dir, args.processed_dir)
+            data = process_data_for_optimization(args.grid_dir, args.processed_dir, planning_years=args.planning_years)
             if not data or 'grid_data' not in data or 'seasons_profiles' not in data:
                 print("Error: Failed to process data. Ensure all required files exist.")
                 return False

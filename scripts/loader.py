@@ -11,7 +11,55 @@ def load_csv(file_path):
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"File not found: {file_path}")
     
-    return pd.read_csv(file_path, index_col='id')
+    try:
+        print(f"Loading data from {file_path}")
+        
+        # Read the CSV file directly with proper data types
+        df = pd.read_csv(file_path, index_col='id')
+        
+        # Convert important numeric columns explicitly
+        numeric_columns = ['lifetime_years', 'capex_per_mw', 'capacity_mw', 'p_mw', 
+                          'energy_mwh', 'discount_rate', 'efficiency_store', 
+                          'efficiency_dispatch', 'susceptance']
+        
+        for col in numeric_columns:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Fill any NaN values with appropriate defaults if needed
+                if col == 'lifetime_years' and df[col].isna().any():
+                    print(f"WARNING: NaN values found in {col} column in {os.path.basename(file_path)}")
+        
+        # Debug info
+        if 'lifetime_years' in df.columns:
+            print(f"Loaded {os.path.basename(file_path)} with lifetime_years: {df['lifetime_years'].tolist()}")
+        
+        print(f"Successfully loaded {file_path} with {len(df)} rows and columns: {df.columns.tolist()}")
+        return df
+        
+    except Exception as e:
+        print(f"Error loading {file_path}: {e}")
+        # Retry with more forgiving options if the first attempt fails
+        try:
+            print(f"Retrying with more forgiving options...")
+            df = pd.read_csv(file_path, index_col='id', skipinitialspace=True, 
+                            on_bad_lines='warn', encoding='utf-8', engine='python')
+            
+            # Force specific columns to numeric
+            for col in ['lifetime_years', 'capex_per_mw', 'capacity_mw', 'p_mw', 
+                       'energy_mwh', 'discount_rate', 'efficiency_store', 
+                       'efficiency_dispatch', 'susceptance']:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            # Check for NaN values in critical columns
+            if 'lifetime_years' in df.columns and df['lifetime_years'].isna().any():
+                print(f"WARNING: NaN values found in lifetime_years column in {os.path.basename(file_path)}")
+            
+            print(f"Successfully loaded {file_path} with {len(df)} rows")
+            return df
+        except Exception as e2:
+            print(f"Fatal error loading {file_path}: {e2}")
+            raise
 
 def load_grid_data(data_dir="data/grid"):
     """
@@ -38,16 +86,31 @@ def load_grid_data(data_dir="data/grid"):
     
     # Handle possible naming difference for storage_units
     try:
-        storage_units = load_csv(os.path.join(data_path, "storage_units.csv"))
+        storage_path = os.path.join(data_path, "storage_units.csv")
+        if os.path.exists(storage_path):
+            storage_units = load_csv(storage_path)
+        else:
+            storage_path = os.path.join(data_path, "storages.csv")
+            storage_units = load_csv(storage_path)
     except FileNotFoundError:
-        try:
-            storage_units = load_csv(os.path.join(data_path, "storages.csv"))
-        except FileNotFoundError:
-            print("No storage file found, using empty DataFrame")
-            storage_units = pd.DataFrame(columns=['name', 'bus', 'p_mw', 'energy_mwh', 
-                                                'charge_efficiency', 'discharge_efficiency'])
+        print("No storage file found, using empty DataFrame")
+        storage_units = pd.DataFrame(columns=['name', 'bus_id', 'p_mw', 'energy_mwh', 
+                                            'efficiency_store', 'efficiency_dispatch', 
+                                            'capex_per_mw', 'lifetime_years', 'discount_rate'])
     
     lines = load_csv(os.path.join(data_path, "lines.csv"))
+    
+    # Verify critical data in generators
+    if 'lifetime_years' in generators.columns:
+        print(f"Generator lifetime years: {generators['lifetime_years'].tolist()}")
+    else:
+        print("Warning: No lifetime_years column found in generators.csv")
+    
+    # Verify critical data in storage units
+    if 'lifetime_years' in storage_units.columns:
+        print(f"Storage lifetime years: {storage_units['lifetime_years'].tolist()}")
+    else:
+        print("Warning: No lifetime_years column found in storage_units.csv")
     
     # Create time series data for loads
     T = 24  # Default to 24 hours
