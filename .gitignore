@@ -1,4 +1,5 @@
 .lock
+poetry.lock
 .env.local
 .DS_Store
 .python-version
