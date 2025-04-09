@@ -17,6 +17,15 @@ def create_dcopf_problem(network, years=None):
     Returns:
         Dictionary with problem data
     """
+    # Debug information - log the column names
+    print("DEBUG: Network column names:")
+    print(f"  Buses columns: {list(network.buses.columns)}")
+    print(f"  Generators columns: {list(network.generators.columns)}")
+    print(f"  Loads columns: {list(network.loads.columns)}")
+    print(f"  Lines/Branches columns: {list(network.lines.columns)}")
+    if not network.storage_units.empty:
+        print(f"  Storage columns: {list(network.storage_units.columns)}")
+    
     # If years not specified, default to a single year
     if years is None:
         years = [1]
@@ -85,6 +94,15 @@ def create_dcopf_problem(network, years=None):
     constraints = []
     
     # Power balance constraints for each bus, year, and time period
+    # Add slack variables to make constraints more flexible
+    slack_pos = {(b, y, t): cp.Variable(pos=True) 
+                for b in buses.index for y in years for t in range(T)}
+    slack_neg = {(b, y, t): cp.Variable(pos=True) 
+                for b in buses.index for y in years for t in range(T)}
+    
+    # Large penalty for using slack variables
+    slack_penalty = 10000
+    
     for b in buses.index:
         for y in years:
             for t in range(T):
@@ -116,8 +134,14 @@ def create_dcopf_problem(network, years=None):
                 # Power flow into the bus (positive means power enters the bus)
                 power_flow_in = sum(p_line[(l, y)][t] for l in lines_to)
                 
-                # Power balance constraint: generation + storage discharge - storage charge = load + net exports
-                constraints.append(gen_output + storage_net == load_demand + power_flow_out - power_flow_in)
+                # Power balance constraint with slack variables: 
+                # generation + storage discharge - storage charge - slack_pos + slack_neg = load + net exports
+                constraints.append(gen_output + storage_net - slack_pos[(b, y, t)] + slack_neg[(b, y, t)] == 
+                                  load_demand + power_flow_out - power_flow_in)
+                
+                # Add slack variables to objective function with high penalty
+                operational_costs.append(slack_penalty * slack_pos[(b, y, t)])
+                operational_costs.append(slack_penalty * slack_neg[(b, y, t)])
     
     # Generator capacity constraints
     for g in gens.index:

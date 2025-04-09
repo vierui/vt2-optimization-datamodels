@@ -41,6 +41,10 @@ def main():
     # Optimization approach
     parser.add_argument('--integrated', action='store_true',
                       help='Use integrated optimization approach (default: False)')
+    parser.add_argument('--season', required=False, choices=['winter', 'summer', 'spri_autu'],
+                      help='Optimize only a specific season (for testing)')
+    parser.add_argument('--year', type=int, required=False,
+                      help='Optimize only a specific year (for testing)')
     
     # Advanced options
     parser.add_argument('--solver-options', type=json.loads, default={},
@@ -67,15 +71,37 @@ def main():
     # Step 2: Create and optimize integrated network
     print("\nStep 2: Creating and optimizing integrated network...")
     try:
+        # Filter seasons if a specific season is requested
+        all_seasons = list(processed_data['seasons_profiles'].keys())
+        if args.season and args.season in all_seasons:
+            print(f"Focusing on a single season: {args.season}")
+            # Filter to only include the specified season
+            seasons_to_use = [args.season]
+        else:
+            seasons_to_use = all_seasons
+        
+        # Filter years if a specific year is requested
+        all_years = processed_data['grid_data']['analysis']['planning_horizon']['years']
+        if args.year and args.year in all_years:
+            print(f"Focusing on a single year: {args.year}")
+            # Filter to only include the specified year
+            years_to_use = [args.year]
+        else:
+            years_to_use = all_years
+            
         # Create integrated network from preprocessed data
         integrated_network = IntegratedNetwork(
-            seasons=list(processed_data['seasons_profiles'].keys()),
-            years=processed_data['grid_data']['analysis']['planning_horizon']['years'],
+            seasons=seasons_to_use,
+            years=years_to_use,
             discount_rate=processed_data['grid_data']['analysis']['planning_horizon']['system_discount_rate']
         )
         
         # Add seasonal networks
         for season, season_data in processed_data['seasons_profiles'].items():
+            # Skip seasons that are not in our list
+            if season not in seasons_to_use:
+                continue
+                
             # Create network for this season
             network = Network(name=season)
             
