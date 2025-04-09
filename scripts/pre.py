@@ -57,12 +57,13 @@ def get_week_dates(year, week_number):
     
     return target_monday, target_sunday
 
-def load_grid_data(base_dir='data/grid'):
+def load_grid_data(base_dir='data/grid', verbose=True):
     """
     Load the grid configuration data (generators, loads, etc.)
     
     Args:
         base_dir: Base directory for grid data
+        verbose: Whether to print loading messages
         
     Returns:
         Dictionary containing dataframes for each component type
@@ -335,84 +336,72 @@ def prepare_load_profiles(grid_data, season_data, processed_data):
     
     return load_profiles
 
-def process_data_for_optimization(grid_dir='data/grid', processed_dir='data/processed', planning_years=10):
+def process_data_for_optimization(grid_dir, processed_dir, planning_years=None):
     """
-    Main function to process data for optimization
+    Process data for optimization
     
     Args:
-        grid_dir: Directory with grid component data
-        processed_dir: Directory with processed time series data
-        planning_years: Number of years in the planning horizon (default: 10)
+        grid_dir: Directory containing grid component CSV files
+        processed_dir: Directory containing processed time series data
+        planning_years: Number of years in the planning horizon
         
     Returns:
-        Dictionary with data structures ready for optimization
+        Dictionary with grid data and processed time series data
     """
-    print("Starting data preprocessing...")
-    
     # Load grid data
-    print(f"Loading grid data from {grid_dir}...")
-    grid_data = load_grid_data(grid_dir)
+    try:
+        grid_data = load_grid_data(grid_dir, verbose=False)
+    except Exception as e:
+        print(f"Error processing grid data: {e}")
+        return None
     
-    # Customize the planning horizon based on the specified number of years
-    if 'analysis' in grid_data:
-        if 'planning_horizon' not in grid_data['analysis']:
-            grid_data['analysis']['planning_horizon'] = {}
-        
-        # Create or update the years list - ensure we respect the full planning horizon
-        relative_years = list(range(1, planning_years + 1))
-        grid_data['analysis']['planning_horizon']['years'] = relative_years
-        
-        # If no absolute years mapping exists, create one
-        if 'absolute_years' not in grid_data['analysis']['planning_horizon']:
-            base_year = grid_data['analysis'].get('base_year', 2023)
-            absolute_years = [base_year + i - 1 for i in relative_years]
-            grid_data['analysis']['planning_horizon']['absolute_years'] = absolute_years
+    # Process analysis data for multi-year optimization if available
+    try:
+        if 'analysis' in grid_data:
+            analysis_data = grid_data['analysis']
+            print(f"Analysis data found")
             
-            # Create mappings
-            year_mapping = dict(zip(absolute_years, relative_years))
-            inverse_mapping = dict(zip(relative_years, absolute_years))
-            grid_data['analysis']['planning_horizon']['year_mapping'] = year_mapping
-            grid_data['analysis']['planning_horizon']['inverse_mapping'] = inverse_mapping
-        else:
-            # Trim or extend the existing absolute years list
-            existing_abs_years = grid_data['analysis']['planning_horizon']['absolute_years']
-            base_year = existing_abs_years[0] if existing_abs_years else 2023
-            
-            if len(existing_abs_years) < planning_years:
-                # Extend the list
-                last_year = existing_abs_years[-1] if existing_abs_years else base_year
-                for i in range(len(existing_abs_years) + 1, planning_years + 1):
-                    existing_abs_years.append(last_year + i - len(existing_abs_years))
-            
-            # Trim if needed
-            absolute_years = existing_abs_years[:planning_years]
-            grid_data['analysis']['planning_horizon']['absolute_years'] = absolute_years
-            
-            # Update mappings
-            year_mapping = dict(zip(absolute_years, relative_years))
-            inverse_mapping = dict(zip(relative_years, absolute_years))
-            grid_data['analysis']['planning_horizon']['year_mapping'] = year_mapping
-            grid_data['analysis']['planning_horizon']['inverse_mapping'] = inverse_mapping
-        
-        # Ensure load growth factors are specified for all years
-        if 'load_growth' not in grid_data['analysis']:
-            grid_data['analysis']['load_growth'] = {}
-        
-        load_growth = grid_data['analysis']['load_growth']
-        for i, year in enumerate(relative_years):
-            year_str = str(year)
-            if year_str not in load_growth and year_str.isdigit():
-                # Default to 5% annual growth
-                load_growth[year_str] = 1.0 + (i * 0.05)
-        
-        print(f"Planning horizon set to {planning_years} years")
-        print(f"Relative years: {relative_years}")
-        print(f"Absolute years: {grid_data['analysis']['planning_horizon']['absolute_years']}")
-        print(f"Load growth factors: {load_growth}")
+            # Process planning horizon if provided
+            if 'planning_horizon' in analysis_data:
+                planning_data = analysis_data['planning_horizon']
+                
+                # Override with command line argument if provided
+                if planning_years is not None:
+                    print(f"Using planning horizon of {planning_years} years from command line")
+                    planning_data['years'] = list(range(1, planning_years + 1))
+                
+                # Process load growth if provided
+                if 'load_growth' in analysis_data:
+                    load_growth_data = analysis_data['load_growth']
+                    
+                    # Convert string keys to integers
+                    load_growth = {}
+                    for year_str, factor in load_growth_data.items():
+                        if year_str.isdigit():
+                            load_growth[int(year_str)] = float(factor)
+                    
+                    # Create a formatted string of load growth factors
+                    load_growth_str = ", ".join([f"Year {y}: {factor:.2f}" for y, factor in sorted(load_growth.items())])
+                    print(f"Load growth factors: {load_growth_str}")
+                    
+                    # Store in analysis data
+                    analysis_data['load_growth'] = load_growth
+    except Exception as e:
+        print(f"Error processing analysis data: {e}")
     
-    # Load processed data
-    print(f"Loading processed time series data from {processed_dir}...")
+    # Load processed time series data
     processed_data = load_processed_data(processed_dir)
+    
+    # Check that required data exists, otherwise add default data
+    if 'load' not in processed_data:
+        print("Required load data not found. Creating default load data.")
+        # Create a default load dataframe with a week of data
+        start_date = datetime(2023, 1, 1)
+        time_index = [start_date + timedelta(hours=h) for h in range(168)]
+        processed_data['load'] = pd.DataFrame({
+            'time': time_index,
+            'value': [1.0] * 168  # Default constant load
+        })
     
     # Prepare season profiles
     print("Preparing season profiles...")

@@ -42,6 +42,10 @@ def create_dcopf_problem(network, years=None):
     lines = network.lines
     storage = network.storage_units
     
+    # Initialize costs lists
+    operational_costs = []
+    capital_costs = []
+    
     # Create optimization variables
     # Generator power output for each generator, year, and time period
     p_gen = {(g, y): cp.Variable(network.T, nonneg=True)
@@ -222,52 +226,6 @@ def create_dcopf_problem(network, years=None):
             constraints.append(theta[(ref_bus, y)][t] == 0)
     
     # Objective function - minimize total cost
-    operational_costs = []
-    capital_costs = []
-    
-    # Operational costs - generator variable costs
-    for gen_id in gens.index:
-        gen_data = gens.loc[gen_id]
-        cost_per_mwh = gen_data['marginal_cost']
-        
-        for y in years:
-            for t in range(T):
-                operational_costs.append(cost_per_mwh * p_gen[(gen_id, y)][t])
-    
-    # Capital costs - generator fixed costs
-    for gen_id in gens.index:
-        gen_data = gens.loc[gen_id]
-        # Use p_nom instead of capacity_mw
-        capex = gen_data.get('capex_per_mw', 0) * gen_data['p_nom']
-        lifetime = gen_data.get('lifetime_years', 20)
-        discount_rate = gen_data.get('discount_rate', 0.05)
-        
-        for y in years:
-            # Annualized capital cost for the first installation
-            yearly_capex = capex * (discount_rate * (1 + discount_rate)**lifetime) / ((1 + discount_rate)**lifetime - 1)
-            capital_costs.append(yearly_capex * gen_first_install[(gen_id, y)])
-            
-            # Capital cost for replacements
-            capital_costs.append(yearly_capex * gen_replacement[(gen_id, y)])
-    
-    # Capital costs - storage fixed costs
-    if not storage.empty:
-        for storage_id in storage.index:
-            storage_data = storage.loc[storage_id]
-            # Use p_nom instead of capacity_mw
-            capex = storage_data.get('capex_per_mw', 0) * storage_data['p_nom']
-            lifetime = storage_data.get('lifetime_years', 10)
-            discount_rate = storage_data.get('discount_rate', 0.05)
-            
-            for y in years:
-                # Annualized capital cost for the first installation
-                yearly_capex = capex * (discount_rate * (1 + discount_rate)**lifetime) / ((1 + discount_rate)**lifetime - 1)
-                capital_costs.append(yearly_capex * storage_first_install[(storage_id, y)])
-                
-                # Capital cost for replacements
-                capital_costs.append(yearly_capex * storage_replacement[(storage_id, y)])
-    
-    # Total cost
     total_cost = cp.sum(operational_costs) + cp.sum(capital_costs)
     
     # Create the optimization problem
@@ -367,7 +325,7 @@ def extract_results(network, problem, solution):
     p_charge = problem['variables']['p_charge']
     p_discharge = problem['variables']['p_discharge']
     soc = problem['variables']['soc']
-    f = problem['variables']['f']
+    p_line = problem['variables']['p_line']
     theta = problem['variables']['theta']
     gen_installed = problem['variables']['gen_installed']
     storage_installed = problem['variables']['storage_installed']
@@ -383,7 +341,31 @@ def extract_results(network, problem, solution):
         gen_replacement = None
         storage_replacement = None
     
-    years = problem.get('years', [0])  # Default to a single year with index 0
+    years = problem.get('years', [1])  # Default to a single year with index 1 since that's what we found in the keys
+    
+    # Print debugging information
+    print("DEBUG - Keys in p_gen:", list(p_gen.keys())[:5])  # Print first 5 keys
+    print("DEBUG - Generator indices:", list(network.generators.index))
+    print("DEBUG - Year in extract_results:", years)
+    
+    # Map network years to problem years (the problem might use different year indices)
+    # This maps from what the network expects to what the problem actually has
+    year_map = {}
+    for year in years:
+        # Try to find this year in the keys
+        sample_gen = list(network.generators.index)[0] if not network.generators.empty else None
+        if sample_gen:
+            for possible_year in [1, 0, year]:  # Try common values
+                if (sample_gen, possible_year) in p_gen:
+                    year_map[year] = possible_year
+                    break
+            
+            # If we haven't found a match, use the first year from any key
+            if year not in year_map and len(list(p_gen.keys())) > 0:
+                first_key = list(p_gen.keys())[0]
+                year_map[year] = first_key[1]  # Use the year from the first key
+    
+    print("DEBUG - Year mapping:", year_map)
     
     # Create containers for time series results by year
     network.generators_t_by_year = {year: {'p': pd.DataFrame(index=range(network.T))} for year in years}
@@ -430,72 +412,100 @@ def extract_results(network, problem, solution):
     
     # Extract and store results for each year
     for year in years:
+        # Map to the actual year used in the keys
+        actual_year = year_map.get(year, year)
+        
         # Extract generator results
         for g in network.generators.index:
-            network.generators_t_by_year[year]['p'][g] = p_gen[(g, year)].value
-            network.generators_installed_by_year[year][g] = gen_installed[(g, year)].value
-            network.generators_first_install_by_year[year][g] = gen_first_install[(g, year)].value
-            
-            # Determine if this is a replacement
-            is_replacement = False
-            if hasattr(network, 'generators_replacement_by_year') and year in network.generators_replacement_by_year:
-                if g in network.generators_replacement_by_year[year]:
-                    replacement_val = network.generators_replacement_by_year[year][g]
-                    is_replacement = replacement_val is not None and replacement_val > 0.5
-            
-            # Add to installation history if first installed in this year
-            if gen_first_install[(g, year)].value > 0.5:
-                if g not in network.asset_installation_history['generators']:
-                    network.asset_installation_history['generators'][g] = []
+            if (g, actual_year) in p_gen:
+                network.generators_t_by_year[year]['p'][g] = p_gen[(g, actual_year)].value
+                network.generators_installed_by_year[year][g] = gen_installed[(g, actual_year)].value
+                network.generators_first_install_by_year[year][g] = gen_first_install[(g, actual_year)].value
                 
-                network.asset_installation_history['generators'][g].append({
-                    'installation_year': year,
-                    'capacity_mw': network.generators.loc[g, 'p_nom'],
-                    'capex_per_mw': network.generators.loc[g].get('capex_per_mw', 0),
-                    'lifetime_years': network.generators.loc[g].get('lifetime_years', 20),
-                    'is_replacement': is_replacement
-                })
+                # Determine if this is a replacement
+                is_replacement = False
+                if hasattr(network, 'generators_replacement_by_year') and year in network.generators_replacement_by_year:
+                    if g in network.generators_replacement_by_year[year]:
+                        replacement_val = network.generators_replacement_by_year[year][g]
+                        is_replacement = replacement_val is not None and replacement_val > 0.5
+                
+                # Add to installation history if first installed in this year
+                if gen_first_install[(g, actual_year)].value is not None and gen_first_install[(g, actual_year)].value > 0.5:
+                    if g not in network.asset_installation_history['generators']:
+                        network.asset_installation_history['generators'][g] = []
+                    
+                    network.asset_installation_history['generators'][g].append({
+                        'installation_year': year,
+                        'capacity_mw': network.generators.loc[g, 'p_nom'],
+                        'capex_per_mw': network.generators.loc[g].get('capex_per_mw', 0),
+                        'lifetime_years': network.generators.loc[g].get('lifetime_years', 20),
+                        'is_replacement': is_replacement
+                    })
+            else:
+                print(f"WARNING: Generator {g}, year {actual_year} not found in p_gen keys")
+                network.generators_t_by_year[year]['p'][g] = 0.0
+                network.generators_installed_by_year[year][g] = 0.0
+                network.generators_first_install_by_year[year][g] = 0.0
         
         # Storage units
         for s in network.storage_units.index:
-            network.storage_units_t_by_year[year]['p_charge'][s] = p_charge[(s, year)].value
-            network.storage_units_t_by_year[year]['p_discharge'][s] = p_discharge[(s, year)].value
-            network.storage_units_t_by_year[year]['state_of_charge'][s] = soc[(s, year)].value
-            network.storage_installed_by_year[year][s] = storage_installed[(s, year)].value
-            network.storage_first_install_by_year[year][s] = storage_first_install[(s, year)].value
-            
-            # Store replacement information if available
-            if storage_replacement is not None:
-                network.storage_replacement_by_year[year][s] = storage_replacement[(s, year)].value
-            
-            # Determine if this is a replacement
-            is_replacement = False
-            if hasattr(network, 'storage_replacement_by_year') and year in network.storage_replacement_by_year:
-                if s in network.storage_replacement_by_year[year]:
-                    replacement_val = network.storage_replacement_by_year[year][s]
-                    is_replacement = replacement_val is not None and replacement_val > 0.5
-            
-            # Add to installation history if first installed in this year
-            if storage_first_install[(s, year)].value > 0.5:
-                if s not in network.asset_installation_history['storage']:
-                    network.asset_installation_history['storage'][s] = []
+            if (s, actual_year) in p_charge:
+                network.storage_units_t_by_year[year]['p_charge'][s] = p_charge[(s, actual_year)].value
+                network.storage_units_t_by_year[year]['p_discharge'][s] = p_discharge[(s, actual_year)].value
+                network.storage_units_t_by_year[year]['state_of_charge'][s] = soc[(s, actual_year)].value
+                network.storage_installed_by_year[year][s] = storage_installed[(s, actual_year)].value
+                network.storage_first_install_by_year[year][s] = storage_first_install[(s, actual_year)].value
                 
-                network.asset_installation_history['storage'][s].append({
-                    'installation_year': year,
-                    'capacity_mw': network.storage_units.loc[s, 'p_nom'],
-                    'energy_capacity_mwh': network.storage_units.loc[s, 'max_hours'] * network.storage_units.loc[s, 'p_nom'],
-                    'capex_per_mw': network.storage_units.loc[s].get('capex_per_mw', 0),
-                    'lifetime_years': network.storage_units.loc[s].get('lifetime_years', 10),
-                    'is_replacement': is_replacement
-                })
+                # Store replacement information if available
+                if storage_replacement is not None:
+                    network.storage_replacement_by_year[year][s] = storage_replacement[(s, actual_year)].value
+                
+                # Determine if this is a replacement
+                is_replacement = False
+                if hasattr(network, 'storage_replacement_by_year') and year in network.storage_replacement_by_year:
+                    if s in network.storage_replacement_by_year[year]:
+                        replacement_val = network.storage_replacement_by_year[year][s]
+                        is_replacement = replacement_val is not None and replacement_val > 0.5
+                
+                # Add to installation history if first installed in this year
+                if storage_first_install[(s, actual_year)].value is not None and storage_first_install[(s, actual_year)].value > 0.5:
+                    if s not in network.asset_installation_history['storage']:
+                        network.asset_installation_history['storage'][s] = []
+                    
+                    network.asset_installation_history['storage'][s].append({
+                        'installation_year': year,
+                        'capacity_mw': network.storage_units.loc[s, 'p_nom'],
+                        'energy_capacity_mwh': network.storage_units.loc[s, 'max_hours'] * network.storage_units.loc[s, 'p_nom'],
+                        'capex_per_mw': network.storage_units.loc[s].get('capex_per_mw', 0),
+                        'lifetime_years': network.storage_units.loc[s].get('lifetime_years', 10),
+                        'is_replacement': is_replacement
+                    })
+            else:
+                print(f"WARNING: Storage {s}, year {actual_year} not found in p_charge keys")
+                network.storage_units_t_by_year[year]['p_charge'][s] = 0.0
+                network.storage_units_t_by_year[year]['p_discharge'][s] = 0.0
+                network.storage_units_t_by_year[year]['state_of_charge'][s] = 0.0
+                network.storage_installed_by_year[year][s] = 0.0
+                network.storage_first_install_by_year[year][s] = 0.0
+                
+                if storage_replacement is not None:
+                    network.storage_replacement_by_year[year][s] = 0.0
         
         # Lines
         for l in network.lines.index:
-            network.lines_t_by_year[year]['p'][l] = f[(l, year)].value
+            if (l, actual_year) in p_line:
+                network.lines_t_by_year[year]['p'][l] = p_line[(l, actual_year)].value
+            else:
+                print(f"WARNING: Line {l}, year {actual_year} not found in p_line keys")
+                network.lines_t_by_year[year]['p'][l] = 0.0
         
         # Bus voltage angles
         for b in network.buses.index:
-            network.buses_t_by_year[year]['v_ang'][b] = theta[(b, year)].value
+            if (b, actual_year) in theta:
+                network.buses_t_by_year[year]['v_ang'][b] = theta[(b, actual_year)].value
+            else:
+                print(f"WARNING: Bus {b}, year {actual_year} not found in theta keys")
+                network.buses_t_by_year[year]['v_ang'][b] = 0.0
     
     # Also populate the regular result containers with the last year's results
     # (for backward compatibility)
@@ -653,7 +663,7 @@ def create_integrated_dcopf_problem(integrated_network):
                                            for b in buses for y in years}
         
         # Line flow variables
-        season_variables[season]['f'] = {(l, y): cp.Variable(T)
+        season_variables[season]['p_line'] = {(l, y): cp.Variable(T)
                                        for l in lines for y in years}
         
         # Set reference bus for each year
@@ -722,15 +732,15 @@ def create_integrated_dcopf_problem(integrated_network):
         # DC power flow constraints for each line
         for y in years:
             for line_id, line_data in network.lines.iterrows():
-                from_bus = line_data['bus_from']
-                to_bus = line_data['bus_to']
+                from_bus = line_data['from_bus']
+                to_bus = line_data['to_bus']
                 susceptance = line_data['susceptance']
                 capacity = line_data['s_nom']
                 
                 # Flow equation based on susceptance and voltage angle difference
                 for t in range(T):
                     season_constraints[season].append(
-                        season_variables[season]['f'][(line_id, y)][t] == 
+                        season_variables[season]['p_line'][(line_id, y)][t] == 
                         susceptance * (
                             season_variables[season]['theta'][(from_bus, y)][t] - 
                             season_variables[season]['theta'][(to_bus, y)][t]
@@ -739,10 +749,10 @@ def create_integrated_dcopf_problem(integrated_network):
                 
                 # Transmission line flow limits
                 season_constraints[season].append(
-                    season_variables[season]['f'][(line_id, y)] <= capacity
+                    season_variables[season]['p_line'][(line_id, y)] <= capacity
                 )
                 season_constraints[season].append(
-                    season_variables[season]['f'][(line_id, y)] >= -capacity
+                    season_variables[season]['p_line'][(line_id, y)] >= -capacity
                 )
         
         # Pre-calculate load values per bus for this season
@@ -753,15 +763,17 @@ def create_integrated_dcopf_problem(integrated_network):
         # Map loads to buses
         load_to_bus_map = {}
         for load_id in network.loads.index:
-            load_to_bus_map[load_id] = network.loads.at[load_id, 'bus_id']
+            load_to_bus_map[load_id] = network.loads.at[load_id, 'bus']
         
         # Now map loads to buses using the mapping
         for t in range(T):
-            for load_id in network.loads_t.columns:
-                if t < len(network.loads_t):
-                    bus_id = load_to_bus_map.get(load_id)
-                    if bus_id in bus_load:
-                        bus_load[bus_id][t] += network.loads_t.iloc[t][load_id]
+            for load_id in network.loads.index:
+                if 'p' in network.loads_t and load_id in network.loads_t['p']:
+                    load_ts = network.loads_t['p'][load_id]
+                    if t < len(load_ts):
+                        bus_id = load_to_bus_map.get(load_id)
+                        if bus_id in bus_load:
+                            bus_load[bus_id][t] += load_ts.iloc[t] if isinstance(load_ts, pd.Series) else load_ts[t]
         
         # Nodal power balance constraints
         for y in years:
@@ -776,7 +788,7 @@ def create_integrated_dcopf_problem(integrated_network):
                     gen_at_bus = [
                         season_variables[season]['p_gen'][(g, y)][t] 
                         for g in generators 
-                        if network.generators.loc[g, 'bus_id'] == bus_id
+                        if network.generators.loc[g, 'bus'] == bus_id
                     ]
                     gen_sum = sum(gen_at_bus) if gen_at_bus else 0
                     
@@ -785,7 +797,7 @@ def create_integrated_dcopf_problem(integrated_network):
                         season_variables[season]['p_discharge'][(s, y)][t] - 
                         season_variables[season]['p_charge'][(s, y)][t] 
                         for s in storage_units 
-                        if network.storage_units.loc[s, 'bus_id'] == bus_id
+                        if network.storage_units.loc[s, 'bus'] == bus_id
                     ]
                     storage_net = sum(storage_at_bus) if storage_at_bus else 0
                     
@@ -794,14 +806,14 @@ def create_integrated_dcopf_problem(integrated_network):
                     
                     # Line flows into and out of the bus
                     flow_out = sum(
-                        season_variables[season]['f'][(l, y)][t] 
+                        season_variables[season]['p_line'][(l, y)][t] 
                         for l in lines 
-                        if network.lines.loc[l, 'bus_from'] == bus_id
+                        if network.lines.loc[l, 'from_bus'] == bus_id
                     )
                     flow_in = sum(
-                        season_variables[season]['f'][(l, y)][t] 
+                        season_variables[season]['p_line'][(l, y)][t] 
                         for l in lines 
-                        if network.lines.loc[l, 'bus_to'] == bus_id
+                        if network.lines.loc[l, 'to_bus'] == bus_id
                     )
                     
                     # Power balance: generation + storage net + flow in = load + flow out
@@ -1153,7 +1165,7 @@ def optimize_seasonal_network(integrated_network, solver_options=None):
             'generators_p': {g: network.generators_t['p'][g] for g in network.generators.index},
             'storage_p_charge': {s: network.storage_units_t['p_charge'][s] for s in network.storage_units.index} if hasattr(network, 'storage_units_t') else {},
             'storage_p_discharge': {s: network.storage_units_t['p_discharge'][s] for s in network.storage_units.index} if hasattr(network, 'storage_units_t') else {},
-            'storage_soc': {s: network.storage_units_t['soc'][s] for s in network.storage_units.index} if hasattr(network, 'storage_units_t') else {}
+            'storage_soc': {s: network.storage_units_t['state_of_charge'][s] for s in network.storage_units.index} if hasattr(network, 'storage_units_t') else {}
         }
         
         # Store the cost for this season

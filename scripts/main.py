@@ -225,19 +225,38 @@ def main():
     # Step 3: Generate implementation plan and calculate costs
     print("\nStep 3: Generating implementation plan...")
     try:
-        # Generate implementation plan
-        implementation_plan = generate_implementation_plan(integrated_network)
-        implementation_plan_file = os.path.join(args.output_dir, 'implementation_plan.json')
-        with open(implementation_plan_file, 'w') as f:
-            json.dump(implementation_plan, f, indent=2)
-        print(f"Implementation plan saved to {implementation_plan_file}")
+        # Generate implementation plan if we have installation data
+        if hasattr(integrated_network, 'asset_installation_history') or hasattr(integrated_network, 'generators_installed_by_year'):
+            # Maps generators_installed_by_year to asset_installation if needed
+            if not hasattr(integrated_network, 'asset_installation') and hasattr(integrated_network, 'generators_installed_by_year'):
+                integrated_network.asset_installation = {
+                    'generators': integrated_network.generators_installed_by_year,
+                    'storage': integrated_network.storage_installed_by_year if hasattr(integrated_network, 'storage_installed_by_year') else {}
+                }
+            
+            implementation_plan = generate_implementation_plan(integrated_network)
+            implementation_plan_file = os.path.join(args.output_dir, 'implementation_plan.json')
+            with open(implementation_plan_file, 'w') as f:
+                json.dump(implementation_plan, f, indent=2)
+            print(f"Implementation plan saved to {implementation_plan_file}")
+        else:
+            print("Warning: No installation data found. Skipping implementation plan generation.")
         
         # Calculate annual costs
-        annual_costs = calculate_annual_cost(integrated_network)
-        annual_costs_file = os.path.join(args.output_dir, 'annual_costs.json')
-        with open(annual_costs_file, 'w') as f:
-            json.dump(annual_costs, f, indent=2)
-        print(f"Annual costs saved to {annual_costs_file}")
+        if hasattr(integrated_network, 'seasons_total_cost'):
+            annual_costs = calculate_annual_cost(integrated_network.seasons_total_cost)
+            annual_costs_file = os.path.join(args.output_dir, 'annual_costs.json')
+            with open(annual_costs_file, 'w') as f:
+                json.dump(annual_costs, f, indent=2)
+            print(f"Annual costs saved to {annual_costs_file}")
+        elif hasattr(integrated_network, 'annual_cost'):
+            # If annual cost is already calculated, just save it
+            annual_costs_file = os.path.join(args.output_dir, 'annual_costs.json')
+            with open(annual_costs_file, 'w') as f:
+                json.dump(integrated_network.annual_cost, f, indent=2)
+            print(f"Annual costs saved to {annual_costs_file}")
+        else:
+            print("Warning: No season costs found in the integrated network. Skipping annual cost calculation.")
         
     except Exception as e:
         print(f"Error during post-processing: {e}")

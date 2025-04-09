@@ -1,0 +1,16 @@
+{
+  "years": [
+    1
+  ],
+  "generators": {},
+  "storage": {},
+  "timestamp": "2025-04-10T01:06:59.227649",
+  "seasonal_utilization": {
+    "generators": {},
+    "storage": {}
+  },
+  "seasonal_costs": {
+    "winter": 737400.0
+  },
+  "annual_cost": 9586200.0
+}
