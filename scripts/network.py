@@ -1,62 +1,411 @@
+#!/usr/bin/env python3
+"""
+Network module for power grid optimization
+
+Contains the IntegratedNetwork class that integrates multiple 
+seasonal subnetworks into a unified optimization model.
+"""
+import os
+import pickle
 import pandas as pd
 import numpy as np
-import cvxpy as cp
-import pickle
+from datetime import datetime
+from dataclasses import field
 from loader import load_grid_data, load_day_profiles
 from optimization import create_dcopf_problem, solve_with_cplex, extract_results
+from components import Bus, Branch, Generator, Storage, Load
+
+class IntegratedNetwork:
+    """
+    Integrated network model that combines multiple seasonal grid models 
+    with shared asset investment decisions.
+    
+    This class maintains seasonal subnetworks while ensuring consistency in
+    asset investment decisions across all seasons.
+    """
+    def __init__(self, seasons=None, years=None, discount_rate=0.05, season_weights=None):
+        """
+        Initialize the integrated network
+        
+        Args:
+            seasons: List of season names
+            years: List of planning years
+            discount_rate: Discount rate for multi-year planning
+            season_weights: Dictionary mapping season names to number of weeks
+        """
+        # Initialize with empty seasons list if None
+        self.seasons = seasons or []
+        self.years = years or []
+        self.discount_rate = discount_rate
+        self.season_networks = {}
+        
+        # Season weights for calculating annual costs
+        self.season_weights = season_weights or {
+            'winter': 13,     # Winter represents 13 weeks
+            'summer': 13,     # Summer represents 13 weeks
+            'spri_autu': 26   # Spring/Autumn represents 26 weeks
+        }
+        
+        # Initialize asset installation trackers
+        self.asset_installation = {
+            'generators': {year: {} for year in self.years},
+            'storage': {year: {} for year in self.years}
+        }
+        
+        # Track replacement and first installation decisions by year
+        self.asset_installation_history = {
+            'generators': {},
+            'storage': {}
+        }
+        
+    def add_season_network(self, season, network):
+        """
+        Add a seasonal network to the integrated model
+        
+        Args:
+            season: Season name
+            network: Network object for this season
+            
+        Returns:
+            True if successful
+        """
+        if season not in self.seasons:
+            self.seasons.append(season)
+            
+        self.season_networks[season] = network
+        
+        # Add generators to installation trackers
+        for gen_id in network.generators.index:
+            for year in self.years:
+                if gen_id not in self.asset_installation['generators'][year]:
+                    self.asset_installation['generators'][year][gen_id] = 0
+                    
+                if gen_id not in self.asset_installation_history['generators']:
+                    self.asset_installation_history['generators'][gen_id] = []
+                    
+        # Add storage units to installation trackers
+        for storage_id in network.storage_units.index:
+            for year in self.years:
+                if storage_id not in self.asset_installation['storage'][year]:
+                    self.asset_installation['storage'][year][storage_id] = 0
+                    
+                if storage_id not in self.asset_installation_history['storage']:
+                    self.asset_installation_history['storage'][storage_id] = []
+                    
+        return True
+        
+    def get_season_network(self, season):
+        """
+        Get the network for a specific season
+        
+        Args:
+            season: Season name
+            
+        Returns:
+            Network object for the specified season
+        """
+        return self.season_networks.get(season)
+        
+    def set_optimization_results(self, results):
+        """
+        Set optimization results from the integrated model solution
+        
+        Args:
+            results: Results dictionary from the solver
+            
+        Returns:
+            True if successful
+        """
+        # Store the integrated results
+        self.integrated_results = results
+        
+        # Set asset installation decisions
+        for year in self.years:
+            for gen_id, installed in results['generators_installed'][year].items():
+                self.asset_installation['generators'][year][gen_id] = installed
+                
+            for storage_id, installed in results['storage_installed'][year].items():
+                self.asset_installation['storage'][year][storage_id] = installed
+                
+        # Store first installation info
+        if 'generators_first_install' in results:
+            for year in self.years:
+                for gen_id, is_first in results['generators_first_install'][year].items():
+                    if is_first > 0.5:  # Binary variable threshold
+                        installation_info = {
+                            'installation_year': year,
+                            'generator_id': gen_id,
+                            'is_replacement': False
+                        }
+                        
+                        # Check if it's a replacement
+                        if 'generators_replacement' in results and gen_id in results['generators_replacement'][year]:
+                            if results['generators_replacement'][year][gen_id] > 0.5:
+                                installation_info['is_replacement'] = True
+                                
+                        self.asset_installation_history['generators'][gen_id].append(installation_info)
+        
+        # Store first installation info for storage
+        if 'storage_first_install' in results:
+            for year in self.years:
+                for storage_id, is_first in results['storage_first_install'][year].items():
+                    if is_first > 0.5:  # Binary variable threshold
+                        installation_info = {
+                            'installation_year': year,
+                            'storage_id': storage_id,
+                            'is_replacement': False
+                        }
+                        
+                        # Check if it's a replacement
+                        if 'storage_replacement' in results and storage_id in results['storage_replacement'][year]:
+                            if results['storage_replacement'][year][storage_id] > 0.5:
+                                installation_info['is_replacement'] = True
+                                
+                        self.asset_installation_history['storage'][storage_id].append(installation_info)
+        
+        # Set up seasonal results
+        for season, network in self.season_networks.items():
+            # Set generator outputs by year
+            if 'generators_p' in results and season in results['generators_p']:
+                network.generators_t_by_year = {}
+                
+                for year in self.years:
+                    network.generators_t_by_year[year] = {'p': {}}
+                    
+                    for gen_id in network.generators.index:
+                        # Check if this generator has output for this year/season
+                        if gen_id in results['generators_p'][season][year]:
+                            p_values = results['generators_p'][season][year][gen_id]
+                            network.generators_t_by_year[year]['p'][gen_id] = pd.Series(p_values)
+                            
+            # Set storage outputs by year
+            if 'storage_p_charge' in results and season in results['storage_p_charge']:
+                network.storage_units_t_by_year = {}
+                
+                for year in self.years:
+                    network.storage_units_t_by_year[year] = {
+                        'p_charge': {},
+                        'p_discharge': {},
+                        'soc': {}
+                    }
+                    
+                    for storage_id in network.storage_units.index:
+                        # Check if this storage has output for this year/season
+                        if storage_id in results['storage_p_charge'][season][year]:
+                            charge_values = results['storage_p_charge'][season][year][storage_id]
+                            discharge_values = results['storage_p_discharge'][season][year][storage_id]
+                            soc_values = results['storage_soc'][season][year][storage_id]
+                            
+                            network.storage_units_t_by_year[year]['p_charge'][storage_id] = pd.Series(charge_values)
+                            network.storage_units_t_by_year[year]['p_discharge'][storage_id] = pd.Series(discharge_values)
+                            network.storage_units_t_by_year[year]['soc'][storage_id] = pd.Series(soc_values)
+            
+            # Set generators installed status
+            network.generators_installed_by_year = {}
+            for year in self.years:
+                network.generators_installed_by_year[year] = results['generators_installed'][year]
+                
+            # Set storage installed status
+            network.storage_installed_by_year = {}
+            for year in self.years:
+                network.storage_installed_by_year[year] = results['storage_installed'][year]
+        
+        # Store seasonal costs if available
+        if 'season_costs' in results:
+            self.seasons_total_cost = results['season_costs']
+            
+        # Store operational and capital costs if available
+        if 'operational_costs' in results:
+            self.operational_costs = results['operational_costs']
+            
+        if 'capital_costs' in results:
+            self.capital_costs = results['capital_costs']
+            
+        return True
+        
+    def save_to_pickle(self, filename):
+        """
+        Save the network to a pickle file
+        
+        Args:
+            filename: Path to save the file
+            
+        Returns:
+            True if successful
+        """
+        try:
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(filename), exist_ok=True)
+            
+            with open(filename, 'wb') as f:
+                pickle.dump(self, f)
+                
+            print(f"Network saved to {filename}")
+            return True
+            
+        except Exception as e:
+            print(f"Error saving network: {e}")
+            return False
+            
+    @classmethod
+    def load_from_pickle(cls, filename):
+        """
+        Load a network from a pickle file
+        
+        Args:
+            filename: Path to the pickle file
+            
+        Returns:
+            Network object or None if unsuccessful
+        """
+        try:
+            with open(filename, 'rb') as f:
+                network = pickle.load(f)
+                
+            print(f"Network loaded from {filename}")
+            return network
+            
+        except Exception as e:
+            print(f"Error loading network: {e}")
+            return None
+                
+    def get_common_generators(self):
+        """
+        Get a list of generators common to all seasonal networks
+        
+        Returns:
+            List of generator IDs
+        """
+        if not self.season_networks:
+            return []
+            
+        # Get generators from the first season
+        first_season = list(self.season_networks.keys())[0]
+        common_generators = set(self.season_networks[first_season].generators.index)
+        
+        # Intersect with generators from other seasons
+        for season, network in self.season_networks.items():
+            if season != first_season:
+                common_generators &= set(network.generators.index)
+                
+        return list(common_generators)
+        
+    def get_common_storage_units(self):
+        """
+        Get a list of storage units common to all seasonal networks
+        
+        Returns:
+            List of storage unit IDs
+        """
+        if not self.season_networks:
+            return []
+            
+        # Get storage units from the first season
+        first_season = list(self.season_networks.keys())[0]
+        common_storage = set(self.season_networks[first_season].storage_units.index)
+        
+        # Intersect with storage units from other seasons
+        for season, network in self.season_networks.items():
+            if season != first_season:
+                common_storage &= set(network.storage_units.index)
+                
+        return list(common_storage)
+        
+    def get_annual_cost(self):
+        """
+        Calculate the annual cost based on seasonal costs and weights
+        
+        Returns:
+            Total annual cost
+        """
+        if not hasattr(self, 'seasons_total_cost'):
+            return None
+            
+        annual_cost = 0
+        for season, cost in self.seasons_total_cost.items():
+            weeks = self.season_weights.get(season, 0)
+            annual_cost += weeks * cost
+            
+        return annual_cost
 
 class Network:
     """
-    Network class that holds all power system components and handles optimization
-    Similar to PyPSA's Network class with numeric IDs for components
+    Power grid network representation for a single season
+    
+    This class is used as a subnetwork within the IntegratedNetwork
     """
-    def __init__(self, data_dir=None, use_day_profiles=False, day=10):
+    def __init__(self, name=""):
+        self.name = name
+        self.buses = pd.DataFrame()
+        self.branches = pd.DataFrame()
+        self.lines = self.branches  # Add this line to make lines an alias for branches
+        self.generators = pd.DataFrame()
+        self.storage_units = pd.DataFrame()
+        self.loads = pd.DataFrame()
+        
+        # Time series data
+        self.snapshots = pd.DatetimeIndex([])
+        self.loads_t = {'p': {}, 'q': {}}
+        self.generators_t = {'p': {}, 'q': {}}
+        self.storage_units_t = {'p_charge': {}, 'p_discharge': {}, 'soc': {}}
+        
+        # Optimization trackers for multi-year planning
+        self.generators_t_by_year = {}
+        self.storage_units_t_by_year = {}
+        self.loads_t_by_year = {}
+        self.generators_installed_by_year = {}
+        self.storage_installed_by_year = {}
+    
+    def create_snapshots(self, start_time, periods, freq):
         """
-        Initialize the network, optionally loading data from CSV files
+        Create snapshots for time-series data
         
         Args:
-            data_dir: Directory containing grid component CSV files
-            use_day_profiles: Whether to use time-dependent profiles from processed data
-            day: Day of the year (1-365) to use for time profiles
-        """
-        # Time settings
-        self.snapshots = None
-        self.T = 0
-        
-        # Multi-year planning attributes
-        self.years = []  # Years for multi-year planning, e.g., [2023, 2024, 2025]
-        self.year_weights = {}  # Weights for each year (e.g., for representing different lengths)
-        self.discount_rate = 0.05  # Default discount rate of 5%
-        
-        # Static component DataFrames - now using numeric IDs
-        self.buses = pd.DataFrame(columns=['name', 'v_nom'])
-        self.generators = pd.DataFrame(columns=['name', 'bus_id', 'capacity_mw', 'cost_mwh', 'type', 
-                                               'capex_per_mw', 'lifetime_years', 'discount_rate'])
-        self.loads = pd.DataFrame(columns=['name', 'bus_id', 'p_mw'])
-        self.storage_units = pd.DataFrame(columns=['name', 'bus_id', 'p_mw', 'energy_mwh', 
-                                                 'efficiency_store', 'efficiency_dispatch', 
-                                                 'capex_per_mw', 'lifetime_years', 'discount_rate'])
-        self.lines = pd.DataFrame(columns=['name', 'bus_from', 'bus_to', 'susceptance', 'capacity_mw'])
-        
-        # Time-series component DataFrames
-        self.loads_t = pd.DataFrame()
-        self.generators_t = {}  # Will store results after optimization
-        self.storage_units_t = {}
-        self.lines_t = {}
-        self.buses_t = {}
-        
-        # Day profiles
-        self.use_day_profiles = use_day_profiles
-        self.day = day
-        self.day_profiles = None
-        
-        # Load data if directory provided
-        if data_dir:
-            self.import_from_csv(data_dir)
+            start_time: Start time for snapshots
+            periods: Number of periods
+            freq: Frequency (e.g., 'H' for hourly)
             
-        # Load day profiles if requested
-        if use_day_profiles:
-            self.load_day_profiles(day)
+        Returns:
+            DatetimeIndex of snapshots
+        """
+        self.snapshots = pd.date_range(start=start_time, periods=periods, freq=freq)
+        self.T = len(self.snapshots)
+        return self.snapshots
+        
+    def add_load_time_series(self, load_id, p_values, q_values=None):
+        """
+        Add time series data for a load
+        
+        Args:
+            load_id: Load ID
+            p_values: Active power values
+            q_values: Reactive power values (optional)
+            
+        Returns:
+            True if successful
+        """
+        # Check if load exists
+        if load_id not in self.loads.index:
+            print(f"Error: Load {load_id} does not exist")
+            return False
+            
+        # Check length of values matches snapshots
+        if len(p_values) != len(self.snapshots):
+            print(f"Error: Length of p_values ({len(p_values)}) does not match snapshots ({len(self.snapshots)})")
+            return False
+            
+        # Add active power values
+        self.loads_t['p'][load_id] = pd.Series(p_values, index=self.snapshots)
+        
+        # Add reactive power values if provided
+        if q_values is not None:
+            if len(q_values) != len(self.snapshots):
+                print(f"Error: Length of q_values ({len(q_values)}) does not match snapshots ({len(self.snapshots)})")
+                return False
+                
+            self.loads_t['q'][load_id] = pd.Series(q_values, index=self.snapshots)
+            
+        return True
             
     def load_day_profiles(self, day=10):
         """
