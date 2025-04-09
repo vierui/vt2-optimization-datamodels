@@ -22,22 +22,22 @@
   "total_discounted_cost": 0,
   "years_data": {
     "1": {
-      "total_cost": 30136.6,
-      "discounted_cost": 30136.6,
+      "total_cost": 8566.96,
+      "discounted_cost": 8566.96,
       "discount_factor": 1.0,
-      "operational_cost": 9136.6,
-      "capital_cost": 21000.0,
+      "operational_cost": 8566.96,
+      "capital_cost": 0.0,
       "operational_costs_breakdown": {
-        "generator_1001": 592.0000000000001,
+        "generator_1001": 592.0,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 8544.6,
+        "generator_1004": 7974.96,
         "generator_1005": 0.0,
         "generator_1006": 0.0
       },
       "capital_costs_breakdown": {
-        "generator_1001": 10000.0,
-        "generator_1004": 11000.0
+        "generator_1001": 0.0,
+        "generator_1004": 0.0
       },
       "installations": {
         "generators": {
@@ -61,16 +61,16 @@
       "mismatch": 121.328
     },
     "2": {
-      "total_cost": 9609.542000000001,
-      "discounted_cost": 9151.944761904762,
+      "total_cost": 9027.532000000001,
+      "discounted_cost": 8597.649523809525,
       "discount_factor": 0.9523809523809523,
-      "operational_cost": 9609.542000000001,
+      "operational_cost": 9027.532000000001,
       "capital_cost": 0,
       "operational_costs_breakdown": {
         "generator_1001": 879.3920000000003,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 8730.150000000001,
+        "generator_1004": 8148.140000000001,
         "generator_1005": 0.0,
         "generator_1006": 0.0
       },
@@ -97,16 +97,16 @@
       "mismatch": 127.39440000000002
     },
     "3": {
-      "total_cost": 10084.982,
-      "discounted_cost": 9147.37596371882,
+      "total_cost": 9493.1,
+      "discounted_cost": 8610.521541950113,
       "discount_factor": 0.9070294784580498,
-      "operational_cost": 10084.982,
+      "operational_cost": 9493.1,
       "capital_cost": 0,
       "operational_costs_breakdown": {
         "generator_1001": 1206.7520000000009,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 8878.23,
+        "generator_1004": 8286.348,
         "generator_1005": 0.0,
         "generator_1006": 0.0
       },
@@ -133,18 +133,18 @@
       "mismatch": 133.4608
     },
     "4": {
-      "total_cost": 18315.498933333332,
-      "discounted_cost": 15821.616614476476,
+      "total_cost": 17309.204166666666,
+      "discounted_cost": 14952.341359824351,
       "discount_factor": 0.863837598531476,
-      "operational_cost": 9607.165599999998,
+      "operational_cost": 8600.870833333332,
       "capital_cost": 8708.333333333334,
       "operational_costs_breakdown": {
-        "generator_1001": 914.4264888888887,
+        "generator_1001": 914.4264888888886,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 8235.476083333333,
+        "generator_1004": 7686.444344444444,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {
         "generator_1006": 8708.333333333334
@@ -171,18 +171,18 @@
       "mismatch": 139.5272
     },
     "5": {
-      "total_cost": 10076.447849999999,
-      "discounted_cost": 8289.918583306337,
+      "total_cost": 9054.123333333333,
+      "discounted_cost": 7448.849673404256,
       "discount_factor": 0.8227024747918819,
-      "operational_cost": 10076.447849999999,
+      "operational_cost": 9054.123333333333,
       "capital_cost": 0,
       "operational_costs_breakdown": {
         "generator_1001": 1143.2624888888886,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 8475.922333333334,
+        "generator_1004": 7910.860844444444,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -207,18 +207,18 @@
       "mismatch": 145.59359999999998
     },
     "6": {
-      "total_cost": 10547.236599999998,
-      "discounted_cost": 8264.03586003382,
+      "total_cost": 9510.388833333333,
+      "discounted_cost": 7451.638504206105,
       "discount_factor": 0.7835261664684589,
-      "operational_cost": 10547.236599999998,
+      "operational_cost": 9510.388833333333,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 1396.202488888889,
+        "generator_1001": 1396.2024888888889,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 8693.771083333333,
+        "generator_1004": 8114.186344444444,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -243,18 +243,18 @@
       "mismatch": 151.66
     },
     "7": {
-      "total_cost": 11018.577888888887,
-      "discounted_cost": 8222.232469728793,
+      "total_cost": 9967.75941111111,
+      "discounted_cost": 7438.095542540753,
       "discount_factor": 0.7462153966366274,
-      "operational_cost": 11018.577888888887,
+      "operational_cost": 9967.75941111111,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 1657.9831111111116,
+        "generator_1001": 1657.9831111111114,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 8903.33175,
+        "generator_1004": 8309.7763,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -274,23 +274,23 @@
           "3005": false
         }
       },
-      "total_generation": 157.7264,
+      "total_generation": 157.72639999999998,
       "total_load": 0,
-      "mismatch": 157.7264
+      "mismatch": 157.72639999999998
     },
     "8": {
-      "total_cost": 11491.618972222223,
-      "discounted_cost": 8166.879056527428,
+      "total_cost": 10428.529577777777,
+      "discounted_cost": 7411.361271636424,
       "discount_factor": 0.7106813301301214,
-      "operational_cost": 11491.618972222223,
+      "operational_cost": 10428.529577777777,
       "capital_cost": 0,
       "operational_costs_breakdown": {
         "generator_1001": 1946.960444444445,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9087.3955,
+        "generator_1004": 8481.569133333333,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -315,18 +315,18 @@
       "mismatch": 163.7928
     },
     "9": {
-      "total_cost": 11966.546388888888,
-      "discounted_cost": 8099.4296235422435,
+      "total_cost": 10893.07241111111,
+      "discounted_cost": 7372.860181268735,
       "discount_factor": 0.676839362028687,
-      "operational_cost": 11966.546388888888,
+      "operational_cost": 10893.07241111111,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 2266.1191111111116,
+        "generator_1001": 2266.1191111111107,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9243.16425,
+        "generator_1004": 8626.9533,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -351,18 +351,18 @@
       "mismatch": 169.8592
     },
     "10": {
-      "total_cost": 19526.086722222222,
-      "discounted_cost": 12586.689599986386,
+      "total_cost": 18413.697088987996,
+      "discounted_cost": 11869.633324095359,
       "discount_factor": 0.6446089162177971,
-      "operational_cost": 12442.753388888888,
+      "operational_cost": 11330.363755654664,
       "capital_cost": 7083.333333333333,
       "operational_costs_breakdown": {
-        "generator_1001": 2605.7511111111116,
+        "generator_1001": 1627.419600222222,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9379.739249999999,
+        "generator_1004": 9702.944155432442,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {
         "storage_3003": 7083.333333333333
@@ -384,23 +384,23 @@
           "3005": false
         }
       },
-      "total_generation": 175.92559999999997,
+      "total_generation": 177.24675404863805,
       "total_load": 0,
-      "mismatch": 175.92559999999997
+      "mismatch": 177.24675404863805
     },
     "11": {
-      "total_cost": 12920.807944444445,
-      "discounted_cost": 7932.255243549177,
+      "total_cost": 11801.754750908587,
+      "discounted_cost": 7245.253656620402,
       "discount_factor": 0.6139132535407591,
-      "operational_cost": 12920.807944444445,
+      "operational_cost": 11801.754750908587,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 2974.9440000000013,
+        "generator_1001": 2016.1026868888891,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9488.600916666666,
+        "generator_1004": 9785.652064019698,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -420,23 +420,23 @@
           "3005": false
         }
       },
-      "total_generation": 181.99200000000002,
+      "total_generation": 183.2868341832179,
       "total_load": 0,
-      "mismatch": 181.99200000000002
+      "mismatch": 183.2868341832179
     },
     "12": {
-      "total_cost": 13399.230744259774,
-      "discounted_cost": 7834.2527058589385,
+      "total_cost": 12273.915974011696,
+      "discounted_cost": 7176.304465991825,
       "discount_factor": 0.5846792890864373,
-      "operational_cost": 13399.230744259774,
+      "operational_cost": 12273.915974011696,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 3349.691733333335,
+        "generator_1001": 2412.1853360000005,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9592.275983148662,
+        "generator_1004": 9861.730638011695,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -456,23 +456,23 @@
           "3005": false
         }
       },
-      "total_generation": 188.0586808864266,
+      "total_generation": 189.32470406842103,
       "total_load": 0,
-      "mismatch": 188.0586808864266
+      "mismatch": 189.32470406842103
     },
     "13": {
-      "total_cost": 13879.62579102801,
-      "discounted_cost": 7728.694990746701,
+      "total_cost": 12748.601772011698,
+      "discounted_cost": 7098.898496100851,
       "discount_factor": 0.5568374181775593,
-      "operational_cost": 13879.62579102801,
+      "operational_cost": 12748.601772011698,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 3717.673866666669,
+        "generator_1001": 2838.746134000002,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9704.688896583562,
+        "generator_1004": 9909.855638011697,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -492,23 +492,23 @@
           "3005": false
         }
       },
-      "total_generation": 194.15729639889196,
+      "total_generation": 195.34421404342106,
       "total_load": 0,
-      "mismatch": 194.15729639889196
+      "mismatch": 195.34421404342106
     },
     "14": {
-      "total_cost": 14362.078843951986,
-      "discounted_cost": 7616.517050598827,
+      "total_cost": 13224.667511345027,
+      "discounted_cost": 7013.32353645144,
       "discount_factor": 0.5303213506452945,
-      "operational_cost": 14362.078843951986,
+      "operational_cost": 13224.667511345027,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 4069.551555555556,
+        "generator_1001": 3266.686873333332,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9835.264260618653,
+        "generator_1004": 9957.980638011695,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -528,23 +528,23 @@
           "3005": false
         }
       },
-      "total_generation": 200.29677236380425,
+      "total_generation": 201.3809732850877,
       "total_load": 0,
-      "mismatch": 200.29677236380425
+      "mismatch": 201.3809732850877
     },
     "15": {
-      "total_cost": 14845.304335395505,
-      "discounted_cost": 7497.887472273705,
+      "total_cost": 13701.421079625732,
+      "discounted_cost": 6920.148697816217,
       "discount_factor": 0.5050679529955185,
-      "operational_cost": 14845.304335395505,
+      "operational_cost": 13701.421079625732,
       "capital_cost": 0,
       "operational_costs_breakdown": {
-        "generator_1001": 4418.034133333334,
+        "generator_1001": 3697.573862666667,
         "generator_1002": 0.0,
         "generator_1003": 0.0,
-        "generator_1004": 9970.007174284394,
+        "generator_1004": 10003.847216959064,
         "generator_1005": 0.0,
-        "generator_1006": 457.2630277777778
+        "generator_1006": 0.0
       },
       "capital_costs_breakdown": {},
       "installations": {
@@ -564,9 +564,9 @@
           "3005": false
         }
       },
-      "total_generation": 206.44937676823636,
+      "total_generation": 207.42229749385962,
       "total_load": 0,
-      "mismatch": 206.44937676823636
+      "mismatch": 207.42229749385962
     }
   },
   "final_installations": {
@@ -574,7 +574,7 @@
       "1001": {
         "installed": true,
         "capacity_mw": 1.0,
-        "annual_gen_mwh": 55.22542666666667
+        "annual_gen_mwh": 46.219673283333336
       },
       "1002": {
         "installed": false,
@@ -589,7 +589,7 @@
       "1004": {
         "installed": true,
         "capacity_mw": 1.0,
-        "annual_gen_mwh": 132.9334289904586
+        "annual_gen_mwh": 142.9121030994152
       },
       "1005": {
         "installed": false,
@@ -621,8 +621,8 @@
         "installed": true,
         "capacity_mw": 0.5,
         "energy_capacity_mwh": 2.0,
-        "annual_charge_mwh": 1.9669412126808234,
-        "annual_discharge_mwh": 1.7751644444444428
+        "annual_charge_mwh": 11.94561532163743,
+        "annual_discharge_mwh": 10.78091782777778
       },
       "3004": {
         "installed": false,
@@ -646,7 +646,7 @@
         {
           "installation_year": 1,
           "capacity_mw": 1.0,
-          "capex_per_mw": 50000,
+          "capex_per_mw": 0,
           "lifetime_years": 5.0,
           "is_replacement": false,
           "relative_year": 1,
@@ -655,27 +655,81 @@
         {
           "installation_year": 6,
           "capacity_mw": 1.0,
-          "capex_per_mw": 50000,
+          "capex_per_mw": 0,
           "lifetime_years": 5.0,
           "is_replacement": true,
           "relative_year": 6,
           "absolute_year": 6
         },
         {
+          "installation_year": 7,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 7,
+          "absolute_year": 7
+        },
+        {
+          "installation_year": 8,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 8,
+          "absolute_year": 8
+        },
+        {
           "installation_year": 11,
           "capacity_mw": 1.0,
-          "capex_per_mw": 50000,
+          "capex_per_mw": 0,
           "lifetime_years": 5.0,
           "is_replacement": true,
           "relative_year": 11,
           "absolute_year": 11
+        },
+        {
+          "installation_year": 12,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 12,
+          "absolute_year": 12
+        },
+        {
+          "installation_year": 13,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 13,
+          "absolute_year": 13
+        },
+        {
+          "installation_year": 14,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 14,
+          "absolute_year": 14
+        },
+        {
+          "installation_year": 15,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 15,
+          "absolute_year": 15
         }
       ],
       "1004": [
         {
           "installation_year": 1,
           "capacity_mw": 1.0,
-          "capex_per_mw": 55000,
+          "capex_per_mw": 0,
           "lifetime_years": 5.0,
           "is_replacement": false,
           "relative_year": 1,
@@ -684,20 +738,83 @@
         {
           "installation_year": 6,
           "capacity_mw": 1.0,
-          "capex_per_mw": 55000,
+          "capex_per_mw": 0,
           "lifetime_years": 5.0,
           "is_replacement": true,
           "relative_year": 6,
           "absolute_year": 6
         },
         {
+          "installation_year": 7,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 7,
+          "absolute_year": 7
+        },
+        {
+          "installation_year": 8,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 8,
+          "absolute_year": 8
+        },
+        {
+          "installation_year": 9,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 9,
+          "absolute_year": 9
+        },
+        {
           "installation_year": 11,
           "capacity_mw": 1.0,
-          "capex_per_mw": 55000,
+          "capex_per_mw": 0,
           "lifetime_years": 5.0,
           "is_replacement": true,
           "relative_year": 11,
           "absolute_year": 11
+        },
+        {
+          "installation_year": 12,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 12,
+          "absolute_year": 12
+        },
+        {
+          "installation_year": 13,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 13,
+          "absolute_year": 13
+        },
+        {
+          "installation_year": 14,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 14,
+          "absolute_year": 14
+        },
+        {
+          "installation_year": 15,
+          "capacity_mw": 1.0,
+          "capex_per_mw": 0,
+          "lifetime_years": 5.0,
+          "is_replacement": true,
+          "relative_year": 15,
+          "absolute_year": 15
         }
       ],
       "1006": [

@@ -25,8 +25,8 @@
 #### New Generators
 | ID | Name | Type | Capacity (MW) | Cost |
 |-------|------|------|-------------|------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 50,000 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 55,000 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
 
 ### Year 2 (Absolute: 2)
 
@@ -46,8 +46,8 @@
 #### Replaced Generators
 | ID | Name | Type | Capacity (MW) | Cost |
 |-------|------|------|-------------|------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 50,000 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 55,000 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
 
 ### Year 7 (Absolute: 7)
 
@@ -56,6 +56,11 @@
 ### Year 9 (Absolute: 9)
 
 ### Year 10 (Absolute: 10)
+
+#### New Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1003 | Solar Generator 1 | solar | 1.0 | 60,000 |
 
 #### Replaced Generators
 | ID | Name | Type | Capacity (MW) | Cost |
@@ -67,14 +72,32 @@
 #### Replaced Generators
 | ID | Name | Type | Capacity (MW) | Cost |
 |-------|------|------|-------------|------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 50,000 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 55,000 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
 
 ### Year 12 (Absolute: 12)
 
+#### Replaced Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
+
 ### Year 13 (Absolute: 13)
 
+#### Replaced Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
+
 ### Year 14 (Absolute: 14)
+
+#### Replaced Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
 
 ### Year 15 (Absolute: 15)
 
@@ -85,6 +108,7 @@
 #### Generators
 | ID | Name | Type | Capacity (MW) | Installation Year(s) |
 |-------|------|------|-------------|--------------------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 1, 6, 11 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 1, 6, 11 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 1, 6, 11, 12, 13, 14 |
+| 1003 | Solar Generator 1 | solar | 1.0 | 10 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 1, 6, 11, 12, 13, 14 |
 | 1006 | Solar Generator 2 | solar | 1.0 | 4, 10 |

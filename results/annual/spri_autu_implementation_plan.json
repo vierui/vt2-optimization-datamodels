@@ -75,8 +75,50 @@
           "is_replacement": true
         },
         {
+          "year": 7,
+          "absolute_year": 7,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 8,
+          "absolute_year": 8,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
           "year": 11,
           "absolute_year": 11,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 12,
+          "absolute_year": 12,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 13,
+          "absolute_year": 13,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 14,
+          "absolute_year": 14,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 15,
+          "absolute_year": 15,
           "action": "install",
           "reason": "replacement",
           "is_replacement": true
@@ -137,8 +179,57 @@
           "is_replacement": true
         },
         {
+          "year": 7,
+          "absolute_year": 7,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 8,
+          "absolute_year": 8,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 9,
+          "absolute_year": 9,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
           "year": 11,
           "absolute_year": 11,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 12,
+          "absolute_year": 12,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 13,
+          "absolute_year": 13,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 14,
+          "absolute_year": 14,
+          "action": "install",
+          "reason": "replacement",
+          "is_replacement": true
+        },
+        {
+          "year": 15,
+          "absolute_year": 15,
           "action": "install",
           "reason": "replacement",
           "is_replacement": true
@@ -383,7 +474,10 @@
           1006
         ],
         "decommissioned": [],
-        "replaced": []
+        "replaced": [
+          1001,
+          1004
+        ]
       },
       "storage": {
         "new": [],
@@ -402,7 +496,10 @@
           1006
         ],
         "decommissioned": [],
-        "replaced": []
+        "replaced": [
+          1001,
+          1004
+        ]
       },
       "storage": {
         "new": [],
@@ -421,7 +518,9 @@
           1006
         ],
         "decommissioned": [],
-        "replaced": []
+        "replaced": [
+          1004
+        ]
       },
       "storage": {
         "new": [],
@@ -489,7 +588,10 @@
           1006
         ],
         "decommissioned": [],
-        "replaced": []
+        "replaced": [
+          1001,
+          1004
+        ]
       },
       "storage": {
         "new": [],
@@ -510,7 +612,10 @@
           1006
         ],
         "decommissioned": [],
-        "replaced": []
+        "replaced": [
+          1001,
+          1004
+        ]
       },
       "storage": {
         "new": [],
@@ -533,7 +638,10 @@
           1006
         ],
         "decommissioned": [],
-        "replaced": []
+        "replaced": [
+          1001,
+          1004
+        ]
       },
       "storage": {
         "new": [],
@@ -554,7 +662,10 @@
           1006
         ],
         "decommissioned": [],
-        "replaced": []
+        "replaced": [
+          1001,
+          1004
+        ]
       },
       "storage": {
         "new": [],
@@ -578,7 +689,7 @@
       "is_replacement": false,
       "capacity_mw": 1.0,
       "type": "thermal",
-      "cost": 50000.0,
+      "cost": 0.0,
       "lifetime_years": 5.0
     },
     {
@@ -591,7 +702,7 @@
       "is_replacement": false,
       "capacity_mw": 1.0,
       "type": "thermal",
-      "cost": 55000.0,
+      "cost": 0.0,
       "lifetime_years": 5.0
     },
     {
@@ -617,7 +728,7 @@
       "is_replacement": true,
       "capacity_mw": 1.0,
       "type": "thermal",
-      "cost": 50000.0,
+      "cost": 0.0,
       "lifetime_years": 5.0
     },
     {
@@ -630,7 +741,72 @@
       "is_replacement": true,
       "capacity_mw": 1.0,
       "type": "thermal",
-      "cost": 55000.0,
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 7,
+      "absolute_year": 7,
+      "asset_type": "generator",
+      "asset_id": 1001,
+      "asset_name": "Thermal Generator 1",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 7,
+      "absolute_year": 7,
+      "asset_type": "generator",
+      "asset_id": 1004,
+      "asset_name": "Thermal Generator 2",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 8,
+      "absolute_year": 8,
+      "asset_type": "generator",
+      "asset_id": 1001,
+      "asset_name": "Thermal Generator 1",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 8,
+      "absolute_year": 8,
+      "asset_type": "generator",
+      "asset_id": 1004,
+      "asset_name": "Thermal Generator 2",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 9,
+      "absolute_year": 9,
+      "asset_type": "generator",
+      "asset_id": 1004,
+      "asset_name": "Thermal Generator 2",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
       "lifetime_years": 5.0
     },
     {
@@ -669,7 +845,7 @@
       "is_replacement": true,
       "capacity_mw": 1.0,
       "type": "thermal",
-      "cost": 50000.0,
+      "cost": 0.0,
       "lifetime_years": 5.0
     },
     {
@@ -682,7 +858,59 @@
       "is_replacement": true,
       "capacity_mw": 1.0,
       "type": "thermal",
-      "cost": 55000.0,
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 12,
+      "absolute_year": 12,
+      "asset_type": "generator",
+      "asset_id": 1001,
+      "asset_name": "Thermal Generator 1",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 12,
+      "absolute_year": 12,
+      "asset_type": "generator",
+      "asset_id": 1004,
+      "asset_name": "Thermal Generator 2",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 13,
+      "absolute_year": 13,
+      "asset_type": "generator",
+      "asset_id": 1001,
+      "asset_name": "Thermal Generator 1",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 13,
+      "absolute_year": 13,
+      "asset_type": "generator",
+      "asset_id": 1004,
+      "asset_name": "Thermal Generator 2",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
       "lifetime_years": 5.0
     },
     {
@@ -697,6 +925,58 @@
       "energy_capacity_mwh": 2.0,
       "cost": 21250.0,
       "lifetime_years": 3.0
+    },
+    {
+      "year": 14,
+      "absolute_year": 14,
+      "asset_type": "generator",
+      "asset_id": 1001,
+      "asset_name": "Thermal Generator 1",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 14,
+      "absolute_year": 14,
+      "asset_type": "generator",
+      "asset_id": 1004,
+      "asset_name": "Thermal Generator 2",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 15,
+      "absolute_year": 15,
+      "asset_type": "generator",
+      "asset_id": 1001,
+      "asset_name": "Thermal Generator 1",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
+    },
+    {
+      "year": 15,
+      "absolute_year": 15,
+      "asset_type": "generator",
+      "asset_id": 1004,
+      "asset_name": "Thermal Generator 2",
+      "action": "install",
+      "is_replacement": true,
+      "capacity_mw": 1.0,
+      "type": "thermal",
+      "cost": 0.0,
+      "lifetime_years": 5.0
     }
   ]
 }

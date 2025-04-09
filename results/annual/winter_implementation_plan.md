@@ -25,15 +25,11 @@
 #### New Generators
 | ID | Name | Type | Capacity (MW) | Cost |
 |-------|------|------|-------------|------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 50,000 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 55,000 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
+| 1006 | Solar Generator 2 | solar | 1.0 | 52,250 |
 
 ### Year 2 (Absolute: 2)
-
-#### New Generators
-| ID | Name | Type | Capacity (MW) | Cost |
-|-------|------|------|-------------|------|
-| 1006 | Solar Generator 2 | solar | 1.0 | 52,250 |
 
 ### Year 3 (Absolute: 3)
 
@@ -51,10 +47,15 @@
 #### Replaced Generators
 | ID | Name | Type | Capacity (MW) | Cost |
 |-------|------|------|-------------|------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 50,000 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 55,000 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
 
 ### Year 7 (Absolute: 7)
+
+#### Replaced Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1006 | Solar Generator 2 | solar | 1.0 | 52,250 |
 
 #### Replaced Storage Units
 | ID | Name | Power (MW) | Energy (MWh) | Cost |
@@ -62,11 +63,6 @@
 | 3003 | Battery 1 | 0.5 | 2.0 | 21,250 |
 
 ### Year 8 (Absolute: 8)
-
-#### Replaced Generators
-| ID | Name | Type | Capacity (MW) | Cost |
-|-------|------|------|-------------|------|
-| 1006 | Solar Generator 2 | solar | 1.0 | 52,250 |
 
 ### Year 9 (Absolute: 9)
 
@@ -87,30 +83,44 @@
 #### Replaced Generators
 | ID | Name | Type | Capacity (MW) | Cost |
 |-------|------|------|-------------|------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 50,000 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 55,000 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
 
 ### Year 12 (Absolute: 12)
+
+#### Replaced Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
+
+### Year 13 (Absolute: 13)
+
+#### Replaced Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
+| 1006 | Solar Generator 2 | solar | 1.0 | 52,250 |
+
+#### Replaced Storage Units
+| ID | Name | Power (MW) | Energy (MWh) | Cost |
+|-------|------|-----------|-------------|------|
+| 3003 | Battery 1 | 0.5 | 2.0 | 21,250 |
+| 3004 | Battery 2 | 0.5 | 2.0 | 23,375 |
+
+### Year 14 (Absolute: 14)
+
+#### Replaced Generators
+| ID | Name | Type | Capacity (MW) | Cost |
+|-------|------|------|-------------|------|
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 0 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 0 |
 
 #### New Storage Units
 | ID | Name | Power (MW) | Energy (MWh) | Cost |
 |-------|------|-----------|-------------|------|
-| 3005 | Flow Battery | 2.0 | 10.0 | 120,000 |
-
-### Year 13 (Absolute: 13)
-
-#### Decommissioned Assets
-| Type | ID | Name | Reason |
-|------|-------|------|-------|
-| Storage | 3003 | Battery 1 | End of lifetime |
-| Storage | 3004 | Battery 2 | End of lifetime |
-
-### Year 14 (Absolute: 14)
-
-#### Decommissioned Assets
-| Type | ID | Name | Reason |
-|------|-------|------|-------|
-| Generator | 1006 | Solar Generator 2 | End of lifetime |
+| 3001 | Storage 1 | 1.0 | 4.0 | 35,000 |
 
 ### Year 15 (Absolute: 15)
 
@@ -121,10 +131,13 @@
 #### Generators
 | ID | Name | Type | Capacity (MW) | Installation Year(s) |
 |-------|------|------|-------------|--------------------|
-| 1001 | Thermal Generator 1 | thermal | 1.0 | 1, 6, 11 |
-| 1004 | Thermal Generator 2 | thermal | 1.0 | 1, 6, 11 |
+| 1001 | Thermal Generator 1 | thermal | 1.0 | 1, 6, 11, 12, 13, 14 |
+| 1004 | Thermal Generator 2 | thermal | 1.0 | 1, 6, 11, 12, 13, 14 |
+| 1006 | Solar Generator 2 | solar | 1.0 | 1, 7, 13 |
 
 #### Storage Units
 | ID | Name | Power (MW) | Energy (MWh) | Installation Year(s) |
 |-------|------|-----------|-------------|--------------------|
-| 3005 | Flow Battery | 2.0 | 10.0 | 12 |
+| 3001 | Storage 1 | 1.0 | 4.0 | 14 |
+| 3003 | Battery 1 | 0.5 | 2.0 | 4, 7, 10, 13 |
+| 3004 | Battery 2 | 0.5 | 2.0 | 10, 13 |
