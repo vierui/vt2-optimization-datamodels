@@ -1,16 +1,41 @@
 {
   "years": [
-    1
+    1,
+    2,
+    3,
+    4,
+    5
   ],
-  "generators": {},
+  "generators": {
+    "1001": {
+      "years_installed": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "1004": {
+      "years_installed": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    },
+    "1006": {
+      "years_installed": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ]
+    }
+  },
   "storage": {},
-  "timestamp": "2025-04-10T01:06:59.227649",
-  "seasonal_utilization": {
-    "generators": {},
-    "storage": {}
-  },
-  "seasonal_costs": {
-    "winter": 737400.0
-  },
-  "annual_cost": 9586200.0
+  "objective_value": 4354166.666666667,
+  "status": "optimal"
 }

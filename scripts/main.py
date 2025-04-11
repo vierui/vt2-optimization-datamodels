@@ -1,291 +1,357 @@
 #!/usr/bin/env python3
 """
-Main entry point for the power grid optimization tool.
+Main entry point for the simplified multi-year power grid optimization tool.
 
-This script runs the integrated multi-year, multi-season optimization model
-to determine the optimal grid expansion plan.
+Key changes compared to older versions:
+  - Single binary variable for each asset per year (no re-install or replacement).
+  - No slack variables (no load shedding).
+  - Annualized CAPEX cost (capex_per_mw * p_nom / lifetime).
+  - No discounting in the cost function (simple sum across years).
+  - Storage SoC forced to zero at season start/end, removing cross-season coupling.
 """
+
 import os
 import sys
+# Ensure the script can find modules in the scripts directory
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 import json
 import argparse
 import pandas as pd
 from datetime import datetime
+import numpy as np
+import logging
+import traceback
 
-from pre import process_data_for_optimization
-from optimization import optimize_integrated_network, optimize_seasonal_network
-from post import generate_implementation_plan, calculate_annual_cost
-from network import IntegratedNetwork, Network
-from components import Bus, Generator, Load, Storage, Branch
+# Import our revised pre-processing, optimization, and post modules
+from pre import process_data_for_optimization, SEASON_WEIGHTS
+from optimization import solve_multi_year_investment  # Uses the new streamlined approach
+from post import generate_implementation_plan, NumpyEncoder
+
+# Import your integrated network class, or a similar structure
+from network import IntegratedNetwork, Network  # Adjust if your code differs
+from components import Bus, Generator, Load, Storage, Branch  # optional if needed
+
+# Paths and constants
+SEASON_WEIGHTS = {'winter': 13, 'summer': 13, 'spri_autu': 26}
+
+def setup_logging(output_dir):
+    """Set up logging to both console and file."""
+    log_file = os.path.join(output_dir, 'optimization.log')
+    
+    # Create a logger
+    logger = logging.getLogger('optimization')
+    logger.setLevel(logging.INFO)
+    
+    # Create handlers
+    file_handler = logging.FileHandler(log_file)
+    console_handler = logging.StreamHandler()
+    
+    # Create formatters
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers to logger
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    
+    return logger
 
 def main():
-    """Run the power grid optimization tool."""
+    """Run the simplified multi-year power grid optimization tool."""
     parser = argparse.ArgumentParser(
-        description='Power Grid Optimization Tool with Integrated Multi-year Planning'
+        description='Simplified Multi-Year Power Grid Optimization'
     )
-    
+
     # Input files
     parser.add_argument('--grid-file', required=True,
-                      help='Path to grid data CSV file')
+                        help='Path to grid data directory or CSV file')
     parser.add_argument('--profiles-dir', required=True,
-                      help='Directory containing time series profile data')
+                        help='Directory containing time series profile data')
     parser.add_argument('--analysis-file', required=False, default=None,
-                      help='Path to analysis configuration JSON file')
-    
+                        help='Path to analysis configuration JSON file')
+
     # Output settings
     parser.add_argument('--output-dir', required=False, default='results',
-                      help='Directory to save output files (default: results)')
+                        help='Directory to save output files (default: results)')
     parser.add_argument('--save-network', action='store_true',
-                      help='Save the optimized network to a pickle file')
-    
-    # Optimization approach
-    parser.add_argument('--integrated', action='store_true',
-                      help='Use integrated optimization approach (default: False)')
-    parser.add_argument('--season', required=False, choices=['winter', 'summer', 'spri_autu'],
-                      help='Optimize only a specific season (for testing)')
-    parser.add_argument('--year', type=int, required=False,
-                      help='Optimize only a specific year (for testing)')
-    
-    # Advanced options
+                        help='Save the optimized network to a pickle file')
+
+    # Optional solver options
     parser.add_argument('--solver-options', type=json.loads, default={},
-                      help='JSON string with solver options')
-    
+                        help='JSON string with solver options (e.g. \'{"timelimit":3600}\')')
+
     args = parser.parse_args()
-    
-    # Create output directory if it doesn't exist
+
+    # Ensure output directory exists
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Step 1: Preprocess data
-    print("Step 1: Preprocessing data...")
+    # Set up logging
+    logger = setup_logging(args.output_dir)
+    logger.info("Starting optimization run")
+
+    #------------------------------------------------------------------
+    # 1) PRE-PROCESSING
+    #    Load data and create the dictionary required for optimization
+    #------------------------------------------------------------------
+    logger.info("Step 1: Preprocessing data...")
     try:
         processed_data = process_data_for_optimization(
-            args.grid_file,
-            args.profiles_dir,
-            args.analysis_file
+            grid_dir=args.grid_file,
+            processed_dir=args.profiles_dir,
+            planning_years=None  # or override if you want
         )
-        print("Data preprocessing completed.")
+        logger.info("Data preprocessing completed.")
+        
+        # Log the data summary
+        logger.info(f"Processed data summary:")
+        logger.info(f"  Grid data contains: {list(processed_data['grid_data'].keys())}")
+        logger.info(f"  Seasons: {list(processed_data['seasons_profiles'].keys())}")
+        
+        buses_df = processed_data['grid_data']['buses']
+        gens_df = processed_data['grid_data']['generators']
+        loads_df = processed_data['grid_data']['loads']
+        
+        logger.info(f"  Buses: {len(buses_df)}")
+        logger.info(f"  Generators: {len(gens_df)}")
+        logger.info(f"  Generator types: {gens_df['type'].unique().tolist()}")
+        logger.info(f"  Total generation capacity: {gens_df['capacity_mw'].sum()} MW")
+        logger.info(f"  Loads: {len(loads_df)}")
+        logger.info(f"  Total load: {loads_df['p_mw'].sum()} MW")
+        
+        # Print loads per bus
+        loads_by_bus = loads_df.groupby('bus')['p_mw'].sum()
+        logger.info("  Loads by bus:")
+        for bus, load in loads_by_bus.items():
+            logger.info(f"    Bus {bus}: {load} MW")
+            
+        # Print generators per bus
+        gens_by_bus = gens_df.groupby('bus')['capacity_mw'].sum()
+        logger.info("  Generation by bus:")
+        for bus, cap in gens_by_bus.items():
+            logger.info(f"    Bus {bus}: {cap} MW")
+            
     except Exception as e:
-        print(f"Error during data preprocessing: {e}")
+        logger.error(f"Error during data preprocessing: {e}")
         return 1
+
+    # Check that we have the necessary data
+    if not processed_data or 'grid_data' not in processed_data or 'seasons_profiles' not in processed_data:
+        logger.error("Error: Incomplete processed data.")
+        return 1
+
+    #------------------------------------------------------------------
+    # 2) CREATE THE INTEGRATED NETWORK
+    #    We'll build an IntegratedNetwork from the preprocessed data.
+    #------------------------------------------------------------------
+    logger.info("Step 2: Building integrated network object...")
+
+    # Extract analysis info (years, discount, etc.)
+    analysis = processed_data['grid_data'].get('analysis', {})
+    planning_horizon = analysis.get('planning_horizon', {})
+    # We assume 'years' is now a list of relative years [1,2,3,...]
+    years = planning_horizon.get('years', [1])  # fallback if missing
+    system_discount_rate = planning_horizon.get('system_discount_rate', 0.0)
+
+    # Create an IntegratedNetwork instance
+    integrated_network = IntegratedNetwork(
+        seasons=list(processed_data['seasons_profiles'].keys()),
+        years=years,
+        discount_rate=system_discount_rate,
+        season_weights=SEASON_WEIGHTS
+    )
     
-    # Step 2: Create and optimize integrated network
-    print("\nStep 2: Creating and optimizing integrated network...")
-    try:
-        # Filter seasons if a specific season is requested
-        all_seasons = list(processed_data['seasons_profiles'].keys())
-        if args.season and args.season in all_seasons:
-            print(f"Focusing on a single season: {args.season}")
-            # Filter to only include the specified season
-            seasons_to_use = [args.season]
-        else:
-            seasons_to_use = all_seasons
-        
-        # Filter years if a specific year is requested
-        all_years = processed_data['grid_data']['analysis']['planning_horizon']['years']
-        if args.year and args.year in all_years:
-            print(f"Focusing on a single year: {args.year}")
-            # Filter to only include the specified year
-            years_to_use = [args.year]
-        else:
-            years_to_use = all_years
-            
-        # Create integrated network from preprocessed data
-        integrated_network = IntegratedNetwork(
-            seasons=seasons_to_use,
-            years=years_to_use,
-            discount_rate=processed_data['grid_data']['analysis']['planning_horizon']['system_discount_rate']
-        )
-        
-        # Add seasonal networks
-        for season, season_data in processed_data['seasons_profiles'].items():
-            # Skip seasons that are not in our list
-            if season not in seasons_to_use:
-                continue
-                
-            # Create network for this season
-            network = Network(name=season)
-            
-            # Add components from grid data
-            # Add buses
-            for idx, bus in processed_data['grid_data']['buses'].iterrows():
-                bus_obj = Bus(
-                    index=bus['id'], 
-                    name=bus['name'], 
-                    v_nom=bus.get('v_nom', 1.0)
-                )
-                network.buses = pd.concat([network.buses, pd.Series(bus_obj.__dict__, name=bus['id']).to_frame().T])
-            
-            # Add generators
-            for idx, gen in processed_data['grid_data']['generators'].iterrows():
-                gen_data = pd.Series({
-                    'index': gen['id'],
-                    'name': gen['name'],
-                    'bus': gen['bus_id'],
-                    'p_nom': gen['capacity_mw'],
-                    'marginal_cost': gen['cost_mwh'],
-                    'type': gen['type'],
-                    'capex_per_mw': gen['capex_per_mw'],
-                    'lifetime_years': gen['lifetime_years']
-                }, name=gen['id'])
-                network.generators = pd.concat([network.generators, gen_data.to_frame().T])
-            
-            # Add loads
-            for idx, load in processed_data['grid_data']['loads'].iterrows():
-                load_data = pd.Series({
-                    'index': load['id'],
-                    'name': load['name'],
-                    'bus': load['bus_id'],
-                    'p_set': load['p_mw']
-                }, name=load['id'])
-                network.loads = pd.concat([network.loads, load_data.to_frame().T])
-            
-            # Add storage
-            if 'storage_units' in processed_data['grid_data']:
-                for idx, storage in processed_data['grid_data']['storage_units'].iterrows():
-                    storage_data = pd.Series({
-                        'index': storage['id'],
-                        'name': storage['name'],
-                        'bus': storage['bus_id'],
-                        'p_nom': storage['p_mw'],
-                        'efficiency_store': storage['efficiency_store'],
-                        'efficiency_dispatch': storage['efficiency_dispatch'],
-                        'max_hours': storage['energy_mwh'] / storage['p_mw'] if storage['p_mw'] > 0 else 0,
-                        'capex_per_mw': storage['capex_per_mw'],
-                        'lifetime_years': storage['lifetime_years']
-                    }, name=storage['id'])
-                    network.storage_units = pd.concat([network.storage_units, storage_data.to_frame().T])
-            
-            # Add branches (lines)
-            for idx, line in processed_data['grid_data']['lines'].iterrows():
-                branch_data = pd.Series({
-                    'index': line['id'],
-                    'name': line['name'],
-                    'from_bus': line['bus_from'],
-                    'to_bus': line['bus_to'],
-                    'x': 1.0 / line['susceptance'] if line['susceptance'] != 0 else 0,
-                    's_nom': line['capacity_mw']
-                }, name=line['id'])
-                network.branches = pd.concat([network.branches, branch_data.to_frame().T])
-            
-            # Set up time series data
-            # Create snapshots
-            network.create_snapshots(
-                start_time='2023-01-01', 
-                periods=season_data['hours'], 
-                freq='h'
-            )
-            
-            # Add load time series
-            for load_id in network.loads.index:
+    logger.info(f"Created IntegratedNetwork with:")
+    logger.info(f"  Years: {years}")
+    logger.info(f"  Seasons: {integrated_network.seasons}")
+    logger.info(f"  Discount rate: {system_discount_rate}")
+    logger.info(f"  Season weights: {SEASON_WEIGHTS}")
+
+    # For each season, build a sub-network
+    for season, season_data in processed_data['seasons_profiles'].items():
+        logger.info(f"Building network for season: {season}")
+        network = Network(name=season)
+
+        # Add buses from grid data
+        buses_df = processed_data['grid_data']['buses']
+        for idx, row in buses_df.iterrows():
+            network.buses.loc[row['id']] = {
+                'name': row['name'],
+                'v_nom': row.get('v_nom', 1.0)
+            }
+
+        # Add lines
+        lines_df = processed_data['grid_data']['lines']
+        for idx, row in lines_df.iterrows():
+            network.lines.loc[row['id']] = {
+                'name': row['name'],
+                'from_bus': row['bus_from'],
+                'to_bus': row['bus_to'],
+                'susceptance': row['susceptance'],
+                's_nom': row['capacity_mw']
+            }
+
+        # Add generators
+        gens_df = processed_data['grid_data']['generators']
+        for idx, row in gens_df.iterrows():
+            network.generators.loc[row['id']] = {
+                'name': row['name'],
+                'bus': row['bus'],
+                'p_nom': row['capacity_mw'],
+                'marginal_cost': row['cost_mwh'],
+                'type': row['type'],
+                'capex_per_mw': row['capex_per_mw'],
+                'lifetime_years': row['lifetime_years']
+            }
+
+        # Add loads
+        loads_df = processed_data['grid_data']['loads']
+        for idx, row in loads_df.iterrows():
+            network.loads.loc[row['id']] = {
+                'name': row['name'],
+                'bus': row['bus'],  # Using 'bus' to match the loads.csv column name
+                'p_mw': row['p_mw']
+            }
+
+        # Add storage - Note: The file is named 'storages.csv' in the data dir
+        storage_df = processed_data['grid_data'].get('storage_units', processed_data['grid_data'].get('storages', pd.DataFrame()))
+        for idx, row in storage_df.iterrows():
+            network.storage_units.loc[row['id']] = {
+                'name': row['name'],
+                'bus': row['bus'],
+                'p_nom': row['p_mw'],
+                'efficiency_store': row['efficiency_store'],
+                'efficiency_dispatch': row['efficiency_dispatch'],
+                'max_hours': (row['energy_mwh'] / row['p_mw']) if row['p_mw'] else 0,
+                'capex_per_mw': row['capex_per_mw'],
+                'lifetime_years': row['lifetime_years']
+            }
+
+        # Set up time snapshots for this season
+        T_hours = season_data['hours']  # e.g. 168 for one week
+        network.create_snapshots(start_time="2023-01-01", periods=T_hours, freq='h')
+        logger.info(f"Created {T_hours} snapshots for season {season}")
+
+        # If there's a generator or load time series, incorporate them
+        if 'loads' in season_data:
+            loads_ts = season_data['loads']  # multi-index: (time, load_id)
+            # Get unique load IDs from the timeseries
+            unique_load_ids = loads_ts.index.levels[1]
+            logger.info(f"Adding load timeseries for {len(unique_load_ids)} loads in season {season}")
+            for load_id in unique_load_ids:
+                # Grab the timeseries for this load
+                series_mask = loads_ts.xs(load_id, level='load_id')['p_pu']
+                # Convert p_pu * nominal
+                # We'll get the nominal from network.loads[load_id]['p_mw']
                 try:
-                    # Get profile for this load
-                    profile = season_data['loads'].xs(load_id, level='load_id')['p_pu'].values
-                    if len(profile) > 0:
-                        # Get load nominal power
-                        load_p_mw = network.loads.loc[load_id, 'p_set']
-                        # Set load profile
-                        network.add_load_time_series(load_id, profile * load_p_mw)
-                except (KeyError, ValueError) as e:
-                    # Use constant load
-                    load_p_mw = network.loads.loc[load_id, 'p_set']
-                    network.add_load_time_series(load_id, [load_p_mw] * len(network.snapshots))
-            
-            # Add to the integrated network
-            integrated_network.add_season_network(season, network)
-        
-        # Run the optimization - either integrated or seasonal approach
-        print("Running optimization...")
-        if args.integrated:
-            # Use the integrated optimization approach
-            print("Using integrated optimization approach...")
-            success = optimize_integrated_network(integrated_network, args.solver_options)
-        else:
-            # Use the seasonal optimization approach
-            print("Using seasonal optimization approach...")
-            success = optimize_seasonal_network(integrated_network, args.solver_options)
-        
-        if not success:
-            print("Optimization failed!")
-            return 1
-        
-        print("Optimization completed successfully.")
-        
-        # Save the optimized network if requested
-        if args.save_network:
-            network_file = os.path.join(args.output_dir, 'integrated_network.pkl')
-            integrated_network.save_to_pickle(network_file)
-            print(f"Optimized network saved to {network_file}")
-        
-    except Exception as e:
-        print(f"Error during optimization: {e}")
-        import traceback
-        traceback.print_exc()
-        return 1
-    
-    # Step 3: Generate implementation plan and calculate costs
-    print("\nStep 3: Generating implementation plan...")
+                    p_nominal = network.loads.loc[load_id, 'p_mw']
+                    p_series = series_mask.values * p_nominal
+                    network.add_load_time_series(load_id, p_series)
+                except KeyError:
+                    logger.warning(f"Failed to add load timeseries for load {load_id} - not found in network loads")
+                    pass  # if mismatch
+
+        # Similarly for generator profiles if you have them...
+        if 'generators' in season_data:
+            gens_ts = season_data['generators']
+            unique_gen_ids = gens_ts.index.levels[1]
+            logger.info(f"Adding generator profiles for {len(unique_gen_ids)} generators in season {season}")
+            for gen_id in unique_gen_ids:
+                try:
+                    # Grab the profile for this generator
+                    p_max_pu = gens_ts.xs(gen_id, level='gen_id')['p_max_pu']
+                    # Add it to the network
+                    network.add_generator_time_series(gen_id, p_max_pu.values)
+                    logger.info(f"Added profile for generator {gen_id} in season {season}")
+                except Exception as e:
+                    logger.warning(f"Failed to add generator profile for {gen_id}: {e}")
+
+        # Add the sub-network to the integrated structure
+        integrated_network.add_season_network(season, network)
+
+    #------------------------------------------------------------------
+    # 3) OPTIMIZATION
+    #    Solve the multi-year investment problem (new approach).
+    #------------------------------------------------------------------
+    logger.info("\nStep 3: Solving the multi-year model...")
     try:
-        # Generate implementation plan if we have installation data
-        if hasattr(integrated_network, 'asset_installation_history') or hasattr(integrated_network, 'generators_installed_by_year'):
-            # Maps generators_installed_by_year to asset_installation if needed
-            if not hasattr(integrated_network, 'asset_installation') and hasattr(integrated_network, 'generators_installed_by_year'):
-                integrated_network.asset_installation = {
-                    'generators': integrated_network.generators_installed_by_year,
-                    'storage': integrated_network.storage_installed_by_year if hasattr(integrated_network, 'storage_installed_by_year') else {}
-                }
+        # Log solver options
+        logger.info(f"Solver options: {args.solver_options}")
+        
+        result = solve_multi_year_investment(integrated_network, solver_options=args.solver_options)
+        if not result or result.get('status') not in ('optimal', 'optimal_inaccurate'):
+            logger.error(f"Optimization failed or not optimal. Status: {result.get('status', 'unknown')}")
+            return 1
+        else:
+            logger.info(f"Optimization completed successfully. Objective value: {result.get('value', 0):.2f}")
             
-            implementation_plan = generate_implementation_plan(integrated_network)
-            implementation_plan_file = os.path.join(args.output_dir, 'implementation_plan.json')
-            with open(implementation_plan_file, 'w') as f:
-                json.dump(implementation_plan, f, indent=2)
-            print(f"Implementation plan saved to {implementation_plan_file}")
-        else:
-            print("Warning: No installation data found. Skipping implementation plan generation.")
-        
-        # Calculate annual costs
-        if hasattr(integrated_network, 'seasons_total_cost'):
-            annual_costs = calculate_annual_cost(integrated_network.seasons_total_cost)
-            annual_costs_file = os.path.join(args.output_dir, 'annual_costs.json')
-            with open(annual_costs_file, 'w') as f:
-                json.dump(annual_costs, f, indent=2)
-            print(f"Annual costs saved to {annual_costs_file}")
-        elif hasattr(integrated_network, 'annual_cost'):
-            # If annual cost is already calculated, just save it
-            annual_costs_file = os.path.join(args.output_dir, 'annual_costs.json')
-            with open(annual_costs_file, 'w') as f:
-                json.dump(integrated_network.annual_cost, f, indent=2)
-            print(f"Annual costs saved to {annual_costs_file}")
-        else:
-            print("Warning: No season costs found in the integrated network. Skipping annual cost calculation.")
-        
+            # Print a summary of installation decisions
+            if 'variables' in result:
+                gen_installed = result['variables'].get('gen_installed', {})
+                storage_installed = result['variables'].get('storage_installed', {})
+                
+                # Check if any generators or storage are selected
+                gen_selected = [(g, y) for (g, y), val in gen_installed.items() if val > 0.5]
+                storage_selected = [(s, y) for (s, y), val in storage_installed.items() if val > 0.5]
+                
+                logger.info(f"Generators installed: {len(gen_selected)}")
+                logger.info(f"Storage units installed: {len(storage_selected)}")
+                
+                # In a realistic model, some things should be selected. If nothing is selected,
+                # the model might need tuning.
+                if not gen_selected and not storage_selected:
+                    logger.warning("Warning: No generators or storage selected for installation.")
+                    logger.warning("This may indicate that existing capacity is sufficient,")
+                    logger.warning("or it may be a sign that the model needs adjustments.")
+                    
+                    # Log all the generation and storage variables to debug
+                    logger.debug("Generator installation variables:")
+                    for (g, y), val in gen_installed.items():
+                        logger.debug(f"  Generator {g}, Year {y}: {val}")
+                    
+                    logger.debug("Storage installation variables:")
+                    for (s, y), val in storage_installed.items():
+                        logger.debug(f"  Storage {s}, Year {y}: {val}")
     except Exception as e:
-        print(f"Error during post-processing: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error during optimization: {e}")
+        logger.error(traceback.format_exc())
         return 1
-    
-    print("\nPower grid optimization completed successfully.")
+
+    #------------------------------------------------------------------
+    # 4) POST-PROCESSING
+    #    e.g. Create an implementation plan and store results
+    #------------------------------------------------------------------
+    logger.info("\nStep 4: Post-processing results...")
+
+    try:
+        # Generate the implementation plan and save it
+        implementation_plan = generate_implementation_plan(integrated_network, args.output_dir)
+        if implementation_plan:
+            logger.info("Implementation plan generated.")
+            
+            # Check contents of the plan
+            generators_planned = len(implementation_plan.get('generators', {}))
+            storage_planned = len(implementation_plan.get('storage', {}))
+            
+            if generators_planned > 0 or storage_planned > 0:
+                logger.info(f"Plan includes {generators_planned} generators and {storage_planned} storage units")
+            else:
+                logger.info("Plan includes no new installations")
+        else:
+            logger.warning("No implementation plan returned.")
+    except Exception as e:
+        logger.error(f"Error in post-processing: {e}")
+        logger.error(traceback.format_exc())
+        return 1
+
+    # Optionally save the network
+    if args.save_network:
+        integrated_network.save_to_pickle(os.path.join(args.output_dir, 'integrated_network.pkl'))
+        logger.info("Optimized integrated network saved to integrated_network.pkl")
+
+    logger.info("\nAll steps completed successfully.")
     return 0
 
-def optimize_seasonal_network(integrated_network, solver_options=None):
-    """
-    Run optimization for each season separately
-    
-    Args:
-        integrated_network: IntegratedNetwork object
-        solver_options: Dictionary with solver options
-    
-    Returns:
-        True if all optimizations succeeded, False otherwise
-    """
-    from optimization import optimize_seasonal_network
-    # Set default solver options if None
-    solver_options = solver_options or {}
-    
-    # Run optimization for each season
-    success = optimize_seasonal_network(integrated_network, solver_options)
-    
-    return success
-
 if __name__ == "__main__":
-    sys.exit(main()) 
+    sys.exit(main())
