@@ -1,1 +1,20 @@
-from .loader import load_grid_data, create_time_series, load_day_profiles 
+"""
+VT2 Optimization and Data Models package initialization.
+
+If you keep this minimal, simply ensure the directory is recognized as a Python package.
+You can re-export key modules if you like, e.g.:
+
+
+from .components import Bus, Generator, Load, Storage, Branch
+from .network import Network, IntegratedNetwork
+from .pre import process_data_for_optimization
+from .optimization import solve_multi_year_investment
+from .post import generate_implementation_plan
+"""
+__all__ = [
+    'components',
+    'network',
+    'pre',
+    'post',
+    'optimization'
+]
