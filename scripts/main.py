@@ -26,7 +26,7 @@ import traceback
 # Import our revised pre-processing, optimization, and post modules
 from pre import process_data_for_optimization, SEASON_WEIGHTS
 from optimization import solve_multi_year_investment  # Uses the new streamlined approach
-from post import generate_implementation_plan, NumpyEncoder
+from post import generate_implementation_plan, plot_seasonal_profiles, NumpyEncoder
 
 # Import your integrated network class, or a similar structure
 from network import IntegratedNetwork, Network  # Adjust if your code differs
@@ -153,6 +153,21 @@ def main():
     # We assume 'years' is now a list of relative years [1,2,3,...]
     years = planning_horizon.get('years', [1])  # fallback if missing
     system_discount_rate = planning_horizon.get('system_discount_rate', 0.0)
+    
+    # Extract load growth factors from analysis.json
+    load_growth = processed_data['grid_data'].get('analysis', {}).get('load_growth', {})
+    load_growth_factors = {}
+    
+    # Convert string keys to integers for years
+    for year_str, factor in load_growth.items():
+        if year_str != 'description':  # Skip the description field
+            try:
+                year = int(year_str)
+                load_growth_factors[year] = float(factor)
+            except (ValueError, TypeError):
+                logger.warning(f"Skipping invalid load growth entry: {year_str}={factor}")
+    
+    logger.info(f"Load growth factors: {load_growth_factors}")
 
     # Create an IntegratedNetwork instance
     integrated_network = IntegratedNetwork(
@@ -161,6 +176,9 @@ def main():
         discount_rate=system_discount_rate,
         season_weights=SEASON_WEIGHTS
     )
+    
+    # Add load growth factors to the integrated network
+    integrated_network.load_growth = load_growth_factors
     
     logger.info(f"Created IntegratedNetwork with:")
     logger.info(f"  Years: {years}")
@@ -252,20 +270,46 @@ def main():
                     logger.warning(f"Failed to add load timeseries for load {load_id} - not found in network loads")
                     pass  # if mismatch
 
-        # Similarly for generator profiles if you have them...
+        # Process generator profiles for wind and solar
         if 'generators' in season_data:
             gens_ts = season_data['generators']
-            unique_gen_ids = gens_ts.index.levels[1]
-            logger.info(f"Adding generator profiles for {len(unique_gen_ids)} generators in season {season}")
-            for gen_id in unique_gen_ids:
-                try:
-                    # Grab the profile for this generator
-                    p_max_pu = gens_ts.xs(gen_id, level='gen_id')['p_max_pu']
-                    # Add it to the network
-                    network.add_generator_time_series(gen_id, p_max_pu.values)
-                    logger.info(f"Added profile for generator {gen_id} in season {season}")
-                except Exception as e:
-                    logger.warning(f"Failed to add generator profile for {gen_id}: {e}")
+            if not gens_ts.empty:
+                # Get unique generator IDs from the timeseries
+                unique_gen_ids = gens_ts.index.levels[1]
+                
+                # Count how many generators of each type we're adding profiles for
+                gen_types = {}
+                for gen_id in unique_gen_ids:
+                    if gen_id in network.generators.index:
+                        gen_type = network.generators.at[gen_id, 'type']
+                        gen_types[gen_type] = gen_types.get(gen_type, 0) + 1
+                
+                logger.info(f"Adding generator profiles for {len(unique_gen_ids)} generators in season {season}")
+                logger.info(f"Generator types with profiles: {gen_types}")
+                
+                for gen_id in unique_gen_ids:
+                    try:
+                        # Check if this generator exists in the network
+                        if gen_id not in network.generators.index:
+                            logger.warning(f"Generator {gen_id} not found in network generators, skipping")
+                            continue
+                            
+                        # Get the generator type
+                        gen_type = network.generators.at[gen_id, 'type']
+                        
+                        # Only add profiles for wind and solar generators
+                        if gen_type in ['wind', 'solar']:
+                            # Grab the availability profile (already in MW)
+                            p_max_values = gens_ts.xs(gen_id, level='gen_id')['p_max_pu'].values
+                            
+                            # Add the profile to the network
+                            network.add_generator_time_series(gen_id, p_max_values)
+                            logger.info(f"Added profile for {gen_type} generator {gen_id} in season {season}")
+                        else:
+                            logger.info(f"Skipping profile for thermal generator {gen_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to add generator profile for {gen_id}: {e}")
+                        logger.warning(traceback.format_exc())
 
         # Add the sub-network to the integrated structure
         integrated_network.add_season_network(season, network)
@@ -340,6 +384,17 @@ def main():
                 logger.info("Plan includes no new installations")
         else:
             logger.warning("No implementation plan returned.")
+            
+        # Generate and save profile plots
+        logger.info("Generating seasonal resource profiles...")
+        plot_files = plot_seasonal_profiles(integrated_network, args.output_dir)
+        if plot_files:
+            logger.info("Created profile plots:")
+            for season, plot_file in plot_files.items():
+                logger.info(f"  - {season}: {os.path.basename(plot_file)}")
+        else:
+            logger.warning("No profile plots were generated.")
+            
     except Exception as e:
         logger.error(f"Error in post-processing: {e}")
         logger.error(traceback.format_exc())

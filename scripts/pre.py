@@ -128,6 +128,100 @@ def extract_week_data(raw_df, week_start, week_hours=168):
     mask = (raw_df['time'] >= week_start) & (raw_df['time'] < week_start + timedelta(hours=week_hours))
     return raw_df[mask].copy()
 
+def prepare_generator_profiles(season_data, generators_df):
+    """
+    Prepare generator profiles for generators based on their type.
+    This function creates a DataFrame with generator availability profiles.
+    
+    Args:
+        season_data: Dictionary with wind_df and solar_df from the season
+        generators_df: DataFrame with generator information (must have 'type' column)
+        
+    Returns:
+        DataFrame with multi-index (time, gen_id) containing availability profiles
+    """
+    # Start with an empty DataFrame
+    gen_profiles = []
+    
+    # If we have wind data and there are wind generators
+    if 'wind_df' in season_data and not season_data['wind_df'].empty:
+        wind_gens = generators_df[generators_df['type'] == 'wind']
+        for _, gen in wind_gens.iterrows():
+            gen_id = gen['id']
+            # For each time step in the wind data
+            for i, row in season_data['wind_df'].iterrows():
+                time = row['time']
+                value = row['value']  # Assuming this is in MW
+                gen_profiles.append({
+                    'time': time,
+                    'gen_id': gen_id,
+                    'p_max_pu': value  # Pass the raw value
+                })
+    
+    # If we have solar data and there are solar generators
+    if 'solar_df' in season_data and not season_data['solar_df'].empty:
+        solar_gens = generators_df[generators_df['type'] == 'solar']
+        for _, gen in solar_gens.iterrows():
+            gen_id = gen['id']
+            # For each time step in the solar data
+            for i, row in season_data['solar_df'].iterrows():
+                time = row['time']
+                value = row['value']  # Assuming this is in MW
+                gen_profiles.append({
+                    'time': time,
+                    'gen_id': gen_id,
+                    'p_max_pu': value  # Pass the raw value
+                })
+    
+    # Convert to DataFrame and set index
+    if gen_profiles:
+        profiles_df = pd.DataFrame(gen_profiles)
+        profiles_df.set_index(['time', 'gen_id'], inplace=True)
+        return profiles_df
+    else:
+        # Return an empty DataFrame with the correct columns
+        return pd.DataFrame(columns=['p_max_pu']).set_index(['time', 'gen_id'])
+
+def prepare_load_profiles(season_data, loads_df):
+    """
+    Prepare load profiles from load data. This function creates a DataFrame 
+    with time-varying load profiles.
+    
+    Args:
+        season_data: Dictionary with load_df from the season
+        loads_df: DataFrame with load information
+        
+    Returns:
+        DataFrame with multi-index (time, load_id) containing load profiles
+    """
+    # Start with an empty list
+    load_profiles = []
+    
+    # If we have load data
+    if 'load_df' in season_data and not season_data['load_df'].empty:
+        for _, load in loads_df.iterrows():
+            load_id = load['id']
+            # For each time step in the load data
+            for i, row in season_data['load_df'].iterrows():
+                time = row['time']
+                value = row['value']  # Assuming this is in MW or a scaling factor
+                
+                # Add entry for this load at this time
+                load_profiles.append({
+                    'time': time,
+                    'load_id': load_id,
+                    'p_pu': value  # Store the load value
+                })
+    
+    # Convert to DataFrame and set index
+    if load_profiles:
+        profiles_df = pd.DataFrame(load_profiles)
+        profiles_df.set_index(['time', 'load_id'], inplace=True)
+        return profiles_df
+    else:
+        # Return an empty DataFrame with the correct columns
+        return pd.DataFrame(columns=['p_pu']).set_index(['time', 'load_id'])
+
 def process_data_for_optimization(grid_dir, processed_dir, planning_years=None):
     """
     Main entry point for pre-processing. Loads grid data & time series,
@@ -173,14 +267,12 @@ def process_data_for_optimization(grid_dir, processed_dir, planning_years=None):
         block_hours = 168  # standard 1 week
         sub_data = {}
 
-        # Example: build a loads or generators time series factor
-        # For now, let's just store the raw load slices
+        # Extract load data for this season
         if 'load' in raw_data:
             extracted_load = extract_week_data(raw_data['load'], start_dt, block_hours)
-            # We might want to normalize or store directly
-            # Let's keep it in a DataFrame called 'load_df'
             sub_data['load_df'] = extracted_load
 
+        # Extract wind and solar data for this season
         if 'wind' in raw_data:
             wind_slice = extract_week_data(raw_data['wind'], start_dt, block_hours)
             sub_data['wind_df'] = wind_slice
@@ -192,8 +284,21 @@ def process_data_for_optimization(grid_dir, processed_dir, planning_years=None):
         # We'll store how many hours we have
         # If it doesn't have 168, we can clamp or fill
         actual_hours = block_hours
-        # sub_data['hours'] = len(extracted_load) if 'load_df' in sub_data else block_hours
         sub_data['hours'] = block_hours
+
+        # Create load profiles
+        if 'loads' in grid_data:
+            loads_df = grid_data['loads']
+            load_profiles = prepare_load_profiles(sub_data, loads_df)
+            if not load_profiles.empty:
+                sub_data['loads'] = load_profiles
+
+        # Create generator profiles based on type (wind, solar)
+        if 'generators' in grid_data:
+            generators_df = grid_data['generators']
+            generator_profiles = prepare_generator_profiles(sub_data, generators_df)
+            if not generator_profiles.empty:
+                sub_data['generators'] = generator_profiles
 
         seasons_profiles[season] = sub_data
 

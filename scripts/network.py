@@ -132,7 +132,7 @@ class Network:
         self.T = 0  # number of time steps in this network
         # optional placeholders for time-series data
         self.loads_t = {'p': {}}
-        self.generators_t = {'p': {}}
+        self.generators_t = {'p': {}, 'p_max_pu': {}}
         self.storage_units_t = {'p_charge': {}, 'p_discharge': {}, 'soc': {}}
 
     def create_snapshots(self, start_time, periods, freq='h'):
@@ -153,6 +153,25 @@ class Network:
             return False
 
         self.loads_t['p'][load_id] = pd.Series(p_values, index=self.snapshots)
+        return True
+
+    def add_generator_time_series(self, gen_id, p_max_values):
+        """
+        Store time-dependent maximum output profile for a generator.
+        
+        Args:
+            gen_id: Generator ID to add the time series for
+            p_max_values: Array of maximum output values (in MW or per-unit)
+            
+        Returns:
+            Boolean indicating success
+        """
+        if len(p_max_values) != self.T:
+            print(f"[network.py] Mismatch in length of generator timeseries (got {len(p_max_values)}, expected {self.T})")
+            return False
+            
+        # Store the time series in the generators_t dictionary
+        self.generators_t['p_max_pu'][gen_id] = pd.Series(p_max_values, index=self.snapshots)
         return True
 
     def save_to_pickle(self, filepath):
