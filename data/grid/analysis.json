@@ -1,113 +1,26 @@
 {
   "planning_horizon": {
     "years": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-    "system_discount_rate": 0.05,
-    "description": "Multi-year planning horizon with 15 relative years"
+    "system_discount_rate": 0.07,
+    "description": "Multi-year planning horizon"
   },
   "load_growth": {
     "1": 1.0,
-    "2": 1.05,
-    "3": 1.10,
-    "4": 1.15,
-    "5": 1.20,
-    "6": 1.25,
-    "7": 1.30,
-    "8": 1.35,
-    "9": 1.40,
-    "10": 1.45,
-    "11": 1.50,
-    "12": 1.55,
-    "13": 1.60,
-    "14": 1.65,
-    "15": 1.70,
-    "description": "Load growth factors relative to base year (Year 1)"
-  },
-  "renewable_availability_factors": {
-    "wind": {
-      "1": 1.0,
-      "2": 0.99,
-      "3": 0.99,
-      "4": 0.99,
-      "5": 0.99,
-      "6": 0.99,
-      "7": 0.99,
-      "8": 0.99,
-      "9": 0.99,
-      "10": 0.99,
-      "description": "Wind availability improvement factors due to better technology"
-    },
-    "solar": {
-      "1": 1.0,
-      "2": 0.99,
-      "3": 0.99,
-      "4": 0.98,
-      "5": 0.98,
-      "6": 0.97,
-      "7": 0.97,
-      "8": 0.96,
-      "9": 0.96,
-      "10": 0.95,
-      "description": "Solar availability improvement factors due to better technology"
-    }
-  },
-  "asset_lifetime_extensions": {
-    "description": "Future assets may have longer lifetimes due to technological improvements",
-    "installation_year_thresholds": {
-      "4": {
-        "wind": 5,
-        "solar": 6,
-        "storage": 3
-      },
-      "7": {
-        "wind": 28,
-        "solar": 38,
-        "storage": 20
-      },
-      "2": {
-        "wind": 22,
-        "solar": 32,
-        "storage": 16
-      }
-    }
-  },
-  "cost_learning_curves": {
-    "description": "Capital cost reduction factors due to technology learning",
-    "wind": {
-      "1": 1.0,
-      "2": 0.95,
-      "3": 0.90,
-      "4": 0.85,
-      "5": 0.80,
-      "6": 0.75,
-      "7": 0.72,
-      "8": 0.70,
-      "9": 0.68,
-      "10": 0.65
-    },
-    "solar": {
-      "1": 1.0,
-      "2": 0.92,
-      "3": 0.85,
-      "4": 0.80,
-      "5": 0.75,
-      "6": 0.70,
-      "7": 0.67,
-      "8": 0.65,
-      "9": 0.63,
-      "10": 0.60
-    },
-    "storage": {
-      "1": 1.0,
-      "2": 0.90,
-      "3": 0.80,
-      "4": 0.75,
-      "5": 0.70,
-      "6": 0.65,
-      "7": 0.60,
-      "8": 0.57,
-      "9": 0.55,
-      "10": 0.52
-    }
+    "2": 1.03,
+    "3": 1.0609,
+    "4": 1.0927,
+    "5": 1.1255,
+    "6": 1.1593,
+    "7": 1.1941,
+    "8": 1.2299,
+    "9": 1.2667,
+    "10": 1.3046,
+    "11": 1.3436,
+    "12": 1.3838,
+    "13": 1.4252,
+    "14": 1.4679,
+    "15": 1.5119,
+    "description": "Load growth factors with 3% annual growth rate"
   }
 }
  

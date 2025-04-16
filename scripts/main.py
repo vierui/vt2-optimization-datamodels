@@ -26,7 +26,9 @@ import traceback
 # Import our revised pre-processing, optimization, and post modules
 from pre import process_data_for_optimization, SEASON_WEIGHTS
 from optimization import solve_multi_year_investment  # Uses the new streamlined approach
-from post import generate_implementation_plan, plot_seasonal_profiles, NumpyEncoder
+from post import generate_implementation_plan, plot_seasonal_profiles, plot_annual_load_growth, NumpyEncoder, plot_generation_mix, plot_implementation_timeline
+# Import the new production costs analysis module
+from analysis.production_costs import analyze_production_costs
 
 # Import your integrated network class, or a similar structure
 from network import IntegratedNetwork, Network  # Adjust if your code differs
@@ -81,6 +83,10 @@ def main():
     # Optional solver options
     parser.add_argument('--solver-options', type=json.loads, default={},
                         help='JSON string with solver options (e.g. \'{"timelimit":3600}\')')
+                        
+    # Add flag for running cost analysis
+    parser.add_argument('--analyze-costs', action='store_true',
+                        help='Run detailed production and cost analysis after optimization')
 
     args = parser.parse_args()
 
@@ -119,6 +125,10 @@ def main():
         logger.info(f"  Total generation capacity: {gens_df['capacity_mw'].sum()} MW")
         logger.info(f"  Loads: {len(loads_df)}")
         logger.info(f"  Total load: {loads_df['p_mw'].sum()} MW")
+        
+        logger.info(f"Generators DataFrame columns: {gens_df.columns.tolist()}")
+        logger.info(f"Loads DataFrame columns: {loads_df.columns.tolist()}")
+        logger.info(f"Storage DataFrame columns: {processed_data['grid_data'].get('storage_units', processed_data['grid_data'].get('storages', pd.DataFrame())).columns.tolist() if not processed_data['grid_data'].get('storage_units', processed_data['grid_data'].get('storages', pd.DataFrame())).empty else 'No storage units'}")
         
         # Print loads per bus
         loads_by_bus = loads_df.groupby('bus')['p_mw'].sum()
@@ -219,8 +229,9 @@ def main():
                 'p_nom': row['capacity_mw'],
                 'marginal_cost': row['cost_mwh'],
                 'type': row['type'],
-                'capex_per_mw': row['capex_per_mw'],
-                'lifetime_years': row['lifetime_years']
+                'capex': row['capex'],
+                'lifetime_years': row['lifetime_years'],
+                'discount_rate': row['discount_rate']
             }
 
         # Add loads
@@ -242,8 +253,9 @@ def main():
                 'efficiency_store': row['efficiency_store'],
                 'efficiency_dispatch': row['efficiency_dispatch'],
                 'max_hours': (row['energy_mwh'] / row['p_mw']) if row['p_mw'] else 0,
-                'capex_per_mw': row['capex_per_mw'],
-                'lifetime_years': row['lifetime_years']
+                'capex': row['capex'],
+                'lifetime_years': row['lifetime_years'],
+                'discount_rate': row['discount_rate']
             }
 
         # Set up time snapshots for this season
@@ -261,10 +273,11 @@ def main():
                 # Grab the timeseries for this load
                 series_mask = loads_ts.xs(load_id, level='load_id')['p_pu']
                 # Convert p_pu * nominal
-                # We'll get the nominal from network.loads[load_id]['p_mw']
                 try:
                     p_nominal = network.loads.loc[load_id, 'p_mw']
+                    # Apply the time-varying factor to the nominal load
                     p_series = series_mask.values * p_nominal
+                    logger.info(f"Load {load_id}: nominal={p_nominal} MW, min factor={series_mask.min():.2f}, max factor={series_mask.max():.2f}")
                     network.add_load_time_series(load_id, p_series)
                 except KeyError:
                     logger.warning(f"Failed to add load timeseries for load {load_id} - not found in network loads")
@@ -342,61 +355,71 @@ def main():
                 logger.info(f"Generators installed: {len(gen_selected)}")
                 logger.info(f"Storage units installed: {len(storage_selected)}")
                 
+                # Print out detailed installation decisions
+                logger.info("Detailed generator installation decisions:")
+                for (g, y), val in sorted(gen_installed.items()):
+                    if val > 0.5:
+                        logger.info(f"  Generator {g} installed in year {y}: {val}")
+                
+                logger.info("Detailed storage installation decisions:")
+                for (s, y), val in sorted(storage_installed.items()):
+                    if val > 0.5:
+                        logger.info(f"  Storage {s} installed in year {y}: {val}")
+                
                 # In a realistic model, some things should be selected. If nothing is selected,
                 # the model might need tuning.
                 if not gen_selected and not storage_selected:
                     logger.warning("Warning: No generators or storage selected for installation.")
-                    logger.warning("This may indicate that existing capacity is sufficient,")
-                    logger.warning("or it may be a sign that the model needs adjustments.")
-                    
-                    # Log all the generation and storage variables to debug
-                    logger.debug("Generator installation variables:")
-                    for (g, y), val in gen_installed.items():
-                        logger.debug(f"  Generator {g}, Year {y}: {val}")
-                    
-                    logger.debug("Storage installation variables:")
-                    for (s, y), val in storage_installed.items():
-                        logger.debug(f"  Storage {s}, Year {y}: {val}")
     except Exception as e:
         logger.error(f"Error during optimization: {e}")
         logger.error(traceback.format_exc())
         return 1
 
     #------------------------------------------------------------------
-    # 4) POST-PROCESSING
-    #    e.g. Create an implementation plan and store results
+    # 4) POST-PROCESSING OF RESULTS
     #------------------------------------------------------------------
     logger.info("\nStep 4: Post-processing results...")
 
     try:
-        # Generate the implementation plan and save it
-        implementation_plan = generate_implementation_plan(integrated_network, args.output_dir)
-        if implementation_plan:
-            logger.info("Implementation plan generated.")
-            
-            # Check contents of the plan
-            generators_planned = len(implementation_plan.get('generators', {}))
-            storage_planned = len(implementation_plan.get('storage', {}))
-            
-            if generators_planned > 0 or storage_planned > 0:
-                logger.info(f"Plan includes {generators_planned} generators and {storage_planned} storage units")
-            else:
-                logger.info("Plan includes no new installations")
-        else:
-            logger.warning("No implementation plan returned.")
-            
-        # Generate and save profile plots
+        # Generate implementation plan (even if optimization failed)
+        plan = generate_implementation_plan(integrated_network, args.output_dir)
+        logger.info("Implementation plan generated.")
+        gen_count = len(plan.get('generators', {}))
+        stor_count = len(plan.get('storage', {}))
+        logger.info(f"Plan includes {gen_count} generators and {stor_count} storage units")
+
+        # Create visualizations
+        timeline_plot = plot_implementation_timeline(integrated_network, args.output_dir)
+        logger.info(f"Implementation timeline visualization created: {os.path.basename(timeline_plot) if timeline_plot else 'None'}")
+
+        # Create seasonal profile visualizations
         logger.info("Generating seasonal resource profiles...")
-        plot_files = plot_seasonal_profiles(integrated_network, args.output_dir)
-        if plot_files:
-            logger.info("Created profile plots:")
-            for season, plot_file in plot_files.items():
+        profile_plots = plot_seasonal_profiles(integrated_network, args.output_dir)
+        logger.info("Created profile plots:")
+        for season, plot_file in profile_plots.items():
+            if plot_file:
                 logger.info(f"  - {season}: {os.path.basename(plot_file)}")
-        else:
-            logger.warning("No profile plots were generated.")
-            
+                
+        # Plot load growth
+        load_growth_plot = plot_annual_load_growth(integrated_network, args.output_dir)
+        logger.info(f"Annual load growth visualization created: {os.path.basename(load_growth_plot) if load_growth_plot else 'None'}")
+        
+        # Create generation mix plots
+        logger.info("Generating generation mix plots...")
+        mix_plots = plot_generation_mix(integrated_network, args.output_dir)
+        logger.info("Created generation mix plots:")
+        for plot_type, plot_file in mix_plots.items():
+            if plot_file:
+                logger.info(f"  - {plot_type}: {os.path.basename(plot_file)}")
+        
+        # Run production and cost analysis if requested
+        if args.analyze_costs:
+            logger.info("Running detailed production and cost analysis...")
+            cost_data = analyze_production_costs(integrated_network, args.output_dir)
+            logger.info("Production and cost analysis completed.")
+
     except Exception as e:
-        logger.error(f"Error in post-processing: {e}")
+        logger.error(f"Error during post-processing: {e}")
         logger.error(traceback.format_exc())
         return 1
 

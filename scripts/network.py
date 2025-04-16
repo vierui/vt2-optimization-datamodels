@@ -121,10 +121,10 @@ class Network:
         self.buses = pd.DataFrame(columns=['name','v_nom'])
         self.lines = pd.DataFrame(columns=['name','from_bus','to_bus','susceptance','s_nom'])
         self.generators = pd.DataFrame(columns=['name','bus','p_nom','marginal_cost',
-                                                'type','capex_per_mw','lifetime_years'])
+                                                'type','capex','lifetime_years','discount_rate'])
         self.storage_units = pd.DataFrame(columns=['name','bus','p_nom',
                                                    'efficiency_store','efficiency_dispatch','max_hours',
-                                                   'capex_per_mw','lifetime_years'])
+                                                   'capex','lifetime_years','discount_rate'])
         self.loads = pd.DataFrame(columns=['name','bus','p_mw'])
 
         # Timeseries
@@ -152,7 +152,16 @@ class Network:
             print(f"[network.py] Mismatch in length of load timeseries (got {len(p_values)}, expected {self.T})")
             return False
 
+        # Store the time series
         self.loads_t['p'][load_id] = pd.Series(p_values, index=self.snapshots)
+        
+        # Log some statistics about the load profile
+        print(f"[network.py] Load {load_id} time series added:")
+        print(f"  - Length: {len(p_values)} hours")
+        print(f"  - Min load: {min(p_values):.2f} MW")
+        print(f"  - Max load: {max(p_values):.2f} MW")
+        print(f"  - Average load: {sum(p_values)/len(p_values):.2f} MW")
+        
         return True
 
     def add_generator_time_series(self, gen_id, p_max_values):
@@ -172,6 +181,14 @@ class Network:
             
         # Store the time series in the generators_t dictionary
         self.generators_t['p_max_pu'][gen_id] = pd.Series(p_max_values, index=self.snapshots)
+        
+        # Log some statistics about the generator profile
+        print(f"[network.py] Generator {gen_id} time series added:")
+        print(f"  - Length: {len(p_max_values)} hours")
+        print(f"  - Min availability: {min(p_max_values):.2f}")
+        print(f"  - Max availability: {max(p_max_values):.2f}")
+        print(f"  - Average availability: {sum(p_max_values)/len(p_max_values):.2f}")
+        
         return True
 
     def save_to_pickle(self, filepath):

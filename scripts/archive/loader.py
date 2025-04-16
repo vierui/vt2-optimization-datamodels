@@ -5,68 +5,48 @@ import os
 import pandas as pd
 import numpy as np
 import datetime
+import json
 
-def load_csv(file_path):
-    """Load a CSV file into a pandas DataFrame"""
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"File not found: {file_path}")
+def load_csv(file_path, parse_dates=None, index_col=None, verbose=False):
+    """
+    Load a CSV file into a pandas DataFrame
     
+    Args:
+        file_path: Path to the CSV file
+        parse_dates: List of columns to parse as dates
+        index_col: Column(s) to use as index
+        verbose: Whether to print loading messages
+        
+    Returns:
+        pandas DataFrame
+    """
     try:
-        print(f"Loading data from {file_path}")
+        # Check if file exists
+        if not os.path.exists(file_path):
+            if verbose:
+                print(f"File not found: {file_path}")
+            return None
         
-        # Read the CSV file directly with proper data types
-        df = pd.read_csv(file_path, index_col='id')
-        
-        # Convert important numeric columns explicitly
-        numeric_columns = ['lifetime_years', 'capex_per_mw', 'capacity_mw', 'p_mw', 
-                          'energy_mwh', 'discount_rate', 'efficiency_store', 
-                          'efficiency_dispatch', 'susceptance']
-        
-        for col in numeric_columns:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                # Fill any NaN values with appropriate defaults if needed
-                if col == 'lifetime_years' and df[col].isna().any():
-                    print(f"WARNING: NaN values found in {col} column in {os.path.basename(file_path)}")
-        
-        # Debug info
-        if 'lifetime_years' in df.columns:
-            print(f"Loaded {os.path.basename(file_path)} with lifetime_years: {df['lifetime_years'].tolist()}")
-        
-        print(f"Successfully loaded {file_path} with {len(df)} rows and columns: {df.columns.tolist()}")
-        return df
-        
+        return pd.read_csv(file_path, parse_dates=parse_dates, index_col=index_col)
     except Exception as e:
-        print(f"Error loading {file_path}: {e}")
-        # Retry with more forgiving options if the first attempt fails
+        if verbose:
+            print(f"Error loading {file_path}: {e}")
         try:
-            print(f"Retrying with more forgiving options...")
-            df = pd.read_csv(file_path, index_col='id', skipinitialspace=True, 
-                            on_bad_lines='warn', encoding='utf-8', engine='python')
-            
-            # Force specific columns to numeric
-            for col in ['lifetime_years', 'capex_per_mw', 'capacity_mw', 'p_mw', 
-                       'energy_mwh', 'discount_rate', 'efficiency_store', 
-                       'efficiency_dispatch', 'susceptance']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-            # Check for NaN values in critical columns
-            if 'lifetime_years' in df.columns and df['lifetime_years'].isna().any():
-                print(f"WARNING: NaN values found in lifetime_years column in {os.path.basename(file_path)}")
-            
-            print(f"Successfully loaded {file_path} with {len(df)} rows")
-            return df
+            # Try alternative approach for possibly corrupted CSV files
+            return pd.read_csv(file_path, parse_dates=parse_dates, index_col=index_col, 
+                              error_bad_lines=False, warn_bad_lines=True)
         except Exception as e2:
-            print(f"Fatal error loading {file_path}: {e2}")
-            raise
+            if verbose:
+                print(f"Fatal error loading {file_path}: {e2}")
+            return None
 
-def load_grid_data(data_dir="data/grid"):
+def load_grid_data(data_dir="data/grid", verbose=False):
     """
     Load all grid component data from CSV files
     
     Args:
         data_dir: Directory containing grid component CSV files
+        verbose: Whether to print loading messages
         
     Returns:
         Dictionary with DataFrames for each component type
@@ -80,25 +60,25 @@ def load_grid_data(data_dir="data/grid"):
     print(f"Loading data from: {data_path}")
     
     # Load each component type
-    buses = load_csv(os.path.join(data_path, "buses.csv"))
-    generators = load_csv(os.path.join(data_path, "generators.csv"))
-    loads = load_csv(os.path.join(data_path, "loads.csv"))
+    buses = load_csv(os.path.join(data_path, "buses.csv"), verbose=verbose)
+    generators = load_csv(os.path.join(data_path, "generators.csv"), verbose=verbose)
+    loads = load_csv(os.path.join(data_path, "loads.csv"), verbose=verbose)
     
     # Handle possible naming difference for storage_units
     try:
         storage_path = os.path.join(data_path, "storage_units.csv")
         if os.path.exists(storage_path):
-            storage_units = load_csv(storage_path)
+            storage_units = load_csv(storage_path, verbose=verbose)
         else:
             storage_path = os.path.join(data_path, "storages.csv")
-            storage_units = load_csv(storage_path)
+            storage_units = load_csv(storage_path, verbose=verbose)
     except FileNotFoundError:
         print("No storage file found, using empty DataFrame")
         storage_units = pd.DataFrame(columns=['name', 'bus_id', 'p_mw', 'energy_mwh', 
                                             'efficiency_store', 'efficiency_dispatch', 
                                             'capex_per_mw', 'lifetime_years', 'discount_rate'])
     
-    lines = load_csv(os.path.join(data_path, "lines.csv"))
+    lines = load_csv(os.path.join(data_path, "lines.csv"), verbose=verbose)
     
     # Verify critical data in generators
     if 'lifetime_years' in generators.columns:
@@ -171,9 +151,9 @@ def load_day_profiles(day=10, data_dir="data/processed"):
     print(f"Extracting data for day {day} of the year: {start_str}")
     
     # Load time series data
-    load_df = pd.read_csv(os.path.join(data_path, "load-2023.csv"))
-    wind_df = pd.read_csv(os.path.join(data_path, "wind-2023.csv"))
-    solar_df = pd.read_csv(os.path.join(data_path, "solar-2023.csv"))
+    load_df = pd.read_csv(os.path.join(data_path, "load-2023.csv"), verbose=True)
+    wind_df = pd.read_csv(os.path.join(data_path, "wind-2023.csv"), verbose=True)
+    solar_df = pd.read_csv(os.path.join(data_path, "solar-2023.csv"), verbose=True)
     
     # Convert time column to datetime
     load_df['time'] = pd.to_datetime(load_df['time'])
@@ -195,4 +175,39 @@ def load_day_profiles(day=10, data_dir="data/processed"):
         'wind': wind_day['value'].values,
         'solar': solar_day['value'].values,
         'T': len(load_day)
-    } 
+    }
+
+def load_time_series_data(data_path, verbose=False):
+    """
+    Load time series data from a directory
+    
+    Args:
+        data_path: Path to the directory containing time series CSV files
+        verbose: Whether to print loading messages
+        
+    Returns:
+        Dictionary with time series DataFrames
+    """
+    time_series = {}
+    
+    # Load generator profiles
+    gen_profiles_path = os.path.join(data_path, 'generator_profiles.csv')
+    if os.path.exists(gen_profiles_path):
+        time_series['generator_profiles'] = load_csv(
+            gen_profiles_path, 
+            parse_dates=['timestamp'], 
+            index_col=['timestamp', 'generator_id'],
+            verbose=verbose
+        )
+    
+    # Load load profiles
+    load_profiles_path = os.path.join(data_path, 'load_profiles.csv')
+    if os.path.exists(load_profiles_path):
+        time_series['load_profiles'] = load_csv(
+            load_profiles_path, 
+            parse_dates=['timestamp'], 
+            index_col=['timestamp', 'load_id'],
+            verbose=verbose
+        )
+    
+    return time_series 

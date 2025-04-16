@@ -19,6 +19,7 @@ openai = "^1.58.1"
 seaborn = "^0.13.2"
 numpy-financial = "^1.0.0"
 statsmodels = "^0.14.4"
+cvxpy = "^1.4.2"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"

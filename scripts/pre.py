@@ -46,7 +46,9 @@ def load_csv_if_exists(path, **kwargs):
     if not os.path.exists(path):
         print(f"[pre.py] Warning: File not found: {path}")
         return pd.DataFrame()
-    return pd.read_csv(path, **kwargs)
+    df = pd.read_csv(path, **kwargs)
+    print(f"[pre.py] Loaded {path} with columns: {df.columns.tolist()}")
+    return df
 
 def load_grid_data(grid_dir):
     """
@@ -204,13 +206,13 @@ def prepare_load_profiles(season_data, loads_df):
             # For each time step in the load data
             for i, row in season_data['load_df'].iterrows():
                 time = row['time']
-                value = row['value']  # Assuming this is in MW or a scaling factor
+                value = row['value']  # This is the time-varying factor
                 
                 # Add entry for this load at this time
                 load_profiles.append({
                     'time': time,
                     'load_id': load_id,
-                    'p_pu': value  # Store the load value
+                    'p_pu': value  # Store the time-varying factor
                 })
     
     # Convert to DataFrame and set index
