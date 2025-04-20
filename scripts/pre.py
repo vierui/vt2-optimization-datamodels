@@ -22,12 +22,7 @@ SEASON_WEEKS = {
     'spri_autu': 43   # a sample for "spring/autumn"
 }
 
-# How many weeks each season "represents"
-SEASON_WEIGHTS = {
-    'winter': 13,
-    'summer': 13,
-    'spri_autu': 26
-}
+# How many weeks each season "represents" - Now moved to analysis.json
 
 def get_week_start(year, week_number):
     """
@@ -92,6 +87,9 @@ def load_grid_data(grid_dir):
         with open(analysis_file, 'r') as f:
             analysis = json.load(f)
     grid_data['analysis'] = analysis
+    
+    # pull season weights here so the caller doesn't have to reopen the file
+    grid_data['season_weights'] = analysis.get("representative_weeks", {})
 
     return grid_data
 
@@ -181,8 +179,10 @@ def prepare_generator_profiles(season_data, generators_df):
         profiles_df.set_index(['time', 'gen_id'], inplace=True)
         return profiles_df
     else:
-        # Return an empty DataFrame with the correct columns
-        return pd.DataFrame(columns=['p_max_pu']).set_index(['time', 'gen_id'])
+        # Create an empty DataFrame with the correct structure
+        # This avoids the KeyError when setting index on empty DataFrame
+        df = pd.DataFrame({'time': [], 'gen_id': [], 'p_max_pu': []})
+        return df.set_index(['time', 'gen_id'])
 
 def prepare_load_profiles(season_data, loads_df):
     """
@@ -221,8 +221,10 @@ def prepare_load_profiles(season_data, loads_df):
         profiles_df.set_index(['time', 'load_id'], inplace=True)
         return profiles_df
     else:
-        # Return an empty DataFrame with the correct columns
-        return pd.DataFrame(columns=['p_pu']).set_index(['time', 'load_id'])
+        # Create an empty DataFrame with the correct structure
+        # This avoids the KeyError when setting index on empty DataFrame
+        df = pd.DataFrame({'time': [], 'load_id': [], 'p_pu': []})
+        return df.set_index(['time', 'load_id'])
 
 def process_data_for_optimization(grid_dir, processed_dir, planning_years=None):
     """
@@ -304,7 +306,14 @@ def process_data_for_optimization(grid_dir, processed_dir, planning_years=None):
 
         seasons_profiles[season] = sub_data
 
+    # ---- season‑weight sanity check ----
+    weights = grid_data.get('season_weights', {})
+    if not weights or abs(sum(weights.values())-52) > 1e-6:
+        print("[pre.py] Warning: representative_weeks missing or not summing to 52; using default 13/13/26.")
+        weights = {'winter':13, 'summer':13, 'spri_autu':26}
+
     return {
         'grid_data': grid_data,
-        'seasons_profiles': seasons_profiles
+        'seasons_profiles': seasons_profiles,
+        'season_weights': weights
     }
