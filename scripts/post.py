@@ -15,6 +15,14 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 
+def key(var, season, asset, year, hour):
+    """Return the canonical optimisation‑variable key (3‑digit hour)."""
+    return f"{var}_{season}_{asset}_{year}_{hour:03d}"
+
+def test_key_lookup():
+    k = key('p_gen', 'winter', 'G1', 3, 7)
+    assert k == 'p_gen_winter_G1_3_007'
+
 # A custom JSON encoder to handle e.g. numpy types
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -477,8 +485,8 @@ def plot_annual_load_growth(integrated_network, output_dir="results"):
 
 def plot_generation_mix(integrated_network, output_dir="results"):
     """
-    Create and save plots showing how the load is met by different generator types
-    (thermal, wind, solar) for winter and summer seasons in years 1 and 10.
+    Create and save plots showing how the load is met by different generators
+    and storage units for winter and summer seasons in years 1 and 10.
     
     The plot shows stacked area charts representing the generation mix hour by hour.
     
@@ -519,6 +527,19 @@ def plot_generation_mix(integrated_network, output_dir="results"):
     growth_factor_first_year = load_growth_factors.get(first_year, 1.0)
     growth_factor_last_year = load_growth_factors.get(last_year, 1.0)
     
+    # Function to generate colors based on ID
+    def get_color_map(asset_ids):
+        import matplotlib.cm as cm
+        import matplotlib.colors as mcolors
+        
+        # Create a colormap with distinct colors
+        color_map = {}
+        if asset_ids:
+            cmap = cm.get_cmap('tab20', len(asset_ids))
+            for i, asset_id in enumerate(asset_ids):
+                color_map[asset_id] = cmap(i)
+        return color_map
+    
     # For each season
     for season in seasons_to_plot:
         if season not in integrated_network.season_networks:
@@ -528,28 +549,25 @@ def plot_generation_mix(integrated_network, output_dir="results"):
         network = integrated_network.season_networks[season]
         hours = range(1, network.T + 1)
         
-        # Collect generator types and IDs
-        thermal_gens = []
-        wind_gens = []
-        solar_gens = []
+        # Get all generator IDs
+        all_gens = list(network.generators.index)
         
-        for gen_id in network.generators.index:
-            gen_type = network.generators.at[gen_id, 'type']
-            if gen_type == 'thermal':
-                thermal_gens.append(gen_id)
-            elif gen_type == 'wind':
-                wind_gens.append(gen_id)
-            elif gen_type == 'solar':
-                solar_gens.append(gen_id)
+        # Get all storage unit IDs
+        all_storage = list(network.storage_units.index)
         
-        # Create arrays to store dispatch by generator type for each year
-        thermal_dispatch_y1 = np.zeros(network.T)
-        wind_dispatch_y1 = np.zeros(network.T)
-        solar_dispatch_y1 = np.zeros(network.T)
+        # Create consistent color maps for assets
+        gen_colors = get_color_map(all_gens)
+        storage_colors = get_color_map(all_storage)
         
-        thermal_dispatch_y10 = np.zeros(network.T)
-        wind_dispatch_y10 = np.zeros(network.T)
-        solar_dispatch_y10 = np.zeros(network.T)
+        # Create arrays to store dispatch by generator ID for each year
+        dispatch_y1 = {gen_id: np.zeros(network.T) for gen_id in all_gens}
+        dispatch_y10 = {gen_id: np.zeros(network.T) for gen_id in all_gens}
+        
+        # Create arrays to store discharge and charge by storage ID for each year
+        storage_discharge_y1 = {stor_id: np.zeros(network.T) for stor_id in all_storage}
+        storage_charge_y1 = {stor_id: np.zeros(network.T) for stor_id in all_storage}
+        storage_discharge_y10 = {stor_id: np.zeros(network.T) for stor_id in all_storage}
+        storage_charge_y10 = {stor_id: np.zeros(network.T) for stor_id in all_storage}
         
         # Calculate total load for both years
         total_load_y1 = np.zeros(network.T)
@@ -569,76 +587,72 @@ def plot_generation_mix(integrated_network, output_dir="results"):
             total_load_y1 += bus_load * growth_factor_first_year
             total_load_y10 += bus_load * growth_factor_last_year
         
-        # Sum up generator dispatch by type for each hour
+        # Sum up generator dispatch for each hour
         for hour in range(1, network.T + 1):
             # Year 1
-            for gen_id in thermal_gens:
-                dispatch_key = f"p_gen_{season}_{gen_id}_{first_year}_{hour}"
+            for gen_id in all_gens:
+                dispatch_key = key('p_gen', season, gen_id, first_year, hour)
                 dispatch = result['variables'].get(dispatch_key, 0)
-                thermal_dispatch_y1[hour-1] += dispatch
-                
-            for gen_id in wind_gens:
-                dispatch_key = f"p_gen_{season}_{gen_id}_{first_year}_{hour}"
-                dispatch = result['variables'].get(dispatch_key, 0)
-                wind_dispatch_y1[hour-1] += dispatch
-                
-            for gen_id in solar_gens:
-                dispatch_key = f"p_gen_{season}_{gen_id}_{first_year}_{hour}"
-                dispatch = result['variables'].get(dispatch_key, 0)
-                solar_dispatch_y1[hour-1] += dispatch
+                dispatch_y1[gen_id][hour-1] = dispatch
                 
             # Year 10
-            for gen_id in thermal_gens:
-                dispatch_key = f"p_gen_{season}_{gen_id}_{last_year}_{hour}"
+            for gen_id in all_gens:
+                dispatch_key = key('p_gen', season, gen_id, last_year, hour)
                 dispatch = result['variables'].get(dispatch_key, 0)
-                thermal_dispatch_y10[hour-1] += dispatch
-                
-            for gen_id in wind_gens:
-                dispatch_key = f"p_gen_{season}_{gen_id}_{last_year}_{hour}"
-                dispatch = result['variables'].get(dispatch_key, 0)
-                wind_dispatch_y10[hour-1] += dispatch
-                
-            for gen_id in solar_gens:
-                dispatch_key = f"p_gen_{season}_{gen_id}_{last_year}_{hour}"
-                dispatch = result['variables'].get(dispatch_key, 0)
-                solar_dispatch_y10[hour-1] += dispatch
+                dispatch_y10[gen_id][hour-1] = dispatch
         
-        # Get actual storage charge and discharge from optimization results
-        storage_units = list(network.storage_units.index)
-        storage_charge_y1 = np.zeros(network.T)
-        storage_discharge_y1 = np.zeros(network.T)
-        storage_charge_y10 = np.zeros(network.T)
-        storage_discharge_y10 = np.zeros(network.T)
-        
+        # Get storage charge and discharge for each storage unit
         for hour in range(1, network.T + 1):
             # Year 1
-            for stor_id in storage_units:
-                charge_key = f"p_charge_{season}_{stor_id}_{first_year}_{hour}"
-                discharge_key = f"p_discharge_{season}_{stor_id}_{first_year}_{hour}"
+            for stor_id in all_storage:
+                charge_key = key('p_charge', season, stor_id, first_year, hour)
+                discharge_key = key('p_discharge', season, stor_id, first_year, hour)
                 
                 charge = result['variables'].get(charge_key, 0)
                 discharge = result['variables'].get(discharge_key, 0)
                 
-                storage_charge_y1[hour-1] -= charge  # Negative because charging reduces net generation
-                storage_discharge_y1[hour-1] += discharge
+                # Negative because charging reduces net generation
+                storage_charge_y1[stor_id][hour-1] = -charge
+                storage_discharge_y1[stor_id][hour-1] = discharge
             
             # Year 10
-            for stor_id in storage_units:
-                charge_key = f"p_charge_{season}_{stor_id}_{last_year}_{hour}"
-                discharge_key = f"p_discharge_{season}_{stor_id}_{last_year}_{hour}"
+            for stor_id in all_storage:
+                charge_key = key('p_charge', season, stor_id, last_year, hour)
+                discharge_key = key('p_discharge', season, stor_id, last_year, hour)
                 
                 charge = result['variables'].get(charge_key, 0)
                 discharge = result['variables'].get(discharge_key, 0)
                 
-                storage_charge_y10[hour-1] -= charge  # Negative because charging reduces net generation
-                storage_discharge_y10[hour-1] += discharge
+                # Negative because charging reduces net generation
+                storage_charge_y10[stor_id][hour-1] = -charge
+                storage_discharge_y10[stor_id][hour-1] = discharge
         
+        # Calculate total generation and storage for verification
+        total_gen_y1 = np.zeros(network.T)
+        total_gen_y10 = np.zeros(network.T)
+        
+        # Sum all generation
+        for gen_id in all_gens:
+            total_gen_y1 += dispatch_y1[gen_id]
+            total_gen_y10 += dispatch_y10[gen_id]
+        
+        # Sum all storage discharge and charge
+        total_storage_discharge_y1 = np.zeros(network.T)
+        total_storage_charge_y1 = np.zeros(network.T)
+        total_storage_discharge_y10 = np.zeros(network.T)
+        total_storage_charge_y10 = np.zeros(network.T)
+        
+        for stor_id in all_storage:
+            total_storage_discharge_y1 += storage_discharge_y1[stor_id]
+            total_storage_charge_y1 += storage_charge_y1[stor_id]
+            total_storage_discharge_y10 += storage_discharge_y10[stor_id]
+            total_storage_charge_y10 += storage_charge_y10[stor_id]
+            
         # VERIFICATION: Check if load is always met using the actual optimizer variables
         print(f"\nLOAD BALANCE VERIFICATION FOR {season.upper()} SEASON:")
         
         # Year 1 verification
-        total_gen_y1 = thermal_dispatch_y1 + wind_dispatch_y1 + solar_dispatch_y1
-        total_with_storage_y1 = total_gen_y1 + storage_discharge_y1 + storage_charge_y1  # Charge is already negative
+        total_with_storage_y1 = total_gen_y1 + total_storage_discharge_y1 + total_storage_charge_y1  # Charge is already negative
         
         # Calculate the maximum absolute error
         max_error_y1 = np.max(np.abs(total_with_storage_y1 - total_load_y1))
@@ -658,8 +672,7 @@ def plot_generation_mix(integrated_network, output_dir="results"):
             print(f"  Year {first_year} - Load is met for all hours within tolerance")
             
         # Year 10 verification
-        total_gen_y10 = thermal_dispatch_y10 + wind_dispatch_y10 + solar_dispatch_y10
-        total_with_storage_y10 = total_gen_y10 + storage_discharge_y10 + storage_charge_y10  # Charge is already negative
+        total_with_storage_y10 = total_gen_y10 + total_storage_discharge_y10 + total_storage_charge_y10  # Charge is already negative
         
         # Calculate the maximum absolute error
         max_error_y10 = np.max(np.abs(total_with_storage_y10 - total_load_y10))
@@ -682,23 +695,45 @@ def plot_generation_mix(integrated_network, output_dir="results"):
         plt.figure(figsize=(14, 8))
         
         # Plot load as a reference area (filled to make it clear the load must be met)
-        plt.fill_between(hours, 0, total_load_y1, color='lightgray', alpha=0.3, label='Required Load')
+        plt.fill_between(hours, 0, total_load_y1, color='lightgray', alpha=0.3)
+        
+        # Plot each generator and storage discharge separately
+        gen_data_y1 = []
+        labels_y1 = []
+        colors_y1 = []
+        
+        # Add generators
+        for gen_id in all_gens:
+            if np.any(dispatch_y1[gen_id] > 0):  # Only include generators with dispatch
+                gen_data_y1.append(dispatch_y1[gen_id])
+                labels_y1.append(f"Gen {gen_id}")
+                colors_y1.append(gen_colors[gen_id])
+        
+        # Add storage discharge
+        for stor_id in all_storage:
+            if np.any(storage_discharge_y1[stor_id] > 0):  # Only add if there's actual discharge
+                gen_data_y1.append(storage_discharge_y1[stor_id])
+                labels_y1.append(f"Storage {stor_id} (Discharge)")
+                colors_y1.append(storage_colors[stor_id])
         
         # Plot the generation stack
         plt.stackplot(hours, 
-                     thermal_dispatch_y1, 
-                     wind_dispatch_y1, 
-                     solar_dispatch_y1,
-                     storage_discharge_y1,
-                     labels=['Thermal', 'Wind', 'Solar', 'Storage (Discharge)'],
-                     colors=['brown', 'blue', 'gold', 'green'],
+                     *gen_data_y1,
+                     labels=labels_y1,
+                     colors=colors_y1,
                      alpha=0.7)
         
         # Plot load as a solid line for comparison
         plt.plot(hours, total_load_y1, 'r-', linewidth=2.5, label='Load')
         
-        # Plot storage charging as negative values (storage_charge_y1 is already negative)
-        plt.fill_between(hours, 0, storage_charge_y1, color='purple', alpha=0.3, label='Storage (Charge)')
+        # Plot storage charging individually
+        for stor_id in all_storage:
+            charge = storage_charge_y1[stor_id]
+            if np.any(charge < 0):  # Only plot if there's actual charging (note: charge values are negative)
+                charge_color = storage_colors[stor_id]
+                # Make charge color slightly different than discharge color for the same storage
+                charge_color = [min(1.0, c * 0.8) for c in charge_color[:3]] + [0.3]  # Adjust color and alpha
+                plt.fill_between(hours, 0, charge, color=charge_color, label=f"Storage {stor_id} (Charge)")
         
         # Plot the sum of generation (should exactly match load)
         plt.plot(hours, total_with_storage_y1, 'k--', linewidth=1.5, label='Net Generation')
@@ -725,23 +760,45 @@ def plot_generation_mix(integrated_network, output_dir="results"):
         plt.figure(figsize=(14, 8))
         
         # Plot load as a reference area (filled to make it clear the load must be met)
-        plt.fill_between(hours, 0, total_load_y10, color='lightgray', alpha=0.3, label='Required Load')
+        plt.fill_between(hours, 0, total_load_y10, color='lightgray', alpha=0.3)
+        
+        # Plot each generator and storage discharge separately
+        gen_data_y10 = []
+        labels_y10 = []
+        colors_y10 = []
+        
+        # Add generators
+        for gen_id in all_gens:
+            if np.any(dispatch_y10[gen_id] > 0):  # Only include generators with dispatch
+                gen_data_y10.append(dispatch_y10[gen_id])
+                labels_y10.append(f"Gen {gen_id}")
+                colors_y10.append(gen_colors[gen_id])
+        
+        # Add storage discharge
+        for stor_id in all_storage:
+            if np.any(storage_discharge_y10[stor_id] > 0):  # Only add if there's actual discharge
+                gen_data_y10.append(storage_discharge_y10[stor_id])
+                labels_y10.append(f"Storage {stor_id} (Discharge)")
+                colors_y10.append(storage_colors[stor_id])
         
         # Plot the generation stack
         plt.stackplot(hours, 
-                     thermal_dispatch_y10, 
-                     wind_dispatch_y10, 
-                     solar_dispatch_y10,
-                     storage_discharge_y10,
-                     labels=['Thermal', 'Wind', 'Solar', 'Storage (Discharge)'],
-                     colors=['brown', 'blue', 'gold', 'green'],
+                     *gen_data_y10,
+                     labels=labels_y10,
+                     colors=colors_y10,
                      alpha=0.7)
         
         # Plot load as a solid line for comparison
         plt.plot(hours, total_load_y10, 'r-', linewidth=2.5, label='Load')
         
-        # Plot storage charging as negative values (storage_charge_y10 is already negative)
-        plt.fill_between(hours, 0, storage_charge_y10, color='purple', alpha=0.3, label='Storage (Charge)')
+        # Plot storage charging individually
+        for stor_id in all_storage:
+            charge = storage_charge_y10[stor_id]
+            if np.any(charge < 0):  # Only plot if there's actual charging (note: charge values are negative)
+                charge_color = storage_colors[stor_id]
+                # Make charge color slightly different than discharge color for the same storage
+                charge_color = [min(1.0, c * 0.8) for c in charge_color[:3]] + [0.3]  # Adjust color and alpha
+                plt.fill_between(hours, 0, charge, color=charge_color, label=f"Storage {stor_id} (Charge)")
         
         # Plot the sum of generation (should exactly match load)
         plt.plot(hours, total_with_storage_y10, 'k--', linewidth=1.5, label='Net Generation')
@@ -838,7 +895,7 @@ def generate_bus_asset_report(integrated_network, output_dir="results"):
                             gen_cap = network.generators.at[gen_id, 'p_nom']
                             
                             # Get the actual dispatch value from optimization results for the first year
-                            dispatch_key = f"p_gen_{season}_{gen_id}_{first_year}_{hour}"
+                            dispatch_key = key('p_gen', season, gen_id, first_year, hour)
                             dispatch = result['variables'].get(dispatch_key, 0) # Default to 0 if key not found
                             hourly_total_gen += dispatch
                             
@@ -863,9 +920,9 @@ def generate_bus_asset_report(integrated_network, output_dir="results"):
                         f.write("    Storage:\n")
                         for stor_id in bus_storage.index:
                             # Get storage dispatch and state of charge for the first year
-                            charge_key = f"p_charge_{season}_{stor_id}_{first_year}_{hour}"
-                            discharge_key = f"p_discharge_{season}_{stor_id}_{first_year}_{hour}"
-                            soc_key = f"soc_{season}_{stor_id}_{first_year}_{hour}"
+                            charge_key = key('p_charge', season, stor_id, first_year, hour)
+                            discharge_key = key('p_discharge', season, stor_id, first_year, hour)
+                            soc_key = key('soc', season, stor_id, first_year, hour)
                             
                             charge = result['variables'].get(charge_key, 0) # Default to 0 if key not found
                             discharge = result['variables'].get(discharge_key, 0) # Default to 0 if key not found
@@ -916,186 +973,143 @@ def generate_bus_asset_report(integrated_network, output_dir="results"):
 
 def plot_implementation_timeline(integrated_network, output_dir="results"):
     """
-    Create a visual timeline showing when each asset (generator, storage) is 
-    installed, replaced, and decommissioned over the planning horizon.
-    
-    Args:
-        integrated_network: IntegratedNetwork object with implementation plan
-        output_dir: Directory to save the output plot
-    
-    Returns:
-        Path to the generated timeline plot
+    Visual timeline of asset life‑cycles (install, active, replacement, decommission).
+
+    Parameters
+    ----------
+    integrated_network : IntegratedNetwork
+    output_dir         : str           directory for the PNG
+
+    Returns
+    -------
+    str   full path to saved figure (or None on failure)
     """
-    # Get the implementation plan
+    import os
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Rectangle
+    from matplotlib.lines import Line2D
+
+    # ------------------------------------------------------------------
+    # 1) Collect implementation information
+    # ------------------------------------------------------------------
     plan = generate_implementation_plan(integrated_network, output_dir)
-    if not plan or 'generators' not in plan or 'storage' not in plan:
-        print("[post.py] Implementation plan not available or incomplete")
+    if not plan:
+        print("[post.py] implementation plan missing → no timeline")
         return None
-    
-    # Ensure output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Get years from the planning horizon
-    years = integrated_network.years if hasattr(integrated_network, 'years') and integrated_network.years else plan.get('years', [])
+
+    years = integrated_network.years or plan.get("years", [])
     if not years:
-        print("[post.py] No planning years found")
+        print("[post.py] planning years undefined → no timeline")
         return None
-    
-    # Select a representative season to get generator/storage metadata
-    if not integrated_network.seasons or not integrated_network.season_networks:
-        print("[post.py] No seasons found in integrated_network")
-        return None
-    
-    representative_season = integrated_network.seasons[0]
-    network = integrated_network.season_networks[representative_season]
-    
-    # Collect asset data
-    assets = []
-    
-    # Process generators
-    for gen_id, gen_data in plan['generators'].items():
-        if not gen_data.get('years_installed'):
-            continue
-            
-        # Get generator metadata
-        gen_type = "unknown"
-        gen_name = f"Generator {gen_id}"
-        if gen_id in network.generators.index:
-            gen_type = network.generators.at[gen_id, 'type']
-            gen_name = network.generators.at[gen_id, 'name'] if 'name' in network.generators.columns else f"Generator {gen_id}"
-        
-        # Add generator to assets list
-        assets.append({
-            'id': gen_id,
-            'name': gen_name,
-            'type': gen_type,
-            'category': 'generator',
-            'years_installed': gen_data.get('years_installed', []),
-            'lifetime': network.generators.at[gen_id, 'lifetime_years'] if gen_id in network.generators.index and 'lifetime_years' in network.generators.columns else 5
-        })
-    
-    # Process storage
-    for stor_id, stor_data in plan['storage'].items():
-        if not stor_data.get('years_installed'):
-            continue
-            
-        # Get storage metadata
-        stor_name = f"Storage {stor_id}"
-        if stor_id in network.storage_units.index:
-            stor_name = network.storage_units.at[stor_id, 'name'] if 'name' in network.storage_units.columns else f"Storage {stor_id}"
-        
-        # Add storage to assets list
-        assets.append({
-            'id': stor_id,
-            'name': stor_name,
-            'type': 'storage',
-            'category': 'storage',
-            'years_installed': stor_data.get('years_installed', []),
-            'lifetime': network.storage_units.at[stor_id, 'lifetime_years'] if stor_id in network.storage_units.index and 'lifetime_years' in network.storage_units.columns else 5
-        })
-    
-    # Sort assets by category (generators first, then storage) and type
-    assets.sort(key=lambda x: (0 if x['category'] == 'generator' else 1, x['type'], x['id']))
-    
-    # Calculate asset active periods based on installation year and lifetime
-    for asset in assets:
-        asset['active_periods'] = []
-        asset['replacements'] = []
-        asset['decommissions'] = []
-        
-        for install_year in asset['years_installed']:
-            # The asset is active from installation year until its lifetime expires
-            end_year = min(install_year + asset['lifetime'], years[-1] + 1)
-            asset['active_periods'].append((install_year, end_year))
-            
-            # If the end year is within the planning horizon, it's decommissioned
-            if end_year <= years[-1]:
-                asset['decommissions'].append(end_year)
-        
-        # Identify replacements (an installation that happens after a decommission)
-        for i in range(1, len(asset['years_installed'])):
-            if asset['years_installed'][i] > asset['years_installed'][0]:
-                asset['replacements'].append(asset['years_installed'][i])
-    
-    # Now create the plot
-    # Determine how many assets we have to size the plot
-    num_assets = len(assets)
-    
-    # Create a larger figure for better readability
-    plt.figure(figsize=(16, max(8, 0.4 * num_assets)))
-    
-    # Set up the plot
+    first_year, last_year = years[0], years[-1] + 1   # +1 so the bar reaches RH edge
+
+    # pick a representative season to fetch metadata (names, lifetimes)
+    season = integrated_network.seasons[0]
+    net = integrated_network.season_networks[season]
+
+    # helper → build a record per asset
+    def asset_records(category, df, mapping):
+        recs = []
+        for asset_id, meta in mapping.items():
+            yrs = sorted(meta["years_installed"])
+            if not yrs:
+                continue
+            lifetime = int(df.at[asset_id, "lifetime_years"]) if asset_id in df.index else 5
+            a_type   = df.at[asset_id, "type"] if (category == "generator" and
+                                                   asset_id in df.index) else "storage"
+            # active spans (install … install+lifetime) but clipped to horizon
+            active = [(y, min(y + lifetime, last_year)) for y in yrs]
+            # decommission if end-year within horizon
+            decom  = [end for _, end in active if end < last_year]
+            repl   = yrs[1:]                       # any second+ install is replacement
+            recs.append(dict(
+                id=asset_id,
+                label=f"{'G' if category=='generator' else 'S'}: "
+                      f"{df.at[asset_id,'name'] if asset_id in df.index else asset_id}"
+                      f" ({a_type})",
+                category=category,
+                type=a_type,
+                active=active,
+                installs=yrs,
+                replacements=repl,
+                decomm=decom
+            ))
+        return recs
+
+    rows = []
+    rows += asset_records("generator", net.generators, plan["generators"])
+    rows += asset_records("storage",   net.storage_units, plan["storage"])
+
+    # sort: generators first (by type), then storage
+    rows.sort(key=lambda r: (0 if r["category"]=="generator" else 1,
+                             r["type"], r["label"]))
+
+    # ------------------------------------------------------------------
+    # 2) Plot
+    # ------------------------------------------------------------------
+    n = len(rows)
+    fig_height = max(6, 0.45 * n)
+    fig = plt.figure(figsize=(16, fig_height))
     ax = plt.gca()
-    
-    # Define colors for different asset types
-    colors = {
-        'thermal': '#a1e8af',  # Light green
-        'wind': '#a1e8af',     # Light green
-        'solar': '#a1e8af',    # Light green
-        'storage': '#a1d6e8',  # Light blue
-        'unknown': '#cccccc'   # Gray
-    }
-    
-    # Plot each asset
-    y_positions = list(range(num_assets, 0, -1))
-    asset_labels = []
-    
-    for i, asset in enumerate(assets):
-        y_pos = y_positions[i]
-        asset_labels.append(f"{asset['category'].title()[0]}: {asset['name']} ({asset['type']})")
-        
-        # Determine color based on category or type
-        if asset['category'] == 'generator':
-            color = colors.get(asset['type'], colors['unknown'])
-        else:
-            color = colors.get('storage', colors['unknown'])
-        
-        # Plot active periods as horizontal bars
-        for start_year, end_year in asset['active_periods']:
-            plt.axhspan(y_pos - 0.4, y_pos + 0.4, start_year, end_year, alpha=0.6, color=color)
-        
-        # Plot installation points
-        for year in asset['years_installed']:
-            plt.plot(year, y_pos, 'g^', markersize=10, markeredgecolor='black')
-        
-        # Plot replacement points (if any)
-        for year in asset['replacements']:
-            plt.plot(year, y_pos, 'yo', markersize=8, markeredgecolor='black')
-        
-        # Plot decommission points (if any)
-        for year in asset['decommissions']:
-            plt.plot(year, y_pos, 'rx', markersize=10, markeredgecolor='black', mew=2)
-    
-    # Set up the axis and labels
-    plt.yticks(y_positions, asset_labels)
-    plt.xlabel('Year')
-    plt.ylabel('Assets')
-    plt.grid(True, linestyle='--', alpha=0.7)
-    
-    # Set x-axis to show all years in the planning horizon
-    plt.xlim(years[0] - 0.5, years[-1] + 0.5)
-    plt.xticks(years)
-    
-    # Fix y-axis to prevent auto-scaling
-    plt.ylim(0.5, num_assets + 0.5)
-    
-    # Add a legend
-    legend_elements = [
-        plt.Rectangle((0, 0), 1, 1, facecolor=colors['thermal'], alpha=0.6, label='Generator Active'),
-        plt.Rectangle((0, 0), 1, 1, facecolor=colors['storage'], alpha=0.6, label='Storage Active'),
-        plt.Line2D([0], [0], marker='^', color='w', markerfacecolor='green', markersize=10, markeredgecolor='black', label='New Installation'),
-        plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='yellow', markersize=8, markeredgecolor='black', label='Replacement'),
-        plt.Line2D([0], [0], marker='x', color='red', markersize=10, markeredgecolor='red', label='Decommission')
+
+    y_positions = list(reversed(range(n)))  # top row = 0
+    bar_height  = 0.6
+
+    color_gen   = "#a1e8af"   # light green
+    color_stor  = "#b9dff7"   # light blue
+
+    for row, y in zip(rows, y_positions):
+        color = color_gen if row["category"]=="generator" else color_stor
+
+        # active bars
+        for start, end in row["active"]:
+            ax.add_patch(Rectangle((start, y-bar_height/2),
+                                   end-start, bar_height,
+                                   facecolor=color, edgecolor="none", alpha=0.6,
+                                   zorder=1))
+
+        # installation markers (first one counts as new)
+        ax.plot(row["installs"][0], y, marker="^", markersize=9,
+                color="green", markeredgecolor="black", zorder=3)
+        # replacements (if any)
+        for yr in row["replacements"]:
+            ax.plot(yr, y, marker="D", markersize=8,
+                    color="orange", markeredgecolor="black", zorder=3)
+        # decommission
+        for yr in row["decomm"]:
+            ax.plot(yr, y, marker="x", markersize=11,
+                    color="red", markeredgewidth=2, zorder=3)
+
+    # cosmetics
+    ax.set_yticks(y_positions)
+    ax.set_yticklabels([r["label"] for r in rows])
+    ax.set_xlabel("Year")
+    ax.set_title("Implementation Plan - Asset Timeline", fontsize=16)
+    ax.set_xlim(first_year - 0.5, last_year + 0.5)
+    ax.set_ylim(-1, n)
+    ax.grid(axis="x", linestyle="--", alpha=0.4)
+
+    # legend
+    legend_elems = [
+        Rectangle((0,0),1,1,facecolor=color_gen,  alpha=0.6, label="Generator Active"),
+        Rectangle((0,0),1,1,facecolor=color_stor, alpha=0.6, label="Storage Active"),
+        Line2D([0],[0],marker="^",color="w", markerfacecolor="green",
+               markeredgecolor="black", markersize=9, label="New Installation"),
+        Line2D([0],[0],marker="D",color="w", markerfacecolor="orange",
+               markeredgecolor="black", markersize=8, label="Replacement"),
+        Line2D([0],[0],marker="x",color="red", markersize=11,
+               markeredgewidth=2, label="Decommission")
     ]
-    plt.legend(handles=legend_elements, loc='lower center', bbox_to_anchor=(0.5, -0.15), ncol=5)
-    
-    plt.title('Implementation Plan - Asset Timeline', fontsize=16)
+    ax.legend(handles=legend_elems, loc="upper center",
+              bbox_to_anchor=(0.5, -0.08), ncol=3, frameon=False)
+
     plt.tight_layout()
-    
-    # Save the plot
-    timeline_file = os.path.join(output_dir, "asset_timeline.png")
-    plt.savefig(timeline_file, dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"[post.py] Asset timeline plot saved to {timeline_file}")
-    return timeline_file
+    # ------------------------------------------------------------------
+    # 3) Save
+    # ------------------------------------------------------------------
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, "asset_timeline.png")
+    plt.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[post.py] Asset timeline plot saved to {path}")
+    return path

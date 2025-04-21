@@ -154,102 +154,40 @@ def create_integrated_dcopf_problem(integrated_network):
                            if y_idx - 1 == yb_idx + lifetime_s_int - 1 and yb_idx < y_idx])
                 )
 
-    # -- 3) Create per-season dispatch variables and constraints 
-    season_variables = {}
-    season_constraints = {}
+    # -- 3) Create flat variable dictionaries and constraints
+    # ----------------------------------------------------------
+    # Flat dictionaries indexed (asset, year, season)
+    # ----------------------------------------------------------
+    p_gen, p_line = {}, {}
+    p_charge, p_discharge, soc = {}, {}, {}
 
-    load_growth_factors = integrated_network.load_growth if hasattr(integrated_network, 'load_growth') else {y: 1.0 for y in years}
+    flat_constraints = []             # replaces season_constraints
+
+    # Build lookup dictionaries to keep loops light
+    mc_g = {}  # Marginal costs for generators
+    for g in generators:
+        if g in first_network.generators.index:
+            mc_g[g] = first_network.generators.at[g, 'marginal_cost']
+
+    # Pre-compute load dictionaries and bus connections
+    bus_load_dict = {}
+    g_at_bus = {}
+    s_at_bus = {}
+    lines_from = {}
+    lines_to = {}
 
     for season in seasons:
         net = integrated_network.season_networks[season]
         T = net.T
-
-        season_variables[season] = {}
-        season_constraints[season] = []
-
-        # 3.1 Generator dispatch variables (using gen_installed for capacity)
-        p_gen = {}
-        for g in generators:
-            for y in years:
-                p_gen[(g, y)] = cp.Variable(T, nonneg=True, name=f"p_gen_{season}_{g}_{y}")
-                if g in net.generators.index:
-                    g_nom = net.generators.at[g, 'p_nom']
-                    gen_type = net.generators.at[g, 'type']
-                    
-                    # Use gen_installed[(g, y)] to enable/disable capacity
-                    if gen_type == 'thermal':
-                        season_constraints[season].append(
-                            p_gen[(g, y)] <= g_nom * gen_installed[(g, y)] 
-                        )
-                    elif gen_type in ['wind', 'solar']:
-                        if 'p_max_pu' in net.generators_t and g in net.generators_t['p_max_pu']:
-                            p_max_vector = net.generators_t['p_max_pu'][g].values[:T]
-                            scaled_p_max = p_max_vector * g_nom
-                            season_constraints[season].append(
-                                p_gen[(g, y)] <= cp.multiply(scaled_p_max, gen_installed[(g, y)])
-                            )
-                        else:
-                            season_constraints[season].append(
-                                p_gen[(g, y)] <= g_nom * gen_installed[(g, y)]
-                            )
-                    else:
-                        season_constraints[season].append(
-                            p_gen[(g, y)] <= g_nom * gen_installed[(g, y)]
-                        )
-                else:
-                    season_constraints[season].append(p_gen[(g, y)] <= 0)
-
-        # 3.2 Line flow variables (no change needed)
-        p_line = {}
-        for l in lines:
-            for y in years:
-                p_line[(l, y)] = cp.Variable(T, name=f"p_line_{season}_{l}_{y}")
-                if l in net.lines.index:
-                    line_cap = net.lines.at[l, 's_nom'] if hasattr(net.lines, 's_nom') else 0
-                    season_constraints[season].append(cp.abs(p_line[(l, y)]) <= line_cap)
-
-        # 3.3 Storage variables (using storage_installed for capacity)
-        p_charge = {}
-        p_discharge = {}
-        soc = {}
-        for s in storage_units:
-            for y in years:
-                p_charge[(s, y)] = cp.Variable(T, nonneg=True, name=f"p_charge_{season}_{s}_{y}")
-                p_discharge[(s, y)] = cp.Variable(T, nonneg=True, name=f"p_discharge_{season}_{s}_{y}")
-                soc[(s, y)] = cp.Variable(T, nonneg=True, name=f"soc_{season}_{s}_{y}")
-                
-                if s in net.storage_units.index:
-                    s_p_nom = net.storage_units.at[s, 'p_nom']
-                    s_max_hours = net.storage_units.at[s, 'max_hours']
-                    eff_in = net.storage_units.at[s, 'efficiency_store']
-                    eff_out = net.storage_units.at[s, 'efficiency_dispatch']
-                    s_e_nom = s_p_nom * s_max_hours
-                else:
-                    s_p_nom, s_e_nom, eff_in, eff_out = 0, 0, 1, 1 # Set defaults for safety
-
-                # Use storage_installed[(s, y)] for capacity constraints
-                season_constraints[season].append(p_charge[(s, y)] <= s_p_nom * storage_installed[(s, y)])
-                season_constraints[season].append(p_discharge[(s, y)] <= s_p_nom * storage_installed[(s, y)])
-                season_constraints[season].append(soc[(s, y)] <= s_e_nom * storage_installed[(s, y)])
-                
-                # SoC dynamics (no change needed in logic)
-                season_constraints[season].append(
-                    soc[(s, y)][1:] == soc[(s, y)][:-1] + eff_in * p_charge[(s, y)][:-1] - (1.0/eff_out) * p_discharge[(s, y)][:-1]
-                )
-                season_constraints[season].append(soc[(s, y)][0] == 0)
-                # Relax final SoC constraint slightly for feasibility
-                season_constraints[season].append(soc[(s, y)][T-1] >= 0)
-                season_constraints[season].append(soc[(s, y)][T-1] <= s_e_nom * storage_installed[(s,y)] * 0.1) # e.g. max 10% end SoC
-
-
-        season_variables[season]['p_gen'] = p_gen
-        season_variables[season]['p_line'] = p_line
-        season_variables[season]['p_charge'] = p_charge
-        season_variables[season]['p_discharge'] = p_discharge
-        season_variables[season]['soc'] = soc
-
-        # 3.4 Build the bus load dictionary (no change needed)
-        bus_load_dict = {b: np.zeros(T) for b in buses}
+        
+        # Initialize load dictionary for this season
+        bus_load_dict[season] = {b: np.zeros(T) for b in buses}
+        g_at_bus[season] = {b: [] for b in buses}
+        s_at_bus[season] = {b: [] for b in buses}
+        lines_from[season] = {b: [] for b in buses}
+        lines_to[season] = {b: [] for b in buses}
+        
+        # Build load dictionary
         if not net.loads.empty:
             for ld in net.loads.index:
                 load_bus_orig = net.loads.at[ld, 'bus']
@@ -266,49 +204,153 @@ def create_integrated_dcopf_problem(integrated_network):
                 if matched_bus is not None:
                     if 'p' in net.loads_t and ld in net.loads_t['p']:
                         load_ts = net.loads_t['p'][ld].values[:T]
-                        bus_load_dict[matched_bus] += load_ts
+                        bus_load_dict[season][matched_bus] += load_ts
                     else:
                         static_val = net.loads.at[ld, 'p_mw']
                         if pd.notna(static_val):
-                            bus_load_dict[matched_bus] += np.ones(T) * static_val
+                            bus_load_dict[season][matched_bus] += np.ones(T) * static_val
                         else:
                             logger.warning(f"Load {ld} at bus {matched_bus} has invalid p_mw value: {static_val}. Setting to 0.")
+        
+        # Build connection dictionaries
+        for g in generators:
+            if g in net.generators.index:
+                bus_g = net.generators.at[g, 'bus']
+                for b in buses:
+                    if str(bus_g) == str(b):
+                        g_at_bus[season][b].append(g)
+                        break
+                        
+        for s in storage_units:
+            if s in net.storage_units.index:
+                bus_s = net.storage_units.at[s, 'bus']
+                for b in buses:
+                    if str(bus_s) == str(b):
+                        s_at_bus[season][b].append(s)
+                        break
+                        
+        for l in lines:
+            if l in net.lines.index:
+                from_bus = net.lines.at[l, 'from_bus']
+                to_bus = net.lines.at[l, 'to_bus']
+                for b in buses:
+                    if str(from_bus) == str(b):
+                        lines_from[season][b].append(l)
+                    if str(to_bus) == str(b):
+                        lines_to[season][b].append(l)
 
-        # 3.5 Vectorized nodal power balance constraints (no change needed in logic)
+    # ----------------------------------------------------------
+    # Create variables ONCE for every (season, year) pair
+    # ----------------------------------------------------------
+    for s in seasons:
+        net = integrated_network.season_networks[s]
+        T = net.T
+
         for y in years:
-            growth_factor = load_growth_factors.get(y, 1.0)
-            for b in buses:
-                scaled_load = bus_load_dict[b] * growth_factor
-                
-                # Find generators, storage, lines connected to this bus (handle type mismatches)
-                g_at_bus = [g for g in generators if g in net.generators.index and str(net.generators.at[g, 'bus']) == str(b)]
-                s_at_bus = [s for s in storage_units if s in net.storage_units.index and str(net.storage_units.at[s, 'bus']) == str(b)]
-                lines_from = [l for l in lines if l in net.lines.index and str(net.lines.at[l, 'from_bus']) == str(b)]
-                lines_to = [l for l in lines if l in net.lines.index and str(net.lines.at[l, 'to_bus']) == str(b)]
+            # ---------- generators ----------
+            for g in generators:
+                var = cp.Variable(T, nonneg=True, name=f"p_gen_{s}_{g}_{y}")
+                p_gen[(g, y, s)] = var
 
-                gen_sum = cp.sum([p_gen[(g, y)] for g in g_at_bus]) if g_at_bus else 0
-                st_net = cp.sum([p_discharge[(s, y)] - p_charge[(s, y)] for s in s_at_bus]) if s_at_bus else 0
-                flow_out = cp.sum([p_line[(l, y)] for l in lines_from]) if lines_from else 0
-                flow_in = cp.sum([p_line[(l, y)] for l in lines_to]) if lines_to else 0
+            # ---------- lines ----------
+            for l in lines:
+                var = cp.Variable(T, name=f"p_line_{s}_{l}_{y}")
+                p_line[(l, y, s)] = var
+
+            # ---------- storage ----------
+            for st in storage_units:
+                p_charge[(st, y, s)] = cp.Variable(T, nonneg=True, name=f"p_charge_{s}_{st}_{y}")
+                p_discharge[(st, y, s)] = cp.Variable(T, nonneg=True, name=f"p_discharge_{s}_{st}_{y}")
+                soc[(st, y, s)] = cp.Variable(T, nonneg=True, name=f"soc_{s}_{st}_{y}")
+
+    # Add capacity constraints for generators
+    for (g, y, s), var in p_gen.items():
+        net = integrated_network.season_networks[s]
+        if g in net.generators.index:
+            g_nom = net.generators.at[g, 'p_nom']
+            g_type = net.generators.at[g, 'type']
+
+            if g_type in ['wind', 'solar'] and \
+               'p_max_pu' in net.generators_t and g in net.generators_t['p_max_pu']:
+                prof = net.generators_t['p_max_pu'][g].values[:net.T]
+                flat_constraints.append(
+                    var <= cp.multiply(prof, g_nom) * gen_installed[(g, y)]
+                )
+            else:
+                flat_constraints.append(
+                    var <= g_nom * gen_installed[(g, y)]
+                )
+        else:
+            flat_constraints.append(var <= 0)
+
+    # Add constraints for line flows
+    for (l, y, s), var in p_line.items():
+        net = integrated_network.season_networks[s]
+        if l in net.lines.index:
+            line_cap = net.lines.at[l, 's_nom'] if hasattr(net.lines, 's_nom') else 0
+            flat_constraints.append(cp.abs(var) <= line_cap)
+
+    # Add constraints for storage
+    for (st, y, s), charge_var in p_charge.items():
+        discharge_var = p_discharge[(st, y, s)]
+        soc_var = soc[(st, y, s)]
+        net = integrated_network.season_networks[s]
+        T = net.T
+        
+        if st in net.storage_units.index:
+            s_p_nom = net.storage_units.at[st, 'p_nom']
+            s_max_hours = net.storage_units.at[st, 'max_hours']
+            eff_in = net.storage_units.at[st, 'efficiency_store']
+            eff_out = net.storage_units.at[st, 'efficiency_dispatch']
+            s_e_nom = s_p_nom * s_max_hours
+        else:
+            s_p_nom, s_e_nom, eff_in, eff_out = 0, 0, 1, 1
+        
+        # Capacity constraints using storage_installed
+        flat_constraints.append(charge_var <= s_p_nom * storage_installed[(st, y)])
+        flat_constraints.append(discharge_var <= s_p_nom * storage_installed[(st, y)])
+        flat_constraints.append(soc_var <= s_e_nom * storage_installed[(st, y)])
+        
+        # SoC dynamics
+        flat_constraints.append(
+            soc_var[1:] == soc_var[:-1] + eff_in * charge_var[:-1] - (1.0/eff_out) * discharge_var[:-1]
+        )
+        flat_constraints.append(soc_var[0] == 0)
+        # Relax final SoC constraint
+        flat_constraints.append(soc_var[T-1] >= 0)
+        flat_constraints.append(soc_var[T-1] <= s_e_nom * storage_installed[(st, y)] * 0.1)
+
+    # Nodal power balance constraints
+    load_growth_factors = integrated_network.load_growth if hasattr(integrated_network, 'load_growth') else {y: 1.0 for y in years}
+    season_weights = integrated_network.season_weights if hasattr(integrated_network, 'season_weights') else {s: 1.0 for s in seasons}
+
+    for s in seasons:
+        net = integrated_network.season_networks[s]
+        T = net.T
+        for y in years:
+            growth = load_growth_factors.get(y, 1.0)
+            for b in buses:
+                load_vec = cp.Constant(growth * bus_load_dict[s][b])
                 
-                load_vec = cp.Constant(scaled_load)
+                gen_sum = cp.sum([p_gen[(g, y, s)] for g in g_at_bus[s][b]]) if g_at_bus[s][b] else 0
+                st_net = cp.sum([p_discharge[(st, y, s)] - p_charge[(st, y, s)] for st in s_at_bus[s][b]]) if s_at_bus[s][b] else 0
+                flow_out = cp.sum([p_line[(l, y, s)] for l in lines_from[s][b]]) if lines_from[s][b] else 0
+                flow_in = cp.sum([p_line[(l, y, s)] for l in lines_to[s][b]]) if lines_to[s][b] else 0
                 
-                season_constraints[season].append(
-                    (gen_sum + st_net + flow_in) == (load_vec + flow_out)
+                flat_constraints.append(
+                    gen_sum + st_net + flow_in == load_vec + flow_out
                 )
 
-    # -- 4) Build the objective function: Operational cost + annualized capital cost (based on 'build')
+    # -- 4) Build the objective function: Operational cost + annualized capital cost
+    # Operational cost with season weighting
     operational_obj = 0
-    for season in seasons:
-        net = integrated_network.season_networks[season]
-        weight_weeks = integrated_network.season_weights.get(season, 0)
-        for y in years:
-            for g in generators:
-                if g in net.generators.index and (g, y) in p_gen: # Check if var exists
-                    mc = net.generators.at[g, 'marginal_cost']
-                    discount_rate = net.generators.at[g, 'discount_rate']
-                    discount_factor = 1.0 / ((1.0 + discount_rate) ** max(0, y - years[0])) # Use relative year for discount
-                    operational_obj += weight_weeks * mc * cp.sum(p_gen[(g, y)]) * discount_factor
+    for (g, y, s), var in p_gen.items():
+        if g in mc_g:  # Using pre-computed marginal costs
+            net = integrated_network.season_networks[s]
+            weight = season_weights.get(s, 0)
+            mc = mc_g[g]
+            # Remove discount factor for operational costs
+            operational_obj += weight * mc * cp.sum(var)
 
     capital_obj = 0
     if first_network:
@@ -375,10 +417,7 @@ def create_integrated_dcopf_problem(integrated_network):
     total_cost = operational_obj + capital_obj
     objective = cp.Minimize(total_cost)
     
-    all_constraints = global_constraints + [c for s_constrs in season_constraints.values() for c in s_constrs]
-
-    # Sanity check for NaNs in constraints or objective coefficients
-    # (Add checks here if needed, e.g., iterating through constraints and objective terms)
+    all_constraints = global_constraints + flat_constraints
 
     return {
         'objective': objective,
@@ -388,7 +427,11 @@ def create_integrated_dcopf_problem(integrated_network):
             'storage_build': storage_build,     # Return new build vars
             'gen_installed': gen_installed,     # Return installed vars
             'storage_installed': storage_installed, # Return installed vars
-            'season_variables': season_variables
+            'p_gen': p_gen,
+            'p_line': p_line,
+            'p_charge': p_charge,
+            'p_discharge': p_discharge,
+            'soc': soc
         },
         'years': years,
         'seasons': seasons
@@ -416,13 +459,13 @@ def solve_multi_year_investment(integrated_network, solver_options=None):
     prob = cp.Problem(problem_dict['objective'], problem_dict['constraints'])
 
     # 2) Solve with CPLEX
-    cplex_params = {'threads': 10, 'timelimit': 1200}
+    cplex_params = {'threads': 10, 'timelimit': 18*60, 'mip.tolerances.mipgap': 0.01}
     cplex_params.update(solver_options)
 
     try:
         logger.info("Solving with CPLEX...")
         # Increase MIP tolerances for potentially challenging problems
-        cplex_params.update({'mip.tolerances.mipgap': 0.01, 'mip.tolerances.absmipgap': 1.0})
+        cplex_params.update({'mip.tolerances.absmipgap': 1.0})
         prob.solve(solver=cp.CPLEX, verbose=True, cplex_params=cplex_params)
     except Exception as e:
         logger.error(f"Solver failed: {e}")
@@ -486,39 +529,35 @@ def solve_multi_year_investment(integrated_network, solver_options=None):
         var_values[k] = get_val(var)
         result_vars[f"storage_installed_{k[0]}_{k[1]}"] = var_values[k]
 
-    # Extract seasonal dispatch variables
-    season_vars_dict = problem_vars['season_variables']
-    for season, svars in season_vars_dict.items():
-        net = integrated_network.season_networks[season]
-        T = net.T
-        
-        for var_type in ['p_gen', 'p_line', 'p_charge', 'p_discharge', 'soc']:
-            if var_type in svars:
-                for key, var_vec in svars[var_type].items(): # key is (asset_id, year)
-                    # Extract values safely
-                    try:
-                        vals = var_vec.value
-                        if vals is None:
-                            vals = np.zeros(T)
-                        elif not isinstance(vals, np.ndarray):
-                            vals = np.full(T, float(vals)) # Handle scalar promotion
-                        elif len(vals) != T:
-                             logger.warning(f"Length mismatch for {var_type} {key} season {season}. Expected {T}, got {len(vals)}. Padding/truncating.")
-                             # Attempt to fix length mismatch, e.g., pad with zeros or truncate
-                             if len(vals) < T:
-                                 vals = np.pad(vals, (0, T - len(vals)), 'constant')
-                             else:
-                                 vals = vals[:T]
-                    except (AttributeError, TypeError, ValueError):
-                         logger.warning(f"Could not get value for {var_type} {key} season {season}. Defaulting to zeros.")
-                         vals = np.zeros(T)
+    # Extract seasonal dispatch variables using the flat dictionaries
+    for var_type, var_dict in [('p_gen', problem_vars['p_gen']), 
+                               ('p_line', problem_vars['p_line']), 
+                               ('p_charge', problem_vars['p_charge']), 
+                               ('p_discharge', problem_vars['p_discharge']), 
+                               ('soc', problem_vars['soc'])]:
+        for key, var_vec in var_dict.items():
+            # key is (asset_id, year, season)
+            asset_id, year, season = key
+            # Extract values safely
+            try:
+                vals = var_vec.value
+                if vals is None:
+                    net = integrated_network.season_networks[season]
+                    T = net.T
+                    vals = np.zeros(T)
+                elif not isinstance(vals, np.ndarray):
+                    net = integrated_network.season_networks[season]
+                    T = net.T
+                    vals = np.full(T, float(vals))
+            except (AttributeError, TypeError, ValueError):
+                net = integrated_network.season_networks[season]
+                T = net.T
+                logger.warning(f"Could not get value for {var_type} {key}. Defaulting to zeros.")
+                vals = np.zeros(T)
 
-                    # Store individual time step values
-                    asset_id, year = key
-                    for t in range(T):
-                        result_vars[f"{var_type}_{season}_{asset_id}_{year}_{t+1}"] = float(vals[t])
-            else:
-                logger.warning(f"Variable type '{var_type}' not found in season '{season}'")
+            # Store individual time step values with padded hour format
+            for t in range(len(vals)):
+                result_vars[f"{var_type}_{season}_{asset_id}_{year}_{t+1:03d}"] = float(vals[t])
 
     # 4) Save solution
     integrated_network.integrated_results = {

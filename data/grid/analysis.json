@@ -21,6 +21,11 @@
     "14": 1.4679,
     "15": 1.5119,
     "description": "Load growth factors with 3% annual growth rate"
+  },
+  "representative_weeks": {
+    "winter": 13,
+    "summer": 13,
+    "spri_autu": 26
   }
 }
  
