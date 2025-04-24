@@ -59,57 +59,39 @@ def generate_implementation_plan(integrated_network, output_dir="results"):
 
     var_dict = result['variables']
 
-    # Extract installation variables from result_vars
-    # The variables are stored as strings like "gen_installed_1001_1"
-    gen_installed = {}
-    storage_installed = {}
-    
-    # Parse the variables based on their keys
-    for key, value in var_dict.items():
-        if key.startswith('gen_installed_'):
-            # Parse the generator and year from the key
-            parts = key.split('_')
-            if len(parts) >= 3:
-                g = parts[2]  # Generator ID
-                y = int(parts[3])  # Year
-                gen_installed[(g, y)] = value
-        elif key.startswith('storage_installed_'):
-            # Parse the storage and year from the key
-            parts = key.split('_')
-            if len(parts) >= 3:
-                s = parts[2]  # Storage ID
-                y = int(parts[3])  # Year
-                storage_installed[(s, y)] = value
+    # ------------------------------------------------------------------
+    # Identify build years   (🔄 replacing old 'installed' logic)
+    # ------------------------------------------------------------------
 
-    # Initialize the plan with defaults
+    gen_build = {}
+    storage_build = {}
+
+    for key, value in var_dict.items():
+        if value <= 0.5:          # skip zeros
+            continue
+
+        if key.startswith('gen_build_'):
+            # key format: gen_build_<ID>_<YEAR>
+            _, _, g_id, y = key.split('_')
+            gen_build.setdefault(g_id, []).append(int(y))
+
+        elif key.startswith('storage_build_'):
+            # key format: storage_build_<ID>_<YEAR>
+            _, _, s_id, y = key.split('_')
+            storage_build.setdefault(s_id, []).append(int(y))
+
+    # ------------------------------------------------------------------
+    # Assemble plan dictionary
+    # ------------------------------------------------------------------
     plan = {
         'years': integrated_network.years,
-        'generators': {},
-        'storage': {},
+        'generators': {g: {'years_installed': sorted(ys)}
+                       for g, ys in gen_build.items()},
+        'storage':    {s: {'years_installed': sorted(ys)}
+                       for s, ys in storage_build.items()},
         'objective_value': result.get('value', 0),
         'status': result.get('status', 'unknown')
     }
-
-    # Extract generator installation
-    # gen_installed keys look like (g, y) -> value
-    # We'll see in which year it's "1"
-    for (g, y), val in gen_installed.items():
-        # That means generator g is installed in year y
-        if val > 0.5:
-            if g not in plan['generators']:
-                plan['generators'][g] = {
-                    'years_installed': []
-                }
-            plan['generators'][g]['years_installed'].append(y)
-
-    # Similarly for storage
-    for (s, y), val in storage_installed.items():
-        if val > 0.5:
-            if s not in plan['storage']:
-                plan['storage'][s] = {
-                    'years_installed': []
-                }
-            plan['storage'][s]['years_installed'].append(y)
 
     # Save to JSON
     os.makedirs(output_dir, exist_ok=True)
@@ -302,7 +284,6 @@ def plot_seasonal_profiles(integrated_network, output_dir="results"):
                             bus_load += network.loads_t['p'][load_id].values
                         else:
                             bus_load += np.ones(network.T) * network.loads.at[load_id, 'p_mw']
-                total_load += bus_load
             
             season_data[season] = {
                 'wind': wind_total,
@@ -973,143 +954,125 @@ def generate_bus_asset_report(integrated_network, output_dir="results"):
 
 def plot_implementation_timeline(integrated_network, output_dir="results"):
     """
-    Visual timeline of asset life‑cycles (install, active, replacement, decommission).
-
-    Parameters
-    ----------
-    integrated_network : IntegratedNetwork
-    output_dir         : str           directory for the PNG
-
-    Returns
-    -------
-    str   full path to saved figure (or None on failure)
+    Gantt‑like view of asset life‑cycles with correct
+    replacement/decommission logic.
     """
-    import os
-    import matplotlib.pyplot as plt
+    import os, matplotlib.pyplot as plt
     from matplotlib.patches import Rectangle
     from matplotlib.lines import Line2D
 
-    # ------------------------------------------------------------------
-    # 1) Collect implementation information
-    # ------------------------------------------------------------------
     plan = generate_implementation_plan(integrated_network, output_dir)
     if not plan:
-        print("[post.py] implementation plan missing → no timeline")
+        print("[timeline] no implementation plan – abort")
         return None
 
     years = integrated_network.years or plan.get("years", [])
     if not years:
-        print("[post.py] planning years undefined → no timeline")
+        print("[timeline] missing planning years – abort")
         return None
-    first_year, last_year = years[0], years[-1] + 1   # +1 so the bar reaches RH edge
+    y0, yN = years[0], years[-1]                # inclusive horizon
+    horizon_end = yN + 1                        # bar end
 
-    # pick a representative season to fetch metadata (names, lifetimes)
     season = integrated_network.seasons[0]
     net = integrated_network.season_networks[season]
 
-    # helper → build a record per asset
-    def asset_records(category, df, mapping):
+    # ------------------------------------------------------------------ helpers
+    def records(cat, df, mapping):
+        """yield a dict per asset with timeline info."""
         recs = []
-        for asset_id, meta in mapping.items():
-            yrs = sorted(meta["years_installed"])
-            if not yrs:
+        for aid, meta in mapping.items():
+            installs = sorted(set(meta["years_installed"]))
+            if not installs:
                 continue
-            lifetime = int(df.at[asset_id, "lifetime_years"]) if asset_id in df.index else 5
-            a_type   = df.at[asset_id, "type"] if (category == "generator" and
-                                                   asset_id in df.index) else "storage"
-            # active spans (install … install+lifetime) but clipped to horizon
-            active = [(y, min(y + lifetime, last_year)) for y in yrs]
-            # decommission if end-year within horizon
-            decom  = [end for _, end in active if end < last_year]
-            repl   = yrs[1:]                       # any second+ install is replacement
-            recs.append(dict(
-                id=asset_id,
-                label=f"{'G' if category=='generator' else 'S'}: "
-                      f"{df.at[asset_id,'name'] if asset_id in df.index else asset_id}"
-                      f" ({a_type})",
-                category=category,
-                type=a_type,
-                active=active,
-                installs=yrs,
-                replacements=repl,
-                decomm=decom
-            ))
+            
+            # Convert aid to int if it's a string, since DataFrame indices might be integers
+            aid_idx = int(aid) if isinstance(aid, str) else aid
+            
+            # Check if aid_idx exists in the DataFrame before accessing
+            if aid_idx in df.index:
+                L = int(df.at[aid_idx, "lifetime_years"])
+                type_label = df.at[aid_idx, 'type'] if cat == 'gen' else 'storage'
+            else:
+                L = 5  # Default lifetime
+                type_label = 'storage' if cat != 'gen' else 'unknown'
+                
+            label = f"{'G' if cat=='gen' else 'S'}: {aid} ({type_label})"
+
+            bars, repl, decomm = [], [], []
+            for i, y in enumerate(installs):
+                end = min(y + L, horizon_end)
+                bars.append((y, end))
+                # look‑ahead to classify next event
+                if i + 1 < len(installs):
+                    y_next = installs[i + 1]
+                    if y_next == y + L:                 # seamless replacement
+                        repl.append(y_next)
+                    else:                               # gap → decommission then new install
+                        decomm.append(end)
+                else:
+                    # last install → maybe final decommission
+                    if end <= yN:
+                        decomm.append(end)
+
+            recs.append(dict(label=label,
+                             category=cat,
+                             bars=bars,
+                             new=installs[0:1],         # first install only
+                             repl=repl,
+                             decomm=decomm))
         return recs
 
-    rows = []
-    rows += asset_records("generator", net.generators, plan["generators"])
-    rows += asset_records("storage",   net.storage_units, plan["storage"])
+    rows = (records("gen",    net.generators,   plan["generators"]) +
+            records("stor",   net.storage_units, plan["storage"]))
 
-    # sort: generators first (by type), then storage
-    rows.sort(key=lambda r: (0 if r["category"]=="generator" else 1,
-                             r["type"], r["label"]))
-
-    # ------------------------------------------------------------------
-    # 2) Plot
-    # ------------------------------------------------------------------
+    # sort: generators first, id order
+    rows.sort(key=lambda r: (0 if r["category"]=="gen" else 1, r["label"]))
     n = len(rows)
-    fig_height = max(6, 0.45 * n)
-    fig = plt.figure(figsize=(16, fig_height))
-    ax = plt.gca()
+    if n == 0:
+        print("[timeline] nothing to plot")
+        return None
 
-    y_positions = list(reversed(range(n)))  # top row = 0
-    bar_height  = 0.6
+    # ------------------------------------------------------------------ plot
+    h = max(6, 0.45 * n)
+    fig, ax = plt.subplots(figsize=(16, h))
 
-    color_gen   = "#a1e8af"   # light green
-    color_stor  = "#b9dff7"   # light blue
+    y_pos = list(reversed(range(n)))
+    bar_h = 0.6
+    col_gen, col_sto = "#a1e8af", "#b9dff7"
 
-    for row, y in zip(rows, y_positions):
-        color = color_gen if row["category"]=="generator" else color_stor
+    for row, y in zip(rows, y_pos):
+        col = col_gen if row["category"]=="gen" else col_sto
+        for s, e in row["bars"]:
+            ax.add_patch(Rectangle((s, y-bar_h/2), e-s, bar_h,
+                                   facecolor=col, alpha=0.6, zorder=1))
 
-        # active bars
-        for start, end in row["active"]:
-            ax.add_patch(Rectangle((start, y-bar_height/2),
-                                   end-start, bar_height,
-                                   facecolor=color, edgecolor="none", alpha=0.6,
-                                   zorder=1))
+        ax.plot(row["new"],       [y]*len(row["new"]),
+                "^",  mfc="green", mec="black", ms=8, zorder=3)
+        ax.plot(row["repl"],      [y]*len(row["repl"]),
+                "D",  mfc="orange", mec="black", ms=7, zorder=3)
+        ax.plot(row["decomm"],    [y]*len(row["decomm"]),
+                "x",  color="red", mew=2, ms=9, zorder=3)
 
-        # installation markers (first one counts as new)
-        ax.plot(row["installs"][0], y, marker="^", markersize=9,
-                color="green", markeredgecolor="black", zorder=3)
-        # replacements (if any)
-        for yr in row["replacements"]:
-            ax.plot(yr, y, marker="D", markersize=8,
-                    color="orange", markeredgecolor="black", zorder=3)
-        # decommission
-        for yr in row["decomm"]:
-            ax.plot(yr, y, marker="x", markersize=11,
-                    color="red", markeredgewidth=2, zorder=3)
-
-    # cosmetics
-    ax.set_yticks(y_positions)
-    ax.set_yticklabels([r["label"] for r in rows])
-    ax.set_xlabel("Year")
-    ax.set_title("Implementation Plan - Asset Timeline", fontsize=16)
-    ax.set_xlim(first_year - 0.5, last_year + 0.5)
-    ax.set_ylim(-1, n)
-    ax.grid(axis="x", linestyle="--", alpha=0.4)
+    ax.set_yticks(y_pos); ax.set_yticklabels([r["label"] for r in rows])
+    ax.set_xlabel("Year"); ax.set_title("Implementation Plan - Asset Timeline", fontsize=16)
+    ax.set_xlim(y0-0.5, horizon_end+0.5); ax.set_ylim(-1, n)
+    ax.grid(axis="x", ls="--", alpha=0.4)
 
     # legend
-    legend_elems = [
-        Rectangle((0,0),1,1,facecolor=color_gen,  alpha=0.6, label="Generator Active"),
-        Rectangle((0,0),1,1,facecolor=color_stor, alpha=0.6, label="Storage Active"),
-        Line2D([0],[0],marker="^",color="w", markerfacecolor="green",
-               markeredgecolor="black", markersize=9, label="New Installation"),
-        Line2D([0],[0],marker="D",color="w", markerfacecolor="orange",
-               markeredgecolor="black", markersize=8, label="Replacement"),
-        Line2D([0],[0],marker="x",color="red", markersize=11,
-               markeredgewidth=2, label="Decommission")
-    ]
-    ax.legend(handles=legend_elems, loc="upper center",
-              bbox_to_anchor=(0.5, -0.08), ncol=3, frameon=False)
+    ax.legend([
+        Rectangle((0,0),1,1,fc=col_gen,  alpha=0.6),
+        Rectangle((0,0),1,1,fc=col_sto,  alpha=0.6),
+        Line2D([0],[0], marker="^", mfc="green", mec="black", ms=8, ls=""),
+        Line2D([0],[0], marker="D", mfc="orange", mec="black", ms=7, ls=""),
+        Line2D([0],[0], marker="x",  color="red", mew=2, ms=9, ls="")
+    ], ["Generator Active", "Storage Active", "New Installation",
+        "Replacement", "Decommission"],
+       ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.08), frameon=False)
 
     plt.tight_layout()
-    # ------------------------------------------------------------------
-    # 3) Save
-    # ------------------------------------------------------------------
     os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, "asset_timeline.png")
-    plt.savefig(path, dpi=300, bbox_inches="tight")
+    fname = os.path.join(output_dir, "asset_timeline.png")
+    plt.savefig(fname, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    print(f"[post.py] Asset timeline plot saved to {path}")
-    return path
+    print(f"[timeline] saved {fname}")
+    return fname

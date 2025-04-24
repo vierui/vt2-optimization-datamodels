@@ -93,66 +93,42 @@ def create_integrated_dcopf_problem(integrated_network):
         lifetime_g = first_network.generators.at[g, 'lifetime_years']
         # Ensure lifetime is treated as an integer for range calculation
         lifetime_g_int = int(lifetime_g) if pd.notna(lifetime_g) else 0 
+        
+        # ---- NEW: "at-most-one-build-per-lifetime window" ----
         for y_idx, y in enumerate(years):
-            # An asset is installed in year y if it was built in a year y_build such that y is within its lifetime
-            # Condition: yb_idx <= y_idx < yb_idx + lifetime_g_int  (equivalent to yb <= y < yb + lifetime_g)
-            relevant_build_years = [yb for yb_idx, yb in enumerate(years) if y_idx >= yb_idx and y_idx < yb_idx + lifetime_g_int]
-            if relevant_build_years:
-                 build_vars_list = [gen_build[(g, yb)] for yb in relevant_build_years]
-                 # This constraint enforces gen_installed <= sum(relevant gen_build)
-                 global_constraints.append(
-                     gen_installed[(g, y)] <= cp.sum(build_vars_list) # Use the list here
-                 )
-            else:
-                # If no possible build year could cover this year, it cannot be installed
-                 global_constraints.append(gen_installed[(g, y)] <= 0)
-            # Ensure that if we build in year y, we are installed in year y (might be redundant with above but clearer)
-            global_constraints.append(gen_installed[(g,y)] >= gen_build[(g,y)])
-            
-            # Add a constraint to prevent redundant builds
-            # Only allow building in the current year if:
-            # - It's the first year, OR
-            # - The asset wasn't installed in the previous year
-            if y_idx > 0:
-                prev_year = years[y_idx - 1]
-                global_constraints.append(
-                    gen_build[(g, y)] <= 1 - gen_installed[(g, prev_year)] + 
-                    # Allow rebuilding if previous installation is expiring
-                    cp.sum([gen_build[(g, yb)] for yb_idx, yb in enumerate(years) 
-                           if y_idx - 1 == yb_idx + lifetime_g_int - 1 and yb_idx < y_idx])
-                )
-
+            window_builds = [gen_build[(g, yb)]
+                             for yb_idx, yb in enumerate(years)
+                             if (y_idx - yb_idx) < lifetime_g_int and y_idx >= yb_idx]
+            global_constraints.append(cp.sum(window_builds) <= 1)
+        
+        # ---- Equality definition of installed ----
+        for y_idx, y in enumerate(years):
+            window_builds = [gen_build[(g, yb)]
+                             for yb_idx, yb in enumerate(years)
+                             if (y_idx - yb_idx) < lifetime_g_int and y_idx >= yb_idx]
+            global_constraints.append(
+                gen_installed[(g, y)] == cp.sum(window_builds))
 
     # For each storage unit s, link installed[s, y] to build decisions within its lifetime
     for s in storage_units:
         lifetime_s = first_network.storage_units.at[s, 'lifetime_years']
         # Ensure lifetime is treated as an integer
         lifetime_s_int = int(lifetime_s) if pd.notna(lifetime_s) else 0
+        
+        # ---- NEW: "at-most-one-build-per-lifetime window" ----
         for y_idx, y in enumerate(years):
-            relevant_build_years = [yb for yb_idx, yb in enumerate(years) if y_idx >= yb_idx and y_idx < yb_idx + lifetime_s_int]
-            if relevant_build_years:
-                 build_vars_list = [storage_build[(s, yb)] for yb in relevant_build_years]
-                 # This constraint enforces storage_installed <= sum(relevant storage_build)
-                 global_constraints.append(
-                     storage_installed[(s, y)] <= cp.sum(build_vars_list) # Use the list here
-                 )
-            else:
-                 global_constraints.append(storage_installed[(s, y)] <= 0)
-            # Ensure that if we build in year y, we are installed in year y
-            global_constraints.append(storage_installed[(s,y)] >= storage_build[(s,y)])
-            
-            # Add a constraint to prevent redundant builds for storage units
-            # Only allow building in the current year if:
-            # - It's the first year, OR
-            # - The asset wasn't installed in the previous year
-            if y_idx > 0:
-                prev_year = years[y_idx - 1]
-                global_constraints.append(
-                    storage_build[(s, y)] <= 1 - storage_installed[(s, prev_year)] + 
-                    # Allow rebuilding if previous installation is expiring
-                    cp.sum([storage_build[(s, yb)] for yb_idx, yb in enumerate(years) 
-                           if y_idx - 1 == yb_idx + lifetime_s_int - 1 and yb_idx < y_idx])
-                )
+            window_builds = [storage_build[(s, yb)]
+                             for yb_idx, yb in enumerate(years)
+                             if (y_idx - yb_idx) < lifetime_s_int and y_idx >= yb_idx]
+            global_constraints.append(cp.sum(window_builds) <= 1)
+        
+        # ---- Equality definition of installed ----
+        for y_idx, y in enumerate(years):
+            window_builds = [storage_build[(s, yb)]
+                             for yb_idx, yb in enumerate(years)
+                             if (y_idx - yb_idx) < lifetime_s_int and y_idx >= yb_idx]
+            global_constraints.append(
+                storage_installed[(s, y)] == cp.sum(window_builds))
 
     # -- 3) Create flat variable dictionaries and constraints
     # ----------------------------------------------------------
