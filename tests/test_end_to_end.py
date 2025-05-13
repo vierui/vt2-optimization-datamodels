@@ -1,5 +1,5 @@
 import pytest, numpy as np
-from scripts.optimization import solve_multi_year_investment
+from scripts.optimization import investement_multi
 from scripts.network import IntegratedNetwork, Network
 from scripts.pre import process_data_for_optimization
 
@@ -25,7 +25,7 @@ def test_end_to_end(toy_case):
         n.loads = data['grid_data']['loads'].set_index('id')
         net.add_season_network(s,n)
     
-    result = solve_multi_year_investment(net, solver_options={"timelimit":60})
+    result = investement_multi(net, solver_options={"timelimit":60})
     
     # Instead of checking for success, just check that the solve completed and returned a result
     assert result is not None

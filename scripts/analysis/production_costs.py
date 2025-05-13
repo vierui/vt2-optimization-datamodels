@@ -307,43 +307,34 @@ def plot_production_costs(cost_data, output_dir="results"):
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Plot 1: Total annual production by generator type
+    # Plot 1: Total annual production by generator ID (instead of type)
     years = sorted(list(cost_data['total_annual_costs'].keys()))
     
-    # Group generators by type
-    gen_types = {}
+    # Calculate production by generator ID and year
+    production_by_gen = {}
     for gen_id, gen_data in cost_data['generators'].items():
-        gen_type = gen_data['type']
-        if gen_type not in gen_types:
-            gen_types[gen_type] = []
-        gen_types[gen_type].append(gen_id)
-    
-    # Calculate production by type and year
-    production_by_type = {gen_type: {year: 0 for year in years} for gen_type in gen_types}
-    
-    for gen_type, gen_ids in gen_types.items():
-        for gen_id in gen_ids:
-            for year in years:
-                production_by_type[gen_type][year] += cost_data['generators'][gen_id]['annual_production_mwh'][year]
+        production_by_gen[gen_id] = {year: 0 for year in years}
+        for year in years:
+            production_by_gen[gen_id][year] = cost_data['generators'][gen_id]['annual_production_mwh'][year]
     
     # Create the plot
     plt.figure(figsize=(12, 6))
     
     # Stack the production
     bottom = np.zeros(len(years))
-    for gen_type in gen_types:
-        values = [production_by_type[gen_type][year] for year in years]
-        plt.bar(years, values, label=gen_type.capitalize(), bottom=bottom)
+    for gen_id in production_by_gen:
+        values = [production_by_gen[gen_id][year] for year in years]
+        plt.bar(years, values, label=f"Gen {gen_id}", bottom=bottom)
         bottom += np.array(values)
     
-    plt.title('Annual Electricity Production by Generator Type', fontsize=14)
+    plt.title('Annual Electricity Production by Generator', fontsize=14)
     plt.xlabel('Year', fontsize=12)
     plt.ylabel('Production (MWh)', fontsize=12)
     plt.legend()
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     
     # Save the plot
-    production_plot = os.path.join(output_dir, "annual_production_by_type.png")
+    production_plot = os.path.join(output_dir, "annual_production_by_generator.png")
     plt.savefig(production_plot, dpi=300, bbox_inches='tight')
     plt.close()
     

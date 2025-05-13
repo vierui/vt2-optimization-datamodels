@@ -1,0 +1,1 @@
+python scripts/main.py --grid-file data/grid --profiles-dir data/processed --analyze-costs

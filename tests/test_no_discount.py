@@ -1,4 +1,4 @@
-from scripts.optimization import create_integrated_dcopf_problem
+from scripts.optimization import dcopf
 from scripts.network import IntegratedNetwork, Network
 from scripts.pre import process_data_for_optimization
 
@@ -18,7 +18,7 @@ def test_operational_no_discount(toy_case):
         n.loads = data['grid_data']['loads'].set_index('id')
         net.add_season_network(s,n)
 
-    prob_dict = create_integrated_dcopf_problem(net)
+    prob_dict = dcopf(net)
     obj = prob_dict['objective']
     # There must be **no** discount_rate parameter left in the coefficients
     assert "discount_rate" not in str(obj)  # coarse but effective 

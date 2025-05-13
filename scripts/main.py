@@ -24,8 +24,8 @@ import logging
 import traceback
 
 # Import our revised pre-processing, optimization, and post modules
-from pre import process_data_for_optimization, SEASON_WEIGHTS
-from optimization import solve_multi_year_investment  # Uses the new streamlined approach
+from pre import process_data_for_optimization
+from optimization import investement_multi 
 from post import generate_implementation_plan, plot_seasonal_profiles, plot_annual_load_growth, NumpyEncoder, plot_generation_mix, plot_implementation_timeline
 # Import the new production costs analysis module
 from analysis.production_costs import analyze_production_costs
@@ -34,8 +34,8 @@ from analysis.production_costs import analyze_production_costs
 from network import IntegratedNetwork, Network  # Adjust if your code differs
 from components import Bus, Generator, Load, Storage, Branch  # optional if needed
 
-# Paths and constants
-SEASON_WEIGHTS = {'winter': 13, 'summer': 13, 'spri_autu': 26}
+# Season weights are now data-driven, they will be overwritten right after preprocess
+SEASON_WEIGHTS = None
 
 def setup_logging(output_dir):
     """Set up logging to both console and file."""
@@ -108,6 +108,9 @@ def main():
             processed_dir=args.profiles_dir,
             planning_years=None  # or override if you want
         )
+        # Get season weights from processed data
+        SEASON_WEIGHTS = processed_data.get('season_weights',
+                        {'winter':13,'summer':13,'spri_autu':26})
         logger.info("Data preprocessing completed.")
         
         # Log the data summary
@@ -336,7 +339,7 @@ def main():
         # Log solver options
         logger.info(f"Solver options: {args.solver_options}")
         
-        result = solve_multi_year_investment(integrated_network, solver_options=args.solver_options)
+        result = investement_multi(integrated_network, solver_options=args.solver_options)
         if not result or result.get('status') not in ('optimal', 'optimal_inaccurate'):
             logger.error(f"Optimization failed or not optimal. Status: {result.get('status', 'unknown')}")
             return 1

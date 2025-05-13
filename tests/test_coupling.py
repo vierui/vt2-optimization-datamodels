@@ -1,4 +1,4 @@
-from scripts.optimization import create_integrated_dcopf_problem
+from scripts.optimization import dcopf
 from scripts.network import IntegratedNetwork, Network
 from scripts.pre import process_data_for_optimization
 
@@ -20,6 +20,6 @@ def test_single_build_suffices(toy_case):
         n.loads = data['grid_data']['loads'].set_index('id')
         net.add_season_network(s,n)
 
-    problem = create_integrated_dcopf_problem(net)
+    problem = dcopf(net)
     # No need to solve: check that exactly one gen_build var exists
     assert len(problem['variables']['gen_build']) == 2   # (G_T,1) (G_T,2) 

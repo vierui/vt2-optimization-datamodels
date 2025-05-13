@@ -1,6 +1,6 @@
 {
   "planning_horizon": {
-    "years": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    "years": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
     "system_discount_rate": 0.07,
     "description": "Multi-year planning horizon"
   },
@@ -16,10 +16,6 @@
     "9": 1.2667,
     "10": 1.3046,
     "11": 1.3436,
-    "12": 1.3838,
-    "13": 1.4252,
-    "14": 1.4679,
-    "15": 1.5119,
     "description": "Load growth factors with 3% annual growth rate"
   },
   "representative_weeks": {

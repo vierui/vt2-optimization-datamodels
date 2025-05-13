@@ -20,9 +20,11 @@ seaborn = "^0.13.2"
 numpy-financial = "^1.0.0"
 statsmodels = "^0.14.4"
 cvxpy = "^1.4.2"
+code2prompt = "^0.8.1"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
+pytest = "^8.3.5"
 
 [build-system]
 requires = ["poetry-core"]

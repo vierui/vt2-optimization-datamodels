@@ -1,7 +1,7 @@
 import tempfile, shutil, json, pandas as pd, numpy as np, pytest, os
 from scripts.pre import process_data_for_optimization
 from scripts.network import IntegratedNetwork, Network
-from scripts.optimization import solve_multi_year_investment
+from scripts.optimization import investement_multi
 
 @pytest.fixture(scope="session")
 def toy_case(tmp_path_factory):

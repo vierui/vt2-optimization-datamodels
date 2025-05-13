@@ -8,7 +8,7 @@ You can re-export key modules if you like, e.g.:
 from .components import Bus, Generator, Load, Storage, Branch
 from .network import Network, IntegratedNetwork
 from .pre import process_data_for_optimization
-from .optimization import solve_multi_year_investment
+from .optimization import investement_multi
 from .post import generate_implementation_plan
 """
 __all__ = [

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Optimization module for simplified multi-year DC OPF with annualized investments.
+Optimization module for multi-year DC OPF with annualized (annuity) investments.
 No layering: create, solve, extract numeric results, store in integrated_network.
 """
 
@@ -10,10 +10,9 @@ import numpy as np
 import os
 import logging
 
-# Basic logging configuration
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
+# Configure only a file handler, no console handler
 logger = logging.getLogger(__name__)
+# Don't add any handlers here - we'll configure through the main module
 
 def compute_crf(lifetime, discount_rate):
     """
@@ -46,7 +45,7 @@ def compute_discount_sum(lifetime, discount_rate):
         return lifetime
     return (1 - 1 / ((1 + discount_rate) ** lifetime)) / discount_rate
 
-def create_integrated_dcopf_problem(integrated_network):
+def dcopf(integrated_network):
     """
     Create an integrated multi-year DC OPF problem with:
       - Separate 'build' and 'installed' binary variables per asset & year.
@@ -413,8 +412,7 @@ def create_integrated_dcopf_problem(integrated_network):
         'seasons': seasons
     }
 
-
-def solve_multi_year_investment(integrated_network, solver_options=None):
+def investement_multi(integrated_network, solver_options=None):
     """
     Solve the integrated multi-year problem using the build/installed formulation:
       1) Create the problem
@@ -431,7 +429,7 @@ def solve_multi_year_investment(integrated_network, solver_options=None):
     logger.info(f"Solving multi-year investment: {len(seasons)} seasons, {len(years)} years using build/installed formulation.")
 
     # 1) Create problem
-    problem_dict = create_integrated_dcopf_problem(integrated_network)
+    problem_dict = dcopf(integrated_network)
     prob = cp.Problem(problem_dict['objective'], problem_dict['constraints'])
 
     # 2) Solve with CPLEX
