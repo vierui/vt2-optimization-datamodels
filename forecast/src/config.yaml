@@ -1,0 +1,72 @@
+# PV Forecasting Configuration
+data:
+  raw_file: "./data/renewables/pv_with_weather_data.csv"
+  processed_file: "data/processed.parquet"
+  target_column: "electricity"
+  time_column: "time"
+  weather_columns: ["irradiance_direct", "irradiance_diffuse", "temperature"]
+  
+splits:
+  train_start: "2014-01-01"
+  train_end: "2021-12-31"
+  val_start: "2022-01-01"
+  val_end: "2023-12-31"
+  test_start: "2024-01-01"
+  test_end: "2024-12-31"
+
+features:
+  target_lags: [1, 2, 3, 4, 5, 6, 12, 24, 168]  # 1-6h, 12h, 24h, 1 week
+  use_cyclical: true
+  use_weather: true
+  scaler_type: "StandardScaler"
+
+forecast:
+  horizons:
+    daily: 1  # days
+    weekly: 7
+    monthly: 30
+    quarterly: 90
+  forecast_length: 24  # hours ahead per forecast
+
+sarima:
+  p_range: [0, 1, 2]
+  q_range: [0, 1, 2]
+  d: 1
+  P_range: [0, 1]
+  Q_range: [0, 1]
+  D: 1
+  seasonal_period: 24
+
+neural_net:
+  manual:
+    layers: 2
+    units: 128
+    dropout: 0.2
+    learning_rate: 0.001
+    batch_size: 64
+    epochs: 100
+    
+  search_space:
+    layers: [1, 2, 3]
+    units: [32, 64, 128, 256]
+    dropout: [0.0, 0.1, 0.2, 0.3, 0.4]
+    learning_rate: [0.0001, 0.0005, 0.001, 0.005]
+    batch_size: [32, 64, 128]
+    
+  early_stopping:
+    patience: 8
+    monitor: "val_loss"
+    restore_best_weights: true
+    
+  tuner:
+    max_trials: 20
+    executions_per_trial: 1
+
+evaluation:
+  metrics: ["mae", "rmse", "mape"]
+  significance_level: 0.05
+  
+paths:
+  reports: "reports/"
+  figures: "reports/figures/"
+  models: "models/" 

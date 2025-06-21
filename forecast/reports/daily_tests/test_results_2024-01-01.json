@@ -1,0 +1,205 @@
+{
+  "test_date": "2024-01-01",
+  "summary": {
+    "sarima_mae": 0.03872656302124425,
+    "nn_mae": 0.10022600841522217,
+    "sarima_rmse": 0.07599598079779649,
+    "nn_rmse": 0.20958720564958983,
+    "better_model": "SARIMA",
+    "improvement_percent": 61.360764901655486
+  },
+  "hourly_data": [
+    {
+      "Hour": 0,
+      "Actual": 0.0,
+      "SARIMA": 7.690330709877438e-40,
+      "NN": 0.0,
+      "SARIMA_Error": 7.690330709877438e-40,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 1,
+      "Actual": 0.0,
+      "SARIMA": 0.0,
+      "NN": 0.0,
+      "SARIMA_Error": 0.0,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 2,
+      "Actual": 0.0,
+      "SARIMA": 9.959986255017057e-22,
+      "NN": 0.0,
+      "SARIMA_Error": 9.959986255017057e-22,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 3,
+      "Actual": 0.0,
+      "SARIMA": 1.979762619720509e-09,
+      "NN": 0.0,
+      "SARIMA_Error": 1.979762619720509e-09,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 4,
+      "Actual": 0.0,
+      "SARIMA": 2.5500857707447366e-07,
+      "NN": 0.0,
+      "SARIMA_Error": 2.5500857707447366e-07,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 5,
+      "Actual": 0.0,
+      "SARIMA": 3.218417662102452e-05,
+      "NN": 0.0,
+      "SARIMA_Error": 3.218417662102452e-05,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 6,
+      "Actual": 0.0,
+      "SARIMA": 0.03606129455101255,
+      "NN": 0.0,
+      "SARIMA_Error": 0.03606129455101255,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 7,
+      "Actual": 0.012,
+      "SARIMA": 0.19303557911531652,
+      "NN": 0.0,
+      "SARIMA_Error": 0.1810355791153165,
+      "NN_Error": 0.012
+    },
+    {
+      "Hour": 8,
+      "Actual": 0.118,
+      "SARIMA": 0.34840305246561853,
+      "NN": 0.0,
+      "SARIMA_Error": 0.23040305246561854,
+      "NN_Error": 0.118
+    },
+    {
+      "Hour": 9,
+      "Actual": 0.274,
+      "SARIMA": 0.45037787685118097,
+      "NN": 0.5164926648139954,
+      "SARIMA_Error": 0.17637787685118095,
+      "NN_Error": 0.24249266481399534
+    },
+    {
+      "Hour": 10,
+      "Actual": 0.4,
+      "SARIMA": 0.4878696704545648,
+      "NN": 0.9089374542236328,
+      "SARIMA_Error": 0.08786967045456479,
+      "NN_Error": 0.5089374542236328
+    },
+    {
+      "Hour": 11,
+      "Actual": 0.454,
+      "SARIMA": 0.47247077435893126,
+      "NN": 1.032728910446167,
+      "SARIMA_Error": 0.01847077435893124,
+      "NN_Error": 0.578728910446167
+    },
+    {
+      "Hour": 12,
+      "Actual": 0.309,
+      "SARIMA": 0.3950752929598896,
+      "NN": 0.8550752401351929,
+      "SARIMA_Error": 0.08607529295988958,
+      "NN_Error": 0.5460752401351929
+    },
+    {
+      "Hour": 13,
+      "Actual": 0.198,
+      "SARIMA": 0.2388364397437802,
+      "NN": 0.479189932346344,
+      "SARIMA_Error": 0.04083643974378018,
+      "NN_Error": 0.281189932346344
+    },
+    {
+      "Hour": 14,
+      "Actual": 0.099,
+      "SARIMA": 0.04569180495420182,
+      "NN": 0.0,
+      "SARIMA_Error": 0.05330819504579819,
+      "NN_Error": 0.099
+    },
+    {
+      "Hour": 15,
+      "Actual": 0.019,
+      "SARIMA": 3.333491439754151e-05,
+      "NN": 0.0,
+      "SARIMA_Error": 0.018966665085602456,
+      "NN_Error": 0.019
+    },
+    {
+      "Hour": 16,
+      "Actual": 0.0,
+      "SARIMA": 2.2867431579434933e-07,
+      "NN": 0.0,
+      "SARIMA_Error": 2.2867431579434933e-07,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 17,
+      "Actual": 0.0,
+      "SARIMA": 2.038890494238888e-09,
+      "NN": 0.0,
+      "SARIMA_Error": 2.038890494238888e-09,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 18,
+      "Actual": 0.0,
+      "SARIMA": 0.0,
+      "NN": 0.0,
+      "SARIMA_Error": 0.0,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 19,
+      "Actual": 0.0,
+      "SARIMA": 0.0,
+      "NN": 0.0,
+      "SARIMA_Error": 0.0,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 20,
+      "Actual": 0.0,
+      "SARIMA": 0.0,
+      "NN": 0.0,
+      "SARIMA_Error": 0.0,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 21,
+      "Actual": 0.0,
+      "SARIMA": 0.0,
+      "NN": 0.0,
+      "SARIMA_Error": 0.0,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 22,
+      "Actual": 0.0,
+      "SARIMA": 0.0,
+      "NN": 0.0,
+      "SARIMA_Error": 0.0,
+      "NN_Error": 0.0
+    },
+    {
+      "Hour": 23,
+      "Actual": 0.0,
+      "SARIMA": 0.0,
+      "NN": 0.0,
+      "SARIMA_Error": 0.0,
+      "NN_Error": 0.0
+    }
+  ]
+}
