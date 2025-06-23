@@ -29,6 +29,8 @@ class PVNeuralNet:
         self.config = config
         self.nn_config = config['neural_net']
         self.forecast_length = config['forecast']['forecast_length']
+        # length of historical window for convolutional model
+        self.history_length = config['forecast'].get('history_length', 24)
         
         self.model = None
         self.history = None
@@ -36,81 +38,66 @@ class PVNeuralNet:
         self.feature_scaler = None
         self.target_scaler = None
         
-    def build_model(self, input_shape: int, hyperparams: Dict = None) -> keras.Model:
-        """
-        Build neural network model with learnable output bias.
-        
-        Args:
-            input_shape: Number of input features
-            hyperparams: Hyperparameters (if None uses manual config)
-            
-        Returns:
-            Compiled Keras model with learnable bias
-        """
+    def quantile_loss(self, tau: float = 0.5):
+        """Quantile (pinball) loss for given tau."""
+
+        def loss(y_true, y_pred):
+            err = y_true - y_pred
+            return tf.reduce_mean(tf.maximum(tau * err, (tau - 1) * err))
+
+        return loss
+
+    def build_model(self, input_shape: Tuple[int, int], hyperparams: Dict = None) -> keras.Model:
+        """Build Temporal Convolutional Network."""
+
         if hyperparams is None:
             hyperparams = self.nn_config['manual']
-        
-        # Use Functional API for learnable bias
-        inputs = layers.Input(shape=(input_shape,))
-        
-        # First layer
-        x = layers.Dense(
-            hyperparams['units'],
-            activation='relu'
-        )(inputs)
-        x = layers.Dropout(hyperparams['dropout'])(x)
-        
-        # Hidden layers
-        for i in range(hyperparams['layers'] - 1):
-            x = layers.Dense(
-                hyperparams['units'],
+
+        inputs = layers.Input(shape=input_shape)
+        x = inputs
+        for dilation in hyperparams.get('dilations', [1, 2, 4, 8]):
+            residual = x
+            x = layers.Conv1D(
+                filters=hyperparams['filters'],
+                kernel_size=hyperparams['kernel_size'],
+                dilation_rate=dilation,
+                padding='causal',
                 activation='relu'
             )(x)
             x = layers.Dropout(hyperparams['dropout'])(x)
-        
-        # Output layer without bias
-        last = layers.Dense(self.forecast_length, use_bias=False)(x)
-        
-        # Learnable output bias to correct systematic errors
-        bias = tf.Variable(tf.zeros([self.forecast_length]), name='output_bias', trainable=True)
-        outputs = last + bias
-        
-        # Create model
+            if residual.shape[-1] == x.shape[-1]:
+                x = layers.Add()([x, residual])
+
+        x = layers.Flatten()(x)
+        outputs = layers.Dense(self.forecast_length)(x)
+
         model = keras.Model(inputs=inputs, outputs=outputs)
-        
-        # Compile model
+
+        loss_fn = 'mae'
+        if self.nn_config.get('loss', 'mae') == 'quantile':
+            loss_fn = self.quantile_loss(0.5)
+
         model.compile(
             optimizer=keras.optimizers.Adam(learning_rate=hyperparams['learning_rate']),
-            loss='mse',
+            loss=loss_fn,
             metrics=['mae']
         )
-        
+
         return model
     
     def create_sequences(self, X: pd.DataFrame, y: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Create sequences for multi-step forecasting.
-        
-        Args:
-            X: Feature matrix
-            y: Target series
-            
-        Returns:
-            Tuple of (X_sequences, y_sequences)
-        """
-        X_sequences = []
-        y_sequences = []
-        
-        # Create sliding windows for 24-hour forecasts
-        for i in range(len(X) - self.forecast_length + 1):
-            # Use current features to predict next 24 hours
-            X_seq = X.iloc[i].values  # Current timestep features
-            y_seq = y.iloc[i:i + self.forecast_length].values  # Next 24 hours
-            
-            if len(y_seq) == self.forecast_length:  # Ensure full sequence
-                X_sequences.append(X_seq)
-                y_sequences.append(y_seq)
-        
+        """Create history and forecast windows for TCN training."""
+
+        X_sequences: list[np.ndarray] = []
+        y_sequences: list[np.ndarray] = []
+
+        total_length = len(X)
+        for i in range(total_length - self.history_length - self.forecast_length + 1):
+            X_seq = X.iloc[i : i + self.history_length].values
+            y_seq = y.iloc[i + self.history_length : i + self.history_length + self.forecast_length].values
+            X_sequences.append(X_seq)
+            y_sequences.append(y_seq)
+
         return np.array(X_sequences), np.array(y_sequences)
     
     def prepare_data(self, X_train: pd.DataFrame, y_train: pd.Series,
@@ -156,7 +143,7 @@ class PVNeuralNet:
         )
         
         # Build model
-        self.model = self.build_model(X_train_seq.shape[1])
+        self.model = self.build_model(X_train_seq.shape[1:])
         
         # Setup callbacks
         callbacks = [
@@ -195,52 +182,48 @@ class PVNeuralNet:
 
 class HyperModel(kt.HyperModel):
     """Hypermodel for Keras Tuner."""
-    
-    def __init__(self, config: Dict, input_shape: int):
+
+    def __init__(self, config: Dict, input_shape: Tuple[int, int]):
         self.config = config
         self.input_shape = input_shape
         self.forecast_length = config['forecast']['forecast_length']
-    
+
     def build(self, hp):
-        """Build model with hyperparameters and learnable bias."""
-        # Hyperparameter search space
-        layers_num = hp.Choice('layers', self.config['neural_net']['search_space']['layers'])
-        units = hp.Choice('units', self.config['neural_net']['search_space']['units'])
+        """Build TCN model for hyperparameter tuning."""
+
+        filters = hp.Choice('filters', self.config['neural_net']['search_space']['filters'])
+        kernel_size = hp.Choice('kernel_size', self.config['neural_net']['search_space']['kernel_size'])
         dropout = hp.Choice('dropout', self.config['neural_net']['search_space']['dropout'])
         learning_rate = hp.Choice('learning_rate', self.config['neural_net']['search_space']['learning_rate'])
-        
-        # Use Functional API for learnable bias
-        inputs = keras.layers.Input(shape=(self.input_shape,))
-        
-        # First layer
-        x = keras.layers.Dense(
-            units,
-            activation='relu'
-        )(inputs)
-        x = keras.layers.Dropout(dropout)(x)
-        
-        # Hidden layers
-        for i in range(layers_num - 1):
-            x = keras.layers.Dense(units, activation='relu')(x)
+
+        inputs = keras.layers.Input(shape=self.input_shape)
+        x = inputs
+        for dilation in self.config['neural_net']['search_space'].get('dilations', [1, 2, 4, 8]):
+            residual = x
+            x = keras.layers.Conv1D(filters=filters,
+                                    kernel_size=kernel_size,
+                                    dilation_rate=dilation,
+                                    padding='causal',
+                                    activation='relu')(x)
             x = keras.layers.Dropout(dropout)(x)
-        
-        # Output layer without bias
-        last = keras.layers.Dense(self.forecast_length, use_bias=False)(x)
-        
-        # Learnable output bias to correct systematic errors
-        bias = tf.Variable(tf.zeros([self.forecast_length]), name='output_bias', trainable=True)
-        outputs = last + bias
-        
-        # Create model
+            if residual.shape[-1] == x.shape[-1]:
+                x = keras.layers.Add()([x, residual])
+
+        x = keras.layers.Flatten()(x)
+        outputs = keras.layers.Dense(self.forecast_length)(x)
+
         model = keras.Model(inputs=inputs, outputs=outputs)
-        
-        # Compile
+
+        loss_fn = 'mae'
+        if self.config['neural_net'].get('loss', 'mae') == 'quantile':
+            loss_fn = PVNeuralNet(self.config).quantile_loss(0.5)
+
         model.compile(
             optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
-            loss='mse',
+            loss=loss_fn,
             metrics=['mae']
         )
-        
+
         return model
 
 
@@ -290,7 +273,7 @@ def train_with_search(config: Dict, nn_forecaster: PVNeuralNet,
     
     # Setup hyperparameter tuner
     tuner = kt.RandomSearch(
-        HyperModel(config, X_train_seq.shape[1]),
+        HyperModel(config, X_train_seq.shape[1:]),
         objective='val_loss',
         max_trials=config['neural_net']['tuner']['max_trials'],
         executions_per_trial=config['neural_net']['tuner']['executions_per_trial'],
@@ -324,8 +307,8 @@ def train_with_search(config: Dict, nn_forecaster: PVNeuralNet,
     # Store results
     nn_forecaster.model = best_model
     nn_forecaster.best_params = {
-        'layers': best_hps.get('layers'),
-        'units': best_hps.get('units'),
+        'filters': best_hps.get('filters'),
+        'kernel_size': best_hps.get('kernel_size'),
         'dropout': best_hps.get('dropout'),
         'learning_rate': best_hps.get('learning_rate')
     }
