@@ -48,7 +48,7 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
         df.loc[df['electricity'] < 0, 'electricity'] = 0
     
     # Forward fill missing values
-    df = df.fillna(method='ffill').fillna(method='bfill')
+    df = df.ffill().bfill()
     
     return df
 

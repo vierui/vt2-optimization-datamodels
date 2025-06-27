@@ -16,7 +16,14 @@ Run as: python 05_daily_forecast_test.py
 # %%
 import sys
 import os
-sys.path.append('../src')
+from pathlib import Path
+
+# Add the forecast/src directory to the Python path
+current_dir = Path(__file__).resolve().parent
+src_dir = current_dir.parent / "src"
+reports_dir = current_dir.parent / "reports"
+data_dir = current_dir.parent.parent / "data"
+sys.path.insert(0, str(src_dir))
 
 import pandas as pd
 import numpy as np
@@ -29,7 +36,7 @@ warnings.filterwarnings('ignore')
 from data_io import load_config, load_and_process_data, create_time_splits
 from features import FeatureEngineer
 from models.arima import SARIMAForecaster
-from models.nn import PVNeuralNet, forecast_nn
+from models.nn import train_nn, forecast_nn, create_sequences
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -40,7 +47,8 @@ plt.style.use('seaborn-v0_8')
 # %%
 def setup_directories():
     """Create necessary directories."""
-    os.makedirs('../reports/daily_tests', exist_ok=True)
+    daily_tests_dir = reports_dir / "daily_tests"
+    os.makedirs(daily_tests_dir, exist_ok=True)
 
 setup_directories()
 
@@ -54,8 +62,8 @@ print("🧪 DAILY FORECAST TEST")
 print("=" * 50)
 
 # Load configuration and data
-config = load_config('../src/config.yaml')
-config['data']['raw_file'] = '../../data/renewables/pv_with_weather_data.csv'
+config = load_config(str(src_dir / "config.yaml"))
+config['data']['raw_file'] = str(data_dir / "renewables" / "pv_with_weather_data.csv")
 df = load_and_process_data(config)
 train_df, val_df, test_df = create_time_splits(df, config)
 
@@ -94,29 +102,70 @@ X_test, y_test = feature_engineer.make_features(test_df, use_weather=True)
 
 print(f"✅ Neural Network features prepared: {X_test.shape}")
 
-# Load Neural Network best parameters and train model
+# Load or train Neural Network model
+model_path = current_dir.parent / "models" / "pv_tcn.h5"
+
 try:
-    with open('../reports/nn_results.json', 'r') as f:
-        nn_results = json.load(f)
-    
-    best_nn_params = nn_results['search_params']
-    print(f"✅ Neural Network best parameters loaded: {best_nn_params}")
-    
-    # Train NN with best parameters
-    nn_forecaster = PVNeuralNet(config)
-    
-    # Update config with best parameters
-    config['neural_net']['manual'] = best_nn_params.copy()
-    config['neural_net']['manual']['batch_size'] = 64
-    config['neural_net']['manual']['epochs'] = 50  # Reduced for speed
-    
-    # Train the model
-    print("Training Neural Network with best parameters...")
-    nn_results_trained = nn_forecaster.train_manual(X_train, y_train, X_val, y_val)
-    trained_nn_model = nn_results_trained['model']
-    
-    print("✅ Neural Network model trained and ready")
-    nn_available = True
+    # First, try to load pre-trained model
+    if model_path.exists():
+        print("📁 Loading pre-trained TCN model...")
+        from tensorflow.keras.models import load_model
+        from models.nn import pinball_loss
+        
+        # Load model with custom loss function
+        trained_nn_model = load_model(model_path, custom_objects={'loss': pinball_loss(0.5)})
+        
+        # Load the saved parameters
+        with open(reports_dir / "nn_results.json", 'r') as f:
+            nn_results = json.load(f)
+        best_nn_params = nn_results['search_params']
+        
+        # Create params dict for compatibility - need to determine correct input_timesteps
+        nn_results_trained = {
+            'model': trained_nn_model,
+            'params': {
+                'filters': best_nn_params.get('units', 128),
+                'n_blocks': best_nn_params.get('layers', 2),
+                'learning_rate': best_nn_params.get('learning_rate', 0.0005)
+            }
+        }
+        
+        print(f"✅ Pre-trained TCN model loaded successfully!")
+        print(f"   Parameters: {best_nn_params}")
+        nn_available = True
+        
+    else:
+        print("🔧 No pre-trained model found, training new TCN...")
+        
+        # Load best parameters
+        with open(reports_dir / "nn_results.json", 'r') as f:
+            nn_results = json.load(f)
+        best_nn_params = nn_results['search_params']
+        
+        # Update config with best parameters for TCN
+        if 'tcn' not in config:
+            config['tcn'] = {}
+        
+        # Map old NN parameters to TCN parameters
+        config['tcn']['filters'] = best_nn_params.get('units', 128)
+        config['tcn']['n_blocks'] = best_nn_params.get('layers', 2)
+        config['tcn']['learning_rate'] = best_nn_params.get('learning_rate', 0.0005)
+        config['tcn']['batch_size'] = 64
+        config['tcn']['epochs'] = 20
+        config['tcn']['patience'] = 5
+        
+        # Train the TCN model
+        print("Training TCN with best parameters...")
+        nn_results_trained = train_nn(config, X_train, y_train, X_val, y_val)
+        trained_nn_model = nn_results_trained['model']
+        
+        # Save the trained model
+        model_path.parent.mkdir(exist_ok=True)
+        trained_nn_model.save(model_path)
+        print(f"✅ Model saved to: {model_path}")
+        
+        print("✅ Neural Network model trained and ready")
+        nn_available = True
     
 except FileNotFoundError:
     print("❌ Neural Network results file not found, using simulation")
@@ -228,18 +277,34 @@ if nn_available:
     except Exception as e:
         print(f"⚠️  Error getting bias values: {e}")
     
-    # Get features for the forecast day
+    # Get features for the forecast day - need to create sequences for TCN
     forecast_day_idx = test_df.index.get_loc(start_time)
     
-    # Create feature vector for the forecast start point
-    X_forecast_point = X_test.iloc[forecast_day_idx:forecast_day_idx+1]
+    # Get input timesteps from trained model params
+    input_timesteps = nn_results_trained['params']['input_timesteps']
+    forecast_length = config["forecast"]["forecast_length"]
     
-    # Create sequence for NN prediction (same format as training)
-    X_forecast_seq = X_forecast_point.values  # Shape: (1, 18)
-    
-    # Generate NN forecast using trained model
-    nn_forecast_raw = forecast_nn(trained_nn_model, X_forecast_seq)
-    nn_forecast = nn_forecast_raw.flatten()[:24]  # Take first 24 hours
+    # Create sequences for TCN prediction
+    if forecast_day_idx >= input_timesteps:
+        # Use features leading up to the forecast point
+        start_idx = forecast_day_idx - input_timesteps
+        end_idx = forecast_day_idx
+        X_sequence = X_test.iloc[start_idx:end_idx]
+        y_dummy = y_test.iloc[start_idx:end_idx]  # Not used but needed for sequence creation
+        
+        # Create proper sequences for TCN
+        X_forecast_seq, _ = create_sequences(X_sequence, y_dummy, input_timesteps, forecast_length)
+        
+        if len(X_forecast_seq) > 0:
+            # Generate TCN forecast using trained model
+            nn_forecast_raw = forecast_nn(trained_nn_model, X_forecast_seq)
+            nn_forecast = nn_forecast_raw.flatten()[:24]  # Take first 24 hours
+        else:
+            print("⚠️  Not enough data for sequence creation, using fallback")
+            nn_forecast = np.zeros(24)
+    else:
+        print(f"⚠️  Not enough historical data (need {input_timesteps} timesteps), using fallback")
+        nn_forecast = np.zeros(24)
     
     print(f"✅ Neural Network forecast generated using trained model: {nn_forecast.min():.3f} to {nn_forecast.max():.3f}")
 else:
@@ -352,7 +417,7 @@ ax4.grid(True, alpha=0.3)
 ax4.set_xticks(range(0, 24, 3))
 
 plt.tight_layout()
-plt.savefig(f'../reports/daily_tests/forecast_comparison_{test_date.date()}.png', 
+plt.savefig(reports_dir / "daily_tests" / f"forecast_comparison_{test_date.date()}.png", 
            dpi=150, bbox_inches='tight')
 plt.show()
 
@@ -399,13 +464,13 @@ test_results = {
 }
 
 # Save to JSON
-results_file = f'../reports/daily_tests/test_results_{test_date.date()}.json'
+results_file = reports_dir / "daily_tests" / f"test_results_{test_date.date()}.json"
 with open(results_file, 'w') as f:
     json.dump(test_results, f, indent=2, default=str)
 
 print(f"\n💾 RESULTS SAVED")
 print(f"✅ Detailed results: {results_file}")
-print(f"✅ Visualization: ../reports/daily_tests/forecast_comparison_{test_date.date()}.png")
+print(f"✅ Visualization: {reports_dir / 'daily_tests' / f'forecast_comparison_{test_date.date()}.png'}")
 
 # %%
 """

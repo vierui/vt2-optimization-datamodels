@@ -44,7 +44,7 @@ neural_net:
     dropout: 0.2
     learning_rate: 0.001
     batch_size: 64
-    epochs: 100
+    epochs: 25  # Reduced for faster training
     
   search_space:
     layers: [1, 2, 3]
@@ -54,13 +54,24 @@ neural_net:
     batch_size: [32, 64, 128]
     
   early_stopping:
-    patience: 8
+    patience: 5  # Reduced for faster convergence
     monitor: "val_loss"
     restore_best_weights: true
     
   tuner:
     max_trials: 20
     executions_per_trial: 1
+
+tcn:
+  filters: 64
+  kernel_size: 3
+  n_blocks: 4
+  dilation_base: 2
+  dropout: 0.2
+  learning_rate: 0.001
+  batch_size: 64
+  epochs: 20  # Reduced - model converges quickly
+  patience: 5  # Early stopping patience
 
 evaluation:
   metrics: ["mae", "rmse", "mape"]

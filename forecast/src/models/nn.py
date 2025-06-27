@@ -1,395 +1,227 @@
 """
-Neural Network model for PV forecasting.
-Supports hyperparameter tuning and manual configuration.
+Temporal Convolutional Network (TCN) forecaster for PV generation.
+Replaces the previous MLP‐based neural network model.
+
+Key design choices
+------------------
+* 1-D dilated causal convolutions with residual blocks (no recurrence)
+* Flexible sequence length (`input_timesteps`, defaults to max   lag in
+  config)
+* Multi-step direct forecasting – one forward pass predicts the next
+  `forecast_length` steps (default 24 h)
+* Pinball / quantile loss (τ = 0.5 ⇒ MAE) implemented as a drop-in
+  replacement for Keras losses
+
+Usage
+-----
+```
+from models.nn import train_tcn, forecast_tcn, evaluate_tcn_forecast
+
+results = train_tcn(config, X_train, y_train, X_val, y_val)
+model   = results["model"]
+…
+y_pred  = forecast_tcn(model, X_test_seq)
+metrics = evaluate_tcn_forecast(y_test_seq, y_pred)
+```
 """
 
-import pandas as pd
+from __future__ import annotations
+
+import logging
+from typing import Dict, Tuple
+
 import numpy as np
+import pandas as pd
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.keras import layers
-import keras_tuner as kt
+from tensorflow.keras import layers as L
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from typing import Dict, Tuple, Optional, Any
-import logging
-import warnings
 
-warnings.filterwarnings('ignore')
 logger = logging.getLogger(__name__)
 
-# Set random seeds for reproducibility
-tf.random.set_seed(42)
-np.random.seed(42)
+# ----------------------------------------------------------------------------
+# Utility: quantile / pinball loss (τ = 0.5 == MAE)
+# ----------------------------------------------------------------------------
 
+def pinball_loss(tau: float = 0.5):
+    """Return the pinball (quantile) loss @ quantile *tau*.
 
-class PVNeuralNet:
-    """Neural Network forecaster for PV generation."""
-    
-    def __init__(self, config: Dict):
-        self.config = config
-        self.nn_config = config['neural_net']
-        self.forecast_length = config['forecast']['forecast_length']
-        
-        self.model = None
-        self.history = None
-        self.best_params = None
-        self.feature_scaler = None
-        self.target_scaler = None
-        
-    def build_model(self, input_shape: int, hyperparams: Dict = None) -> keras.Model:
-        """
-        Build neural network model with learnable output bias.
-        
-        Args:
-            input_shape: Number of input features
-            hyperparams: Hyperparameters (if None uses manual config)
-            
-        Returns:
-            Compiled Keras model with learnable bias
-        """
-        if hyperparams is None:
-            hyperparams = self.nn_config['manual']
-        
-        # Use Functional API for learnable bias
-        inputs = layers.Input(shape=(input_shape,))
-        
-        # First layer
-        x = layers.Dense(
-            hyperparams['units'],
-            activation='relu'
-        )(inputs)
-        x = layers.Dropout(hyperparams['dropout'])(x)
-        
-        # Hidden layers
-        for i in range(hyperparams['layers'] - 1):
-            x = layers.Dense(
-                hyperparams['units'],
-                activation='relu'
-            )(x)
-            x = layers.Dropout(hyperparams['dropout'])(x)
-        
-        # Output layer without bias
-        last = layers.Dense(self.forecast_length, use_bias=False)(x)
-        
-        # Learnable output bias to correct systematic errors
-        bias = tf.Variable(tf.zeros([self.forecast_length]), name='output_bias', trainable=True)
-        outputs = last + bias
-        
-        # Create model
-        model = keras.Model(inputs=inputs, outputs=outputs)
-        
-        # Compile model
-        model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=hyperparams['learning_rate']),
-            loss='mse',
-            metrics=['mae']
-        )
-        
-        return model
-    
-    def create_sequences(self, X: pd.DataFrame, y: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Create sequences for multi-step forecasting.
-        
-        Args:
-            X: Feature matrix
-            y: Target series
-            
-        Returns:
-            Tuple of (X_sequences, y_sequences)
-        """
-        X_sequences = []
-        y_sequences = []
-        
-        # Create sliding windows for 24-hour forecasts
-        for i in range(len(X) - self.forecast_length + 1):
-            # Use current features to predict next 24 hours
-            X_seq = X.iloc[i].values  # Current timestep features
-            y_seq = y.iloc[i:i + self.forecast_length].values  # Next 24 hours
-            
-            if len(y_seq) == self.forecast_length:  # Ensure full sequence
-                X_sequences.append(X_seq)
-                y_sequences.append(y_seq)
-        
-        return np.array(X_sequences), np.array(y_sequences)
-    
-    def prepare_data(self, X_train: pd.DataFrame, y_train: pd.Series,
-                    X_val: pd.DataFrame, y_val: pd.Series) -> Tuple:
-        """
-        Prepare data for neural network training.
-        
-        Args:
-            X_train, y_train: Training features and target
-            X_val, y_val: Validation features and target
-            
-        Returns:
-            Tuple of prepared training and validation data
-        """
-        logger.info("Preparing data for neural network")
-        
-        # Create sequences
-        X_train_seq, y_train_seq = self.create_sequences(X_train, y_train)
-        X_val_seq, y_val_seq = self.create_sequences(X_val, y_val)
-        
-        logger.info(f"Training sequences: {X_train_seq.shape}")
-        logger.info(f"Validation sequences: {X_val_seq.shape}")
-        
-        return X_train_seq, y_train_seq, X_val_seq, y_val_seq
-    
-    def train_manual(self, X_train: pd.DataFrame, y_train: pd.Series,
-                    X_val: pd.DataFrame, y_val: pd.Series) -> Dict:
-        """
-        Train model with manual hyperparameters.
-        
-        Args:
-            X_train, y_train: Training data
-            X_val, y_val: Validation data
-            
-        Returns:
-            Training results dictionary
-        """
-        logger.info("Training neural network with manual parameters")
-        
-        # Prepare data
-        X_train_seq, y_train_seq, X_val_seq, y_val_seq = self.prepare_data(
-            X_train, y_train, X_val, y_val
-        )
-        
-        # Build model
-        self.model = self.build_model(X_train_seq.shape[1])
-        
-        # Setup callbacks
-        callbacks = [
-            keras.callbacks.EarlyStopping(
-                monitor=self.nn_config['early_stopping']['monitor'],
-                patience=self.nn_config['early_stopping']['patience'],
-                restore_best_weights=self.nn_config['early_stopping']['restore_best_weights']
-            ),
-            keras.callbacks.ReduceLROnPlateau(
-                monitor='val_loss',
-                factor=0.5,
-                patience=5,
-                min_lr=1e-6
-            )
-        ]
-        
-        # Train model
-        self.history = self.model.fit(
-            X_train_seq, y_train_seq,
-            validation_data=(X_val_seq, y_val_seq),
-            epochs=self.nn_config['manual']['epochs'],
-            batch_size=self.nn_config['manual']['batch_size'],
-            callbacks=callbacks,
-            verbose=1
-        )
-        
-        # Store best parameters
-        self.best_params = self.nn_config['manual'].copy()
-        
-        return {
-            'model': self.model,
-            'history': self.history.history,
-            'best_params': self.best_params
-        }
-
-
-class HyperModel(kt.HyperModel):
-    """Hypermodel for Keras Tuner."""
-    
-    def __init__(self, config: Dict, input_shape: int):
-        self.config = config
-        self.input_shape = input_shape
-        self.forecast_length = config['forecast']['forecast_length']
-    
-    def build(self, hp):
-        """Build model with hyperparameters and learnable bias."""
-        # Hyperparameter search space
-        layers_num = hp.Choice('layers', self.config['neural_net']['search_space']['layers'])
-        units = hp.Choice('units', self.config['neural_net']['search_space']['units'])
-        dropout = hp.Choice('dropout', self.config['neural_net']['search_space']['dropout'])
-        learning_rate = hp.Choice('learning_rate', self.config['neural_net']['search_space']['learning_rate'])
-        
-        # Use Functional API for learnable bias
-        inputs = keras.layers.Input(shape=(self.input_shape,))
-        
-        # First layer
-        x = keras.layers.Dense(
-            units,
-            activation='relu'
-        )(inputs)
-        x = keras.layers.Dropout(dropout)(x)
-        
-        # Hidden layers
-        for i in range(layers_num - 1):
-            x = keras.layers.Dense(units, activation='relu')(x)
-            x = keras.layers.Dropout(dropout)(x)
-        
-        # Output layer without bias
-        last = keras.layers.Dense(self.forecast_length, use_bias=False)(x)
-        
-        # Learnable output bias to correct systematic errors
-        bias = tf.Variable(tf.zeros([self.forecast_length]), name='output_bias', trainable=True)
-        outputs = last + bias
-        
-        # Create model
-        model = keras.Model(inputs=inputs, outputs=outputs)
-        
-        # Compile
-        model.compile(
-            optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
-            loss='mse',
-            metrics=['mae']
-        )
-        
-        return model
-
-
-def train_nn(config: Dict, X_train: pd.DataFrame, y_train: pd.Series,
-            X_val: pd.DataFrame, y_val: pd.Series, search: bool = True) -> Dict:
+    For *tau* = 0.5 this is equivalent to the MAE up to a factor of 2.
     """
-    Train neural network with or without hyperparameter search.
-    
-    Args:
-        config: Configuration dictionary
-        X_train, y_train: Training data
-        X_val, y_val: Validation data
-        search: Whether to perform hyperparameter search
-        
-    Returns:
-        Training results dictionary
-    """
-    nn_forecaster = PVNeuralNet(config)
-    
-    if search:
-        return train_with_search(config, nn_forecaster, X_train, y_train, X_val, y_val)
-    else:
-        return nn_forecaster.train_manual(X_train, y_train, X_val, y_val)
+
+    def loss(y_true, y_pred):  # pylint:disable=missing-function-docstring
+        err = y_true - y_pred
+        return tf.reduce_mean(tf.maximum(tau * err, (tau - 1) * err))
+
+    return loss
 
 
-def train_with_search(config: Dict, nn_forecaster: PVNeuralNet,
-                     X_train: pd.DataFrame, y_train: pd.Series,
-                     X_val: pd.DataFrame, y_val: pd.Series) -> Dict:
+# ----------------------------------------------------------------------------
+# Temporal Convolutional Network architecture
+# ----------------------------------------------------------------------------
+
+def _tcn_block(x: tf.Tensor, filters: int, kernel_size: int, dilation: int) -> tf.Tensor:
+    """A single causal TCN residual block."""
+    conv1 = L.Conv1D(filters, kernel_size, padding="causal", dilation_rate=dilation,
+                     activation="relu")(x)
+    conv2 = L.Conv1D(filters, kernel_size, padding="causal", dilation_rate=dilation,
+                     activation="relu")(conv1)
+
+    # Match dimensions for residual connection
+    if x.shape[-1] != filters:
+        x = L.Conv1D(filters, 1, padding="same")(x)
+
+    return L.Add()([x, conv2])
+
+
+def build_tcn(input_timesteps: int, n_features: int, forecast_length: int,
+              filters: int = 64, n_blocks: int = 4, kernel_size: int = 3) -> keras.Model:
+    """Build a simple yet effective TCN for multistep forecasting."""
+
+    inp = L.Input(shape=(input_timesteps, n_features))
+    x = inp
+
+    # Stacked residual blocks with exponentially increasing dilations
+    for i in range(n_blocks):
+        x = _tcn_block(x, filters, kernel_size, dilation=2 ** i)
+
+    x = L.LayerNormalization()(x)
+
+    # Global average pooling preserves position-invariant information
+    x = L.GlobalAveragePooling1D()(x)
+
+    out = L.Dense(forecast_length)(x)
+    return keras.Model(inp, out, name="PV_TCN")
+
+
+# ----------------------------------------------------------------------------
+# Data helpers – sequence generator
+# ----------------------------------------------------------------------------
+
+def create_sequences(X: pd.DataFrame, y: pd.Series, input_timesteps: int,
+                     forecast_length: int) -> Tuple[np.ndarray, np.ndarray]:
+    """Convert tabular features to sliding window sequences.
+
+    *X* contains engineered features at 1-h resolution.
     """
-    Train neural network with hyperparameter search.
-    
-    Args:
-        config: Configuration dictionary
-        nn_forecaster: Neural network instance
-        X_train, y_train: Training data
-        X_val, y_val: Validation data
-        
-    Returns:
-        Training results dictionary
+    X_seq, y_seq = [], []
+    total_len = len(X)
+
+    for end in range(input_timesteps, total_len - forecast_length + 1):
+        start = end - input_timesteps
+        X_slice = X.iloc[start:end].values          # shape (timesteps, features)
+        y_slice = y.iloc[end:end + forecast_length].values  # next 24 h
+        X_seq.append(X_slice)
+        y_seq.append(y_slice)
+
+    return np.asarray(X_seq), np.asarray(y_seq)
+
+
+# ----------------------------------------------------------------------------
+# Public training / inference API
+# ----------------------------------------------------------------------------
+
+
+def train_tcn(config: Dict, X_train: pd.DataFrame, y_train: pd.Series,
+              X_val: pd.DataFrame, y_val: pd.Series) -> Dict:
+    """Train a TCN with parameters defined in *config['tcn']*.
+
+    The function keeps the signature similar to the old *train_nn* helper
+    for drop-in replacement in existing notebooks.
     """
-    logger.info("Training neural network with hyperparameter search")
-    
-    # Prepare data
-    X_train_seq, y_train_seq, X_val_seq, y_val_seq = nn_forecaster.prepare_data(
-        X_train, y_train, X_val, y_val
-    )
-    
-    # Setup hyperparameter tuner
-    tuner = kt.RandomSearch(
-        HyperModel(config, X_train_seq.shape[1]),
-        objective='val_loss',
-        max_trials=config['neural_net']['tuner']['max_trials'],
-        executions_per_trial=config['neural_net']['tuner']['executions_per_trial'],
-        directory='../models',
-        project_name='pv_forecasting_tuner'
-    )
-    
-    # Setup callbacks for tuning
+    tcn_cfg = config.setdefault("tcn", {})
+    forecast_len = config["forecast"]["forecast_length"]
+
+    # Hyper-parameters with sensible defaults
+    input_steps = tcn_cfg.get("input_timesteps", max(config["features"]["target_lags"]))
+    filters = tcn_cfg.get("filters", 64)
+    n_blocks = tcn_cfg.get("n_blocks", 4)
+    kernel_size = tcn_cfg.get("kernel_size", 3)
+    batch_size = tcn_cfg.get("batch_size", 64)
+    epochs = tcn_cfg.get("epochs", 100)
+    patience = tcn_cfg.get("patience", 8)
+    learning_rate = tcn_cfg.get("learning_rate", 1e-3)
+    loss_type = tcn_cfg.get("loss", "pinball")  # 'pinball' or 'mae'
+
+    # Prepare sequences
+    X_tr_seq, y_tr_seq = create_sequences(X_train, y_train, input_steps, forecast_len)
+    X_val_seq, y_val_seq = create_sequences(X_val, y_val, input_steps, forecast_len)
+
+    logger.info("Training sequences: %s", X_tr_seq.shape)
+    logger.info("Validation sequences: %s", X_val_seq.shape)
+
+    model = build_tcn(input_steps, X_train.shape[1], forecast_len,
+                      filters=filters, n_blocks=n_blocks, kernel_size=kernel_size)
+
+    loss_fn = pinball_loss(0.5) if loss_type.lower() == "pinball" else "mae"
+    model.compile(optimizer=keras.optimizers.Adam(learning_rate), loss=loss_fn,
+                  metrics=["mae"])
+
     callbacks = [
-        keras.callbacks.EarlyStopping(
-            monitor='val_loss',
-            patience=config['neural_net']['early_stopping']['patience'],
-            restore_best_weights=True
-        )
+        keras.callbacks.EarlyStopping(monitor="val_loss", patience=patience,
+                                      restore_best_weights=True),
+        keras.callbacks.ReduceLROnPlateau(monitor="val_loss", patience=patience // 2,
+                                          factor=0.5, min_lr=1e-6)
     ]
-    
-    # Search for best hyperparameters
-    logger.info("Starting hyperparameter search...")
-    tuner.search(
-        X_train_seq, y_train_seq,
+
+    history = model.fit(
+        X_tr_seq, y_tr_seq,
         validation_data=(X_val_seq, y_val_seq),
-        epochs=50,  # Reduced epochs for search
+        epochs=epochs,
+        batch_size=batch_size,
         callbacks=callbacks,
-        verbose=1
+        verbose=1,
     )
-    
-    # Get best model and parameters
-    best_model = tuner.get_best_models(num_models=1)[0]
-    best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
-    
-    # Store results
-    nn_forecaster.model = best_model
-    nn_forecaster.best_params = {
-        'layers': best_hps.get('layers'),
-        'units': best_hps.get('units'),
-        'dropout': best_hps.get('dropout'),
-        'learning_rate': best_hps.get('learning_rate')
-    }
-    
-    logger.info(f"Best hyperparameters: {nn_forecaster.best_params}")
-    
+
     return {
-        'model': nn_forecaster.model,
-        'tuner': tuner,
-        'best_params': nn_forecaster.best_params
+        "model": model,
+        "history": history.history,
+        "params": {
+            "input_timesteps": input_steps,
+            "filters": filters,
+            "n_blocks": n_blocks,
+            "kernel_size": kernel_size,
+            "batch_size": batch_size,
+            "epochs": epochs,
+            "loss": loss_type,
+            "learning_rate": learning_rate,
+        },
     }
 
 
-def forecast_nn(model: keras.Model, X: np.ndarray) -> np.ndarray:
+def forecast_tcn(model: keras.Model, X_seq: np.ndarray) -> np.ndarray:
+    """Generate forecasts with a trained TCN.
+
+    *X_seq* must have shape (samples, input_timesteps, n_features).
     """
-    Generate forecasts using trained neural network.
-    
-    Args:
-        model: Trained Keras model
-        X: Input features
-        
-    Returns:
-        Forecast array
-    """
-    predictions = model.predict(X, verbose=0)
-    return np.maximum(0, predictions)  # Ensure non-negative
+    pred = model.predict(X_seq, verbose=0)
+    return np.maximum(0, pred)  # electricity generation cannot be negative
 
 
-def evaluate_nn_forecast(y_true: np.ndarray, y_pred: np.ndarray) -> Dict:
-    """
-    Evaluate neural network forecast performance.
-    
-    Args:
-        y_true: True values
-        y_pred: Predicted values
-        
-    Returns:
-        Dictionary with evaluation metrics
-    """
-    # Flatten arrays for evaluation
-    y_true_flat = y_true.flatten()
-    y_pred_flat = y_pred.flatten()
-    
-    # Remove any NaN values
-    mask = ~(np.isnan(y_true_flat) | np.isnan(y_pred_flat))
-    y_true_clean = y_true_flat[mask]
-    y_pred_clean = y_pred_flat[mask]
-    
-    if len(y_true_clean) == 0:
-        return {'error': 'No valid forecast pairs'}
-    
-    mae = mean_absolute_error(y_true_clean, y_pred_clean)
-    rmse = np.sqrt(mean_squared_error(y_true_clean, y_pred_clean))
-    mape = np.mean(np.abs((y_true_clean - y_pred_clean) / (y_true_clean + 1e-8))) * 100
-    
-    # Additional metrics
-    bias = np.mean(y_pred_clean - y_true_clean)
-    r2 = np.corrcoef(y_true_clean, y_pred_clean)[0, 1] ** 2 if len(y_true_clean) > 1 else 0
-    
+def evaluate_tcn_forecast(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, float]:
+    """Compute standard regression metrics."""
+    # Flatten to compute aggregate metrics
+    y_true_f = y_true.reshape(-1)
+    y_pred_f = y_pred.reshape(-1)
+
+    mae = mean_absolute_error(y_true_f, y_pred_f)
+    rmse = np.sqrt(mean_squared_error(y_true_f, y_pred_f))
+    mape = (np.abs((y_true_f - y_pred_f) / (y_true_f + 1e-8)).mean()) * 100
+    bias = (y_pred_f - y_true_f).mean()
+    r2 = np.corrcoef(y_true_f, y_pred_f)[0, 1] ** 2 if len(y_true_f) > 1 else 0.0
+
     return {
-        'mae': mae,
-        'rmse': rmse,
-        'mape': mape,
-        'bias': bias,
-        'r2': r2,
-        'n_samples': len(y_true_clean)
-    } 
+        "mae": mae,
+        "rmse": rmse,
+        "mape": mape,
+        "bias": bias,
+        "r2": r2,
+        "n_samples": len(y_true_f),
+    }
+
+
+# Backward-compatibility aliases ------------------------------------------------
+PVNeuralNet = None               # the old class is deprecated
+train_nn = train_tcn             # notebooks can keep their function calls
+forecast_nn = forecast_tcn
+evaluate_nn_forecast = evaluate_tcn_forecast
