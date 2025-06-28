@@ -1,0 +1,20 @@
+# Paths are relative to the repo root (vt2-optimization-datamodels)
+data_csv: "data/renewables/pv_with_weather_data.csv"
+model_dir: "forecast2/models"
+capacity_kw: 1.0        # for per-unit scaling
+split:
+  train_end: "2021-12-31 23:00"
+  val_end:   "2023-12-31 23:00"
+  test_end:  "2024-01-31 23:00"
+features:
+  lags: [24]            # hours
+  rolling_mean_hrs: 3
+xgb_params:
+  n_estimators: 500
+  learning_rate: 0.05
+  max_depth: 6
+  subsample: 0.8
+  colsample_bytree: 0.8
+  objective: reg:squarederror
+  eval_metric: mae
+  n_jobs: -1 
