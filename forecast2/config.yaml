@@ -1,20 +1,117 @@
-# Paths are relative to the repo root (vt2-optimization-datamodels)
-data_csv: "data/renewables/pv_with_weather_data.csv"
-model_dir: "forecast2/models"
-capacity_kw: 1.0        # for per-unit scaling
+data_csv: data/renewables/dataset.csv
+model_dir: forecast2/models
+capacity_kw: 1.0
 split:
-  train_end: "2021-12-31 23:00"
-  val_end:   "2023-12-31 23:00"
-  test_end:  "2024-01-31 23:00"
+  train_end: 2021-12-31 23:00
+  val_end: 2023-12-31 23:00
+  test_end: 2024-06-30 23:00
 features:
-  lags: [24]            # hours
+  lags:
+  - 1
+  - 2
+  - 24
+  - 48
+  - 168
+  lags_weather:
+  - 1
+  - 24
   rolling_mean_hrs: 3
-xgb_params:
-  n_estimators: 500
-  learning_rate: 0.05
+xgb:
+  n_estimators: 600
   max_depth: 6
-  subsample: 0.8
-  colsample_bytree: 0.8
+  learning_rate: 0.03
+  subsample: 0.9
+  colsample_bytree: 0.9
+  min_child_weight: 1.0
+  gamma: 0.0
+  reg_lambda: 0.0
   objective: reg:squarederror
   eval_metric: mae
-  n_jobs: -1 
+  n_jobs: -1
+xgb_tuning_ranges:
+  n_estimators:
+    min: 300
+    max: 1200
+  max_depth:
+    min: 3
+    max: 8
+  learning_rate:
+    min: 0.01
+    max: 0.1
+    log: true
+  subsample:
+    min: 0.6
+    max: 1.0
+  colsample_bytree:
+    min: 0.6
+    max: 1.0
+  min_child_weight:
+    min: 0.001
+    max: 10.0
+    log: true
+  gamma:
+    min: 0.0
+    max: 5.0
+  reg_lambda:
+    min: 0.0
+    max: 5.0
+tcn:
+  input_timesteps: 168
+  filters: 64
+  n_blocks: 4
+  kernel_size: 3
+  batch_size: 32
+  epochs: 100
+  patience: 10
+  learning_rate: 0.001
+  loss: pinball
+tcn_tuning_ranges:
+  input_timesteps:
+    min: 48
+    max: 336
+  filters:
+    min: 32
+    max: 128
+  n_blocks:
+    min: 2
+    max: 6
+  kernel_size:
+    min: 3
+    max: 7
+  batch_size:
+    min: 16
+    max: 64
+  learning_rate:
+    min: 0.0001
+    max: 0.01
+    log: true
+  patience:
+    min: 5
+    max: 20
+    
+sarima:
+  # Best found parameters: SARIMA(2, 1, 0)×(0, 1, 1, 24)
+  p: 2
+  d: 1
+  q: 0
+  P: 0
+  D: 1
+  Q: 1
+  seasonal_period: 24
+  # Parameter ranges for future tuning
+  max_p: 3
+  max_q: 3
+  max_P: 2
+  max_Q: 2
+  # Training settings
+  information_criterion: aicc
+  stepwise: true
+  trace: true
+  n_fits: 50
+  enforce_stationarity: false
+  enforce_invertibility: false
+  diagnostics:
+    trend_strength: 0.3788
+    seasonal_strength: 0.8667
+    diagnostics_date: 2025-06-29T17:59:17
+prophet: {}
