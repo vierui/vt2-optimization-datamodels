@@ -25,10 +25,10 @@ s = requests.session()
 s.headers = {'Authorization': 'Token ' + token}
 
 # --- PV example ---
-# url = api_base + 'data/pv'
+url = api_base + 'data/weather'
 
 # --- WIND example ---
-url = api_base + 'data/wind'
+# url = api_base + 'data/weather'
 
 args = {
     'lat': 46.2312,
@@ -36,12 +36,20 @@ args = {
     'date_from': '2015-01-01',
     'date_to': '2024-12-31',
     'dataset': 'merra2',
-    'capacity': 1.0,
-    'system_loss': 0.1,
-    'tracking': 0,
-    'tilt': 35,
-    'azim': 180,
-    'format': 'csv'
+    # 'capacity': 1.0,
+    # 'system_loss': 0.1,
+    # 'tracking': 0,
+    # 'tilt': 35,
+    # 'azim': 180,
+    'format': 'csv',
+    # include local time column and header comments:
+    # 'local_time':        'true',
+    'header':            'true',
+    # the four weather vars you want:
+    'var_t2m':           'true',
+    'var_prectotland':   'true',
+    'var_swgdn':         'true',
+    'var_cldtot':        'true',
 }
 
 # --- Start of new section for chunking and fetching ---
@@ -58,7 +66,7 @@ except ValueError:
 # Define output directory relative to the project root
 output_dir = os.path.join(project_root, 'data', 'renewables')
 os.makedirs(output_dir, exist_ok=True)
-file_name = 'wind_data.csv'
+file_name = 'weather_data.csv'
 file_path = os.path.join(output_dir, file_name)
 
 if overall_start_date > overall_end_date:
