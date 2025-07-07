@@ -18,7 +18,10 @@ env/
 scripts/archives/
 notes/
 change/
-report/
+report/out/
+report/config
+report/front/
+report/images/
 
 # Keep LaTeX build artifacts ignored (for backwards compatibility)
 report/*.aux
@@ -35,7 +38,6 @@ __pycache__/
 
 # Temporary excluded folders
 /change/
-/report/
 
 # models
 forecast2/models/*

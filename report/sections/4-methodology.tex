@@ -1,0 +1,134 @@
+\newpage
+\section{Methodology}
+
+\subsection{Data Pipeline and Representative Weeks}
+% Raw weather + SCADA → DuckDB ; extraction of 3 × 168 h seasonal weeks.
+% TODO: Write about:
+% - Raw weather data processing pipeline
+% - SCADA data integration
+% - DuckDB database structure and usage
+% - Extraction of 3 × 168 h seasonal weeks
+% - Data preprocessing and cleaning procedures
+
+A reorganization of the data structure was made, with all relevant grid data now consolidated in 
+the \texttt{data/grid} directory. The configuration was also simplified, moving from a more complex 
+setup to a single \texttt{analysis.json} file, which streamlines the definition of planning horizons, 
+load growth, and representative weeks. 
+
+The grid data is organized in a clear directory structure:
+
+\begin{verbatim}
+            data/grid/
+            |-- analysis.json      # Configuration file
+            |-- buses.csv          # Bus parameters and coordinates
+            |-- generators.csv     # Gen. spec (type, lifetime, capex, etc.)
+            |-- lines.csv          # Transmission line
+            |-- loads.csv          # Load nodes and coordinates  
+            `-- storages.csv       # Storage spec. (lifetime, capex, etc.)
+
+\end{verbatim}
+
+Each CSV file contains the essential parameters for power system modeling. For example, 
+\texttt{generators.csv} includes capacity, costs, and technical parameters for each generator; 
+\texttt{storages.csv} contains energy capacity, power rating, and efficiency values; while 
+\texttt{loads.csv} defines consumption points. This structure enables straightforward data 
+updates and maintains clear separation of concerns between different grid components.
+
+
+The forecasting component, developed in the second part of the semester, further advanced the 
+pipeline. While the initial PV dataset covered only one year with a simple two-column format 
+(\texttt{time,value}), the updated approach extended the dataset to over ten years and incorporated 
+a richer set of predictors, including meteorological variables such as temperature, precipitation, 
+cloud cover, and various irradiance measures. This data was fetched and processed using scripts like
+\texttt{forecast0/pv-renewables.py}, reflecting a more sophisticated feature engineering process 
+to enhance forecasting accuracy. The configuration for this stage is managed via a dedicated 
+\texttt{config.yaml} file, highlighting the evolution towards a more modular and robust pipeline. 
+These improvements demonstrate a growing understanding of data structure and pipeline design, 
+though further refinements are still possible to optimize efficiency and maintainability.
+
+\subsection{Linear to Mixed-Integer Programming Transition}
+
+This section describes the transition from a single-year linear program (LP) to a multi-year mixed-integer linear 
+program (MILP) that embeds investment decisions directly in the optimisation. The migration affects five aspects: 
+the mathematical formulation, capital cost treatment, binary variable design, solver configuration, and the solver 
+back-end. Figure~4-2 gives an overview; each element is detailed below.
+
+\subsubsection{Formulation (Mathematical Model)}
+
+The MILP extends the LP by introducing planning years $y \in Y$, representative seasons $\sigma \in \Sigma$, and 
+binary investment variables. Key sets: $g$ (generators), $s$ (storage), $b$ (buses), $l$ (lines), $y$ (years), 
+$t$ (hours), $\sigma$ (seasons).
+Decision variables include: $\textsf{build}_{g,y},\ \textsf{build}^{\text{stor}}_{s,y} \in \{0,1\}$ 
+(commissioning), $\textsf{inst}_{g,y},\ \textsf{inst}^{\text{stor}}_{s,y} \in \{0,1\}$ (availability), and operational 
+variables for each $(\sigma, y, t)$. The objective minimises operational cost and annualised CAPEX:
+\begin{align*}
+\min\; & \underbrace{\sum_{y\in Y}\sum_{\sigma\in\Sigma}w_\sigma \sum_{t\in T}\sum_{g\in G} c^{\text{marg}}_g\,
+p_{g,\sigma,y,t}}_{\text{operational cost}} \\
+&+ \underbrace{\sum_{y\in Y}\Bigg( \sum_{g\in G}A_g\,\textsf{inst}_{g,y}+ 
+\sum_{s\in S}A_s\,\textsf{inst}^{\text{stor}}_{s,y}\Bigg)}_{\text{annualised CAPEX}}
+\end{align*}
+Constraints include: (1) capacity limits, (2) nodal balance, (3) storage dynamics, and (4) binary linking for asset 
+lifetime. The binary linking ensures at most one build per rolling lifetime window, enforcing realistic replacement 
+logic.
+
+\subsubsection{Lifetime and Annuity CAPEX Handling}
+
+Instead of a lump-sum CAPEX, the MILP internalises an annuity that spreads capital and fixed OPEX over the asset's life. The discount series $D(L,i)$, net-present value $\text{NPV}_a$, and capital-recovery factor $\text{CRF}(L,i)$ yield the annualised cost $A_a$ used in the objective. These are computed once per asset and multiplied by the installed-status binaries, eliminating further discounting in the objective. Implementation is in \texttt{optimization.py} (generators: lines 330--360; storage: 388--413).
+
+\subsubsection{Chunk-based Binary Installation Variables}
+
+The classical year-by-year stock balance scales poorly. The chunk formulation collapses this to one binary per asset-year: $\textsf{build}_{a,y}=1$ activates a whole lifetime chunk, and overlapping chunks are forbidden. This reduces the number of binaries and constraints, eliminates slack variables, and natively supports retirement. Implementation is compact (lines 96--108, 104--118). Benefits: constant binaries per asset, no duplicates, and no load-shedding slack.
+
+\subsubsection{Branch-and-cut Improvements}
+
+Switching to CPLEX enables advanced MIP heuristics: a strict time limit (18 min), parallel threads (10), and tight MIP gap tolerances (1\% relative, $1.0$ absolute). CPLEX's automatic lazy-cut generation accelerates convergence---branch counts dropped from $>100$k (CBC) to $\approx 3$k. The problem remains convex except for binaries, so these features yield substantial speed-ups.
+
+\subsubsection{Solver Change (Gurobi/GLPK $\rightarrow$ CPLEX)}
+
+The API moved from PuLP (CBC, GLPK) to CVXPY 2.0+ (CPLEX). The paradigm shifted from single-scenario LP to multi-year MILP. Academic CPLEX is used via a thin adapter: \texttt{investment\_multi()} wraps the model, calls \texttt{prob.solve(solver=cp.CPLEX, ...)}, and serialises results. Vectorised constraint building (lines 142--206) replaces nested Python loops, leveraging CVXPY's broadcasting for a $7\times$ speed-up in model build time.
+
+\textbf{Recap:} Migrating from LP to MILP enabled discrete investment timing, lifetime-based replacement, and a realistic annuity cost model, while keeping operating constraints linear. Combined with tighter branch-and-cut controls and a high-performance solver, the new formulation solves 10-year planning cases in under 20 minutes, versus several hours previously.
+
+\subsection{Forecasting Module}
+% TODO: Cover the following subsections:
+
+\subsubsection{Feature Engineering}
+% TODO: Write about:
+% - Lag variables and temporal features
+% - Solar geometry calculations
+% - Weather feature preprocessing
+% - Feature selection and importance analysis
+
+\subsubsection{Model Pool}
+% TODO: Write about:
+% - SARIMA statistical models
+% - Prophet forecasting framework
+% - XGBoost gradient boosting
+% - TCN (Temporal Convolutional Networks)
+% - Model comparison and selection criteria
+
+\subsubsection{Hyperparameter Tuning}
+% TODO: Write about:
+% - Automated hyperparameter optimization
+% - Cross-validation strategies
+% - Performance metrics for tuning
+% - Optuna integration
+
+\subsubsection{Error Propagation Scenarios for MILP}
+% TODO: Write about:
+% - Forecast uncertainty quantification
+% - Scenario generation from forecast errors
+% - Integration with optimization model
+% - Robustness testing protocols
+
+\subsection{Architecture}
+% Module map ( pre.py, network.py, optimization.py, forecast2/… )
+% Poetry env, tests, CI pipeline.
+% TODO: Write about:
+% - Module structure and organization
+% - Key modules: pre.py, network.py, optimization.py, forecast2/
+% - Poetry environment management
+% - Testing framework and strategies
+% - CI/CD pipeline implementation
+
+\newpage
