@@ -1,38 +1,65 @@
-\newpage
+% --- Literature and Toolchain Review ---
 \section{Literature and Toolchain Review}
 
 \subsection{Mixed-Integer Programming in Power-System Planning}
-% Why binaries matter
-% Common formulations (UC, storage)
-% TODO: Write about:
-% - Importance of binary variables in power system planning
-% - Common formulations for Unit Commitment (UC)
-% - Storage system modeling with binary variables
-% - Investment decision modeling with integer constraints
+Mixed-Integer Programming (MILP) is an improved version of Linear Programming (LP) 
+that allows to solve problems with discrete variables for example whether a unit is on or off
+(unit commitment). Such binary decisions can not be modelled with pure linear programming.
+This allows to integrate investment (capital expenditure) and operational (dispatch, or operating cost)
+decisions into one optimization framework. One can co-optimize the true least-cost solution 
+that considers both capex and opex together. \cite{andersson2004power, wood2013power}.
+
+Formulating generation expansion planning (GEP) as an MILP captures the binary nature of building 
+decisions (build vs. not build) and can include operational details like unit commitment. Despite being possible to include operation 
+details such as minimum on/off time, rampe rates, etc. in the model, it was not done in this project.
+Not only is it more realistic but it also avoids suboptimal decisions that could arise from 
+treating planning and operation separately.
 
 \subsection{Short-term PV/Wind Forecasting Methods}
-% Statistical (SARIMA) vs ML (XGBoost, TCN, etc.)
-% TODO: Write about:
-% - Statistical methods: SARIMA models and their applications
-% - Machine learning approaches: XGBoost, TCN, and other methods
-% - Comparison of statistical vs ML approaches
-% - Performance characteristics and trade-offs
+Short-term forecasting of photovoltaic (PV) or wind power is vital for grid operations. 
+Approaches include:
+\begin{itemize}
+    \item \textbf{Persistence/Empirical}: Simple baselines, e.g., assuming tomorrow equals today.
+    \item \textbf{Physical/NWP}: Use weather forecasts and physical models for power prediction.
+    \item \textbf{Statistical}: ARIMA/SARIMA and ARIMAX models learn from historical data and 
+    exogenous variables \cite{predictive_modeling_notes}. They are interpretable and 
+    data-efficient but limited for nonlinearities.
+    \item \textbf{Machine Learning}: Methods like neural networks, SVR, and especially gradient 
+    boosting (e.g., XGBoost) capture complex patterns and often outperform statistical models 
+    when sufficient data is available \cite{grzebyk2021xgboost, zhong2020xgboost, scikit-learn}. 
+    Gradient boosting is noted for its accuracy and speed in PV/wind forecasting.
+    \item \textbf{Hybrid/Ensemble}: Combine models (e.g., ARIMA+ANN) for improved robustness, 
+    though added complexity may not always yield better results.
+\end{itemize}
+Given these findings, we used gradient boosting (XGBoost) for forecasting, with SARIMA as a 
+baseline.
 
 \subsection{Solver Landscape and Selection}
-% Open-source vs commercial; rationale for choosing CPLEX
-% TODO: Write about:
-% - Open-source solver options (GLPK, CBC, etc.)
-% - Commercial solver advantages (CPLEX, Gurobi)
-% - Rationale for choosing CPLEX
-% - Performance comparisons and licensing considerations
+Solving large MILPs requires robust solvers. Commercial options (CPLEX, Gurobi, Xpress) are 
+state-of-the-art, offering fast solve times and reliability \cite{mitchell2011pulp, forrest2018cbc}. 
+Open-source solvers (CBC, GLPK, SCIP, HiGHS) are free but generally slower and less robust. 
+Benchmarks show Gurobi and CPLEX are typically 12--100x faster than CBC, and commercial solvers 
+solve more instances to optimality \cite{mittelmann2023benchmarks}.
+
+For this project, CPLEX was chosen for the sake of understanding the solver and for having a 
+academic license. Additionally, CPLEX offers a Python API (docplex), which made integration with 
+our Python-based workflow straightforward
 
 \subsection{Python Ecosystem for Optimisation and ML}
-% CVXPY, docplex, Optuna, TensorFlow, XGBoost, etc.
-% TODO: Write about:
-% - Optimization libraries: CVXPY, docplex
-% - Hyperparameter tuning: Optuna
-% - Machine learning frameworks: TensorFlow, XGBoost
-% - Integration and workflow considerations
-% - Library selection rationale
+This interoperability and abundance of libraries is a major reason Python is so dominant in these 
+fields today. Our literature review also confirmed that many recent research works in energy systems 
+adopt Python for similar tasks, citing its balance of user-friendliness and powerful capabilities
+
+Below is a list of the most relevant libraries for optimization and machine learning:
+
+\begin{itemize}
+    \item For optimization, libraries like PuLP and Pyomo allow flexible model formulation and 
+    solver switching \cite{mitchell2011pulp}. We used the CPLEX Python API (docplex) for direct 
+    integration. 
+    \item For ML, scikit-learn and XGBoost provide powerful tools for data processing and 
+    forecasting. Others librairies such as PyTorch, TensorFlow, and Keras are the reference ones 
+    for deep learning and neural networks \cite{scikit-learn}. 
+    \item Statsmodels was used for time-series (SARIMA) modeling as a baseline model.
+\end{itemize}
 
 \newpage

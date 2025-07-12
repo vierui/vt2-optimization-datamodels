@@ -10,10 +10,10 @@
 % - Extraction of 3 × 168 h seasonal weeks
 % - Data preprocessing and cleaning procedures
 
-A reorganization of the data structure was made, with all relevant grid data now consolidated in 
-the \texttt{data/grid} directory. The configuration was also simplified, moving from a more complex 
-setup to a single \texttt{analysis.json} file, which streamlines the definition of planning horizons, 
-load growth, and representative weeks. 
+The data structure was reorganized and simplified in the context of the optimization framework change. 
+All the relevant grid data is now consolidated in the \texttt{data/grid} directory. The configuration 
+is now setup to in a single \texttt{analysis.json} file, which streamlines the definition of planning 
+horizons, annual load growths, and representative weeks selection. 
 
 The grid data is organized in a clear directory structure:
 
@@ -28,27 +28,20 @@ The grid data is organized in a clear directory structure:
 
 \end{verbatim}
 
-Each CSV file contains the essential parameters for power system modeling. For example, 
-\texttt{generators.csv} includes capacity, costs, and technical parameters for each generator; 
-\texttt{storages.csv} contains energy capacity, power rating, and efficiency values; while 
-\texttt{loads.csv} defines consumption points. This structure enables straightforward data 
-updates and maintains clear separation of concerns between different grid components.
+This structure enables straightforward data updates and maintains clear separation of concerns 
+between different grid components.
 
 
-The forecasting component, developed in the second part of the semester, further advanced the 
-pipeline. While the initial PV dataset covered only one year with a simple two-column format 
-(\texttt{time,value}), the updated approach extended the dataset to over ten years and incorporated 
-a richer set of predictors, including meteorological variables such as temperature, precipitation, 
-cloud cover, and various irradiance measures. This data was fetched and processed using scripts like
-\texttt{forecast0/pv-renewables.py}, reflecting a more sophisticated feature engineering process 
-to enhance forecasting accuracy. The configuration for this stage is managed via a dedicated 
-\texttt{config.yaml} file, highlighting the evolution towards a more modular and robust pipeline. 
-These improvements demonstrate a growing understanding of data structure and pipeline design, 
-though further refinements are still possible to optimize efficiency and maintainability.
+The forecasting framework feature has specific pipeline. While the initial photovoltaic (PV) dataset
+covered only one year with a simple two-column format (\texttt{time,value}), the updated approach 
+extended the dataset to over ten years and incorporated a richer set of predictors, including 
+meteorological variables such as temperature, precipitation, cloud cover, and various irradiance 
+measures. This data is fetched using renewables.ninja's API. The configuration for this stage is managed via a dedicated 
+\texttt{config.yaml} file, highlighting the evolution towards standardised structures and more robust pipelines. 
 
 \subsection{Linear to Mixed-Integer Programming Transition}
 
-This section describes the transition from a single-year linear program (LP) to a multi-year mixed-integer linear 
+Described below, the transition from a single-year linear program (LP) to a multi-year mixed-integer linear 
 program (MILP) that embeds investment decisions directly in the optimisation. The migration affects five aspects: 
 the mathematical formulation, capital cost treatment, binary variable design, solver configuration, and the solver 
 back-end. Figure~4-2 gives an overview; each element is detailed below.
@@ -73,53 +66,105 @@ logic.
 
 \subsubsection{Lifetime and Annuity CAPEX Handling}
 
-Instead of a lump-sum CAPEX, the MILP internalises an annuity that spreads capital and fixed OPEX over the asset's life. The discount series $D(L,i)$, net-present value $\text{NPV}_a$, and capital-recovery factor $\text{CRF}(L,i)$ yield the annualised cost $A_a$ used in the objective. These are computed once per asset and multiplied by the installed-status binaries, eliminating further discounting in the objective. Implementation is in \texttt{optimization.py} (generators: lines 330--360; storage: 388--413).
+Instead of a lump-sum CAPEX, the MILP internalises an annuity that spreads capital and fixed OPEX over the asset's life. 
+The discount series $D(L,i)$, net-present value $\text{NPV}_a$, and capital-recovery factor $\text{CRF}(L,i)$ yield the 
+annualised cost $A_a$ used in the objective. These are computed once per asset and multiplied by the installed-status binaries, 
+eliminating further discounting in the objective. Implementation is in \texttt{optimization.py} (generators: lines 330--360; 
+storage: 388--413).
 
 \subsubsection{Chunk-based Binary Installation Variables}
 
-The classical year-by-year stock balance scales poorly. The chunk formulation collapses this to one binary per asset-year: $\textsf{build}_{a,y}=1$ activates a whole lifetime chunk, and overlapping chunks are forbidden. This reduces the number of binaries and constraints, eliminates slack variables, and natively supports retirement. Implementation is compact (lines 96--108, 104--118). Benefits: constant binaries per asset, no duplicates, and no load-shedding slack.
+The classical year-by-year stock balance scales poorly. The chunk formulation collapses this to one binary per asset-year: 
+$\textsf{build}_{a,y}=1$ activates a whole lifetime chunk, and overlapping chunks are forbidden. This reduces the number of 
+binaries and constraints, eliminates slack variables, and natively supports retirement. Implementation is compact 
+(lines 96--108, 104--118). Benefits: constant binaries per asset, no duplicates, and no load-shedding slack.
 
 \subsubsection{Branch-and-cut Improvements}
 
-Switching to CPLEX enables advanced MIP heuristics: a strict time limit (18 min), parallel threads (10), and tight MIP gap tolerances (1\% relative, $1.0$ absolute). CPLEX's automatic lazy-cut generation accelerates convergence---branch counts dropped from $>100$k (CBC) to $\approx 3$k. The problem remains convex except for binaries, so these features yield substantial speed-ups.
+Switching to CPLEX enables advanced MIP heuristics: a strict time limit (18 min), parallel threads (10), and tight MIP 
+gap tolerances (1\% relative, $1.0$ absolute). CPLEX's automatic lazy-cut generation accelerates convergence---branch counts 
+dropped from $>100$k (CBC) to $\approx 3$k. The problem remains convex except for binaries, so these features yield substantial 
+speed-ups.
 
-\subsubsection{Solver Change (Gurobi/GLPK $\rightarrow$ CPLEX)}
+\subsubsection{Solver Change (GLPK $\rightarrow$ CPLEX)}
 
-The API moved from PuLP (CBC, GLPK) to CVXPY 2.0+ (CPLEX). The paradigm shifted from single-scenario LP to multi-year MILP. Academic CPLEX is used via a thin adapter: \texttt{investment\_multi()} wraps the model, calls \texttt{prob.solve(solver=cp.CPLEX, ...)}, and serialises results. Vectorised constraint building (lines 142--206) replaces nested Python loops, leveraging CVXPY's broadcasting for a $7\times$ speed-up in model build time.
+The API moved from PuLP (CBC, GLPK) to CVXPY 2.0+ (CPLEX). The paradigm shifted from single-scenario LP to multi-year MILP. 
+Academic CPLEX is used via a thin adapter: \texttt{investment\_multi()} wraps the model, calls 
+\texttt{prob.solve(solver=cp.CPLEX, ...)}, and serialises results. Vectorised constraint building (lines 142--206) replaces 
+nested Python loops, leveraging CVXPY's broadcasting for a $7\times$ speed-up in model build time.
 
-\textbf{Recap:} Migrating from LP to MILP enabled discrete investment timing, lifetime-based replacement, and a realistic annuity cost model, while keeping operating constraints linear. Combined with tighter branch-and-cut controls and a high-performance solver, the new formulation solves 10-year planning cases in under 20 minutes, versus several hours previously.
+\textbf{Recap:} Migrating from LP to MILP enabled discrete investment timing, lifetime-based replacement, and a realistic 
+annuity cost model, while keeping operating constraints linear. Combined with tighter branch-and-cut controls and a 
+high-performance solver, the new formulation solves 10-year planning cases in under 2 minutes, versus 10-20 minutes
+previously.
 
 \subsection{Forecasting Module}
-% TODO: Cover the following subsections:
+\label{sec:forecasting-module}
 
-\subsubsection{Feature Engineering}
-% TODO: Write about:
-% - Lag variables and temporal features
-% - Solar geometry calculations
-% - Weather feature preprocessing
-% - Feature selection and importance analysis
+\subsubsection*{a) Feature Engineering}
 
-\subsubsection{Model Pool}
-% TODO: Write about:
-% - SARIMA statistical models
-% - Prophet forecasting framework
-% - XGBoost gradient boosting
-% - TCN (Temporal Convolutional Networks)
-% - Model comparison and selection criteria
+The forecasting pipeline leverages a rich set of features to capture temporal patterns, physical drivers, and exogenous influences. Table~\ref{tab:feature-engineering} summarises the main feature blocks:
 
-\subsubsection{Hyperparameter Tuning}
-% TODO: Write about:
-% - Automated hyperparameter optimization
-% - Cross-validation strategies
-% - Performance metrics for tuning
-% - Optuna integration
+\begin{center}
+\begin{tabular}{llll}
+Block & Variables & Purpose & Implementation Notes \\
+\hline
+Temporal core & hour, month (integer), hour\_sin, hour\_cos, month\_sin, month\_cos & captures diurnal/annual seasonality without sharp jumps & computed in every stage-N script; cyclic encoding reduces tree splits by $\approx$15\% \\
+Lags \& persistence & electricity\_lag\{1,24,48,168\}, irradiance\_direct\_lag\{1,24,48,168\} & provides "yesterday" and "last-week" anchors; improves persistence baseline & generated via a vectorised loop; first rows are dropped to avoid leakage \\
+Rolling means & \{electricity, irradiance\_direct\}\_roll\{24,168\} & noise suppression; exposes diurnal/weekly trend to tree models & min\_periods=w to avoid NaN cascades; yields +0.7 pp MAE gain in Stage-1 \\
+Solar geometry & $\cos(\theta_s)$ (sun-elevation cosine), airmass & orthogonalises irradiance; stabilises winter mornings & computed with PVLib (declination + hour-angle) on-the-fly, cached to DuckDB \\
+Weather drivers & t2m, cldtot, irradiance\_diffuse, wind\_speed & exogenous explanation; key for 24--48~h horizon & raw ECMWF ERA5 hourly grid, bilinearly interpolated to plant \\
+\end{tabular}
+\end{center}
 
-\subsubsection{Error Propagation Scenarios for MILP}
-% TODO: Write about:
-% - Forecast uncertainty quantification
-% - Scenario generation from forecast errors
-% - Integration with optimization model
-% - Robustness testing protocols
+A feature template YAML (Appendix~B) enumerates every candidate column so the pipeline can switch tracks ("basic", "rich", "full") by a single flag.
+
+\subsubsection*{b) Model Pool}
+
+A diverse pool of models is maintained to balance transparency, speed, and predictive power. Table~\ref{tab:model-pool} lists the main candidates:
+
+\begin{center}
+\begin{tabular}{lllll}
+Acronym & Type & Library & Strengths & When Kept \\
+\hline
+SARIMA & statistical & statsmodels & transparent coefficients, quick to benchmark & always --- baseline C against which ML must beat \\
+GBT-C & ensemble & sklearn & fast fit, interpretable importance, robust to collinearity & flagship in Stages 0--4; sets yard-stick \\
+XGBoost & boosted trees & xgboost & better handling of large feature space, native importance + SHAP & activated when feature count $>$ 40 \\
+LSTM \& TCN & deep sequence nets & TensorFlow/Keras & learns long-range patterns, handles non-linearities without heavy engineering & trained only after GBT margin $<$ 0.5 pp MAE gain \\
+Prophet & decomposable model & prophet & plug-and-play seasonality, holiday regressor option & quick sanity check; often out-performed by SARIMA in hourly series \\
+\end{tabular}
+\end{center}
+
+\textbf{Selection logic:} Try SARIMA $\rightarrow$ GBT $\rightarrow$ XGB; deploy LSTM/TCN only if MAE target (Section~3.3) is unbeaten.
+
+\subsubsection*{c) Hyper-parameter Tuning}
+
+Each model undergoes systematic hyper-parameter optimisation, as summarised below:
+
+\begin{center}
+\begin{tabular}{lllll}
+Model & Search Space & Optimiser & Budget & Early-stopping Criterion \\
+\hline
+SARIMA & $p,q \in [0,2]$, $P,Q \in [0,1]$; $d,D$ from ADF; seasonality $S=24$ & grid search & $\leq 12$ configs (Section~4 scripts) & minimum AIC \\
+GBT / XGB & n\_estimators, learning\_rate, max\_depth, subsample, colsample & Optuna TPE & 50 trials $\times$ 5-fold time-CV & $1-\text{MAE}$ plateau $<$ 0.1\% for 10 trials \\
+LSTM / TCN & layers $\in$ [1--3], filters/units $\in$ [32--128], dropout, lr & Optuna + Keras-Pruning & 30 trials & validation MAE on last split; prune after 10 epochs w/o improvement \\
+\end{tabular}
+\end{center}
+
+TimeSeriesSplit (5 $\times$ 30~day) is reused across all searches to respect temporal ordering. The best trial's parameters are persisted to \texttt{mlruns/} for reproducibility.
+
+\subsubsection*{d) Error Propagation Scenarios for MILP}
+
+To assess the impact of forecast uncertainty on system operation and investment, several error-propagation scenarios are implemented:
+\begin{enumerate}
+    \item \textbf{Deterministic run:} Use point forecasts ($\hat{\mu}$) as in Stages~0--4.
+    \item \textbf{Static error bands ($\pm\sigma$):} For each hour, draw upper/lower bounds: $\hat{\mu} \pm k \cdot \text{RMSE}$, with $k=1.28$ ($\approx$80\% coverage). Passed to MILP as robust constraints on renewable availability.
+    \item \textbf{Stochastic realisations (Monte-Carlo):} Fit an empirical residual distribution $\varepsilon = y - \hat{\mu}$. Generate $N=100$ trajectories via block bootstrap (24~h blocks keep autocorrelation). Optimiser is rerun for each trajectory; outputs are aggregated to cost-at-risk (CaR).
+    \item \textbf{Horizon-dependent degradation:} Scale $\sigma$ with lead-time $\lambda$: $\sigma(\lambda) = \sigma_{1h} \cdot (1 + \alpha \lambda)$. Parameter $\alpha$ obtained from Stage-3 "MAE vs horizon" curve. Used for look-ahead $>$24~h where forecast uncertainty widens.
+    \item \textbf{Worst-case envelope:} Combine the 5\%-quantile minima and maxima across Monte-Carlo runs to create a single pessimistic scenario. Ensures security-of-supply constraints remain feasible under extreme, yet plausible, forecast errors.
+\end{enumerate}
+
+All scenarios share the same MILP seed to isolate forecast uncertainty from solver randomness. Results are logged to an "error-propagation" tag set in MLflow and summarised in Section~6.
 
 \subsection{Architecture}
 % Module map ( pre.py, network.py, optimization.py, forecast2/… )

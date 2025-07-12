@@ -1,38 +1,186 @@
 \newpage
 \section{Problem Definition and Scope}
+\label{sec:problem-definition}
+
+This chapter formalises the real-world planning task that the optimisation model is 
+meant to answer and translates it into a mathematical decision problem. 
+Section~\ref{sec:planning-horizon} fixes the temporal and geographical domain of 
+the study; Section~\ref{sec:decision-variables} introduces the decision variables and 
+system constraints that emerge from those boundaries.
 
 \subsection{Planning Horizon and System Boundaries}
-% TODO: Write about:
-% - Multi-year planning horizon definition
-% - System boundaries and geographical scope
-% - Temporal resolution and seasonal representation
-% - Which aspects are excluded (AC power flow, real-time trading, etc.)
-% - Justification for exclusions and scope limitations
+\label{sec:planning-horizon}
+
+\textbf{Temporal horizon} \quad The study covers a multi-year horizon of
+\[
+Y=\{1,\dots,Y_{\max}\},\qquad Y_{\max}\in[10,30]
+\]
+counted from a common base year $y=1$. Each year is represented operationally by three one-week seasons (winter, summer, spring / autumn) that together sum to 52 weeks via weighting factors
+\[
+w_{\text{winter}}=13,\;w_{\text{summer}}=13,\;w_{\text{spri autu}}=26.
+\]
+
+\textbf{Geographical scope} \quad The network model is a single high-voltage control area comprising:
+\begin{itemize}
+    \item $|B|$ transmission buses,
+    \item $|L|$ AC lines modelled with DC susceptance,
+    \item $|G|$ generators (thermal, wind, solar),
+    \item $|S|$ storage units (battery or pumped hydro), and
+    \item deterministic in-area electrical demand profiles.
+\end{itemize}
+
+Interconnection with neighbouring systems is neglected; cross-border trading is implicitly captured by fixed-price imports already embedded in the marginal costs of thermal units. Environmental constraints (emissions, RES quotas) are likewise outside the present scope; they can be added later as linear constraints if needed.
+
+\textbf{Uncertainty handling} \quad All time-series---load, wind and solar availability---are treated as perfect forecasts for the representative weeks. Inter-annual load growth is exogenous and applied through deterministic scaling factors $\gamma_y$. No stochasticity or scenario tree is modelled in Chapter~4; the MILP therefore produces a single, deterministic expansion path.
 
 \subsection{Decision Variables and Constraints}
-% Investment binaries, UC binaries, storage SOC, DC flows
-% TODO: Write about:
-% - Investment binary variables for capacity expansion
-% - Unit commitment binary variables for operational decisions
-% - Storage state of charge (SOC) variables
-% - DC power flow variables
-% - Constraint formulations and mathematical relationships
+\label{sec:decision-variables}
+
+The model couples long-term investment choices with short-term operation. Four families of variables are sufficient; all constraints remain linear.
+
+\begin{center}
+\begin{tabular}{llll}
+Symbol & Nature & Description & Index sets \\
+\hline
+\textsf{build}\(_{a,y}\) & binary & 1 $\Rightarrow$ asset $a$ is commissioned in year $y$ & $a \in G \cup S,\;y \in Y$ \\
+\textsf{inst}\(_{a,y}\) & binary (derived) & 1 $\Rightarrow$ asset $a$ is operational in year $y$ & same \\
+u\(_{g,\sigma,y,t}\) & binary & Unit-commitment status of thermal generator $g$ & thermal $g$, $\sigma \in \Sigma, y, t$ \\
+p\(_{g,\sigma,y,t}\) & continuous $\geq 0$ & Dispatch of generator $g$ (MW) & all $g,\sigma,y,t$ \\
+c\(_{s,\sigma,y,t}\) & continuous $\geq 0$ & Storage charge (MW) & all $s,\sigma,y,t$ \\
+d\(_{s,\sigma,y,t}\) & continuous $\geq 0$ & Storage discharge (MW) & all $s,\sigma,y,t$ \\
+\textsf{soc}\(_{s,\sigma,y,t}\) & continuous $\geq 0$ & State of charge (MWh) & all $s,\sigma,y,t$ \\
+f\(_{l,\sigma,y,t}\) & continuous & DC power flow on line $l$ (MW) & all $l,\sigma,y,t$ \\
+\end{tabular}
+\end{center}
+
+(The current code base allows the UC binaries to be de-activated, but the formulation keeps the slot for future work.)
+
+\subsubsection{Investment logic}
+\begin{enumerate}
+    \item \textbf{Chunk-based lifetime rule}
+    \[
+    \sum_{y'=y-L_a+1}^{y}\textsf{build}_{a,y'}\le 1
+    \quad\forall a,\;y
+    \]
+    forbids commissioning the same asset twice within its lifetime $L_a$.
+    \item \textbf{Installed-status definition}
+    \[
+    \textsf{inst}_{a,y}= \sum_{y'=y-L_a+1}^{y}\textsf{build}_{a,y'}
+    \quad\forall a,\;y
+    \]
+    makes $\textsf{inst}$ a derived binary that switches on exactly in the years covered by the latest build.
+    \item \textbf{Annualised CAPEX} – each installed asset incurs a fixed annuity $A_a$ (Section~4.2b) in every active year and zero otherwise.
+\end{enumerate}
+
+\subsubsection{Operational constraints}
+\begin{enumerate}
+    \item \textbf{Generator capacity}
+    \[
+    0\le p_{g,\sigma,y,t}\le P^{\max}_g
+    \begin{cases}
+    \alpha_{g,\sigma,t}\textsf{inst}_{g,y}, & g\in\{\text{wind},\text{solar}\}\\
+    \textsf{inst}_{g,y}, & \text{thermal}
+    \end{cases}
+    \]
+    where $\alpha$ is the time-varying availability profile.
+    \item \textbf{Unit-commitment (optional)}
+    
+    If UC binaries are enabled:
+    \[
+    p_{g,\sigma,y,t}\le P^{\max}_g u_{g,\sigma,y,t}.
+    \]
+    \item \textbf{Storage dynamics}
+    \[
+    \text{soc}_{s,\sigma,y,t+1}=
+    \text{soc}_{s,\sigma,y,t}+\eta^{\text{in}}_s c_{s,\sigma,y,t}
+    -\frac{1}{\eta^{\text{out}}_s}d_{s,\sigma,y,t}
+    \]
+    with
+    \[
+    0\le\text{soc}_{s,\sigma,y,t}\le E^{\max}_s\textsf{inst}_{s,y}\quad\text{and}\quad
+    \text{soc}_{s,\sigma,y,1}=0.
+    \]
+    \item \textbf{Nodal balance (Kirchhoff)}
+    \[
+    \sum_{g\in G_b} p_{g,\sigma,y,t}
+    +\sum_{s\in S_b} (d_{s,\sigma,y,t}-c_{s,\sigma,y,t})
+    +\sum_{l\in L^{\text{in}}_b} f_{l,\sigma,y,t}
+    = \gamma_y \lambda_{b,\sigma,t}
+    +\sum_{l\in L^{\text{out}}_b} f_{l,\sigma,y,t}
+    \]
+    \item \textbf{DC line limits}
+    \[
+    |f_{l,\sigma,y,t}|\le F^{\max}_l.
+    \]
+    \item \textbf{Season weighting}
+    
+    Operational cost is summed over $w_\sigma$ replicated weeks:
+    \[
+    \sum_{\sigma} w_\sigma\sum_t (\cdot).
+    \]
+\end{enumerate}
+
+With these variables and constraints the model simultaneously decides what to build, when to build it and how to operate the system hour-by-hour in the representative weeks—while rigorously respecting lifetime, network and storage physics.
 
 \subsection{Forecast Horizon and Accuracy Targets}
-% TODO: Write about:
-% - Short-term forecasting horizon definition
-% - Accuracy targets for different forecast types
-% - Integration of forecasts with optimization model
-% - Uncertainty handling and scenario generation
-% - Forecast update frequency and rolling horizon approach
+\label{sec:forecast-horizon}
 
-\subsection{KPIs}
-% Total cost, MILP solve time, forecast MAE/RMSE.
-% TODO: Write about:
-% - Total system cost metrics
-% - MILP solve time performance indicators
-% - Forecast accuracy metrics (MAE/RMSE)
-% - Investment decision quality measures
-% - Operational efficiency indicators
+The integrated workflow (see Figure~4-1) requires two nested time-axes:
+
+\begin{center}
+\begin{tabular}{llll}
+Layer & Resolution & Span & Consumer \\
+\hline
+Forecast module & 1~h & $HF = 0\ldots48$~h rolling & feeds hourly PV/Wind expectations to the MILP \\
+Optimisation core & 1~h (in-model) $\rightarrow$ 168~h representative weeks & $HO = 168$~h per scenario & determines UC, storage dispatch, capex \\
+\end{tabular}
+\end{center}
+
+We therefore define a 48-hour look-ahead as the operational forecast horizon:
+\begin{itemize}
+    \item \textbf{0--6~h ahead (intra-day):} covers balancing-market bids and real-time redispatch.
+    \item \textbf{6--24~h ahead (day-ahead):} coincides with spot-market gate closure.
+    \item \textbf{24--48~h ahead (two-day stability buffer):} protects against low-pressure fronts and forecast drift that would otherwise trigger excessive start-ups in the MILP.
+\end{itemize}
+
+Accuracy targets are expressed in mean-absolute-error (MAE) on the hold-out calendar year 2024:
+
+\begin{center}
+\begin{tabular}{lll}
+Horizon & Target MAE & Rationale \\
+\hline
+1~h & $\leq 5\%$ of mean load & real-time control margin \\
+24~h & $\leq 8\%$ & day-ahead bidding error used by TSOs [ENTSO-E benchmark] \\
+48~h & $\leq 10\%$ & keeps MILP recourse cost $<2\%$ of total cost (Section~6.2) \\
+\end{tabular}
+\end{center}
+
+These thresholds guide model selection in Stages~0--4: any candidate whose cross-validated MAE breaches a band is discarded or re-tuned. Stage-3's Trim~+~BSFS~GBT currently meets the 1~h and 24~h targets and is within 0.6~pp of the 48~h goal; further feature pruning and ensembling are planned.
+
+A horizon-decay analysis (to be added in Section~6.1) will chart MAE versus lead-time to ensure monotonic degradation and reveal any regime-specific bias (e.g., sunset spikes).
+
+\subsection{Key Performance Indicators (KPIs)}
+\label{sec:kpis}
+
+To link forecasting quality with economic impact we track three KPI families:
+
+\begin{center}
+\begin{tabular}{llll}
+Class & Symbol / Unit & Measurement Window & Purpose \\
+\hline
+Economic & $TC$ [€] -- total system cost (objective value) & per optimisation run & Primary goal: minimise net-present cost of generation, storage and purchases. \\
+Computational & $T_{\text{solve}}$ [s] -- MILP wall-clock solve time \\ $\text{gap}_{\text{final}}$ [\%] -- optimality gap & per scenario \& sensitivity sweep & Confirms MILP tractability; target $T_{\text{solve}} \leq 600$~s and $\text{gap} \leq 0.1\%$ on baseline hardware. \\
+Forecasting & MAE, RMSE [kWh] & rolling 48~h forecasts on 2024 hold-out & Inputs for stochastic/error-band scenarios; MAE is ranking metric, RMSE punishes spikes. \\
+\end{tabular}
+\end{center}
+
+\textbf{How they interact}
+\begin{enumerate}
+    \item \textbf{Forecast $\rightarrow$ Economics:} Higher MAE inflates $TC$ via reserve and start-up penalties. Sensitivity runs will quantify the €/MAE gradient.
+    \item \textbf{Forecast $\rightarrow$ Computation:} Poor forecasts enlarge the feasible region (more binaries switch), often raising $T_{\text{solve}}$.
+    \item \textbf{Solver performance:} If $T_{\text{solve}}$ exceeds the rolling forecast refresh (1~h), operational viability is lost; hence the 600~s threshold.
+\end{enumerate}
+
+All KPIs will be logged per experiment run (MLflow for MAE/RMSE; CPLEX-log parser for $T_{\text{solve}}$) and summarised in Section~6. Metrics are reported with 95\% bootstrap CIs to reflect temporal autocorrelation.
 
 \newpage
