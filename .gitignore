@@ -41,3 +41,7 @@ __pycache__/
 
 # models
 forecast2/models/*
+vt1/main.py
+vt1/dcopf.py
+vt1/methodology.tex
+vt1/theoretical.tex

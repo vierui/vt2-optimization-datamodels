@@ -6,14 +6,12 @@ rui vieira
 
 ---
 # 0  Abstract
-
 - What problem does it solve?
 - How is it novel?
 - Results in one paragraph?
 
 ---
 # 1  Introduction
-
 1.1 Context and Motivation ("bring up reason for goals")
 - Rising share of renewables → need for integrated planning and short-term forecasting
 
@@ -28,7 +26,6 @@ rui vieira
 
 ---
 # 2 Literature and Toolchain Review 
-
 2.1 Mixed-Integer Programming in Power-System Planning
 - Why binaries matter
 - Common formulations (UC, storage)
@@ -41,7 +38,6 @@ rui vieira
 
 ---
 # 3 · Problem Definition and Scope 
-
 3.1 Planning Horizon and System Boundaries
 
 3.2 Decision Variables and Constraints
