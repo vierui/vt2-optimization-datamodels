@@ -1,179 +1,110 @@
 \newpage
 \section{Methodology}
 
+This section describes how data move through the tool, how the optimisation model was upgraded from an 
+LP to a MILP, how the forecasting module is built, and how the code is organised.  Section\,4 gives the 
+full maths, Section\,5 the code.
+
 \subsection{Data Pipeline and Representative Weeks}
-% Raw weather + SCADA → DuckDB ; extraction of 3 × 168 h seasonal weeks.
-% TODO: Write about:
-% - Raw weather data processing pipeline
-% - SCADA data integration
-% - DuckDB database structure and usage
-% - Extraction of 3 × 168 h seasonal weeks
-% - Data preprocessing and cleaning procedures
 
-The data structure was reorganized and simplified in the context of the optimization framework change. 
-All the relevant grid data is now consolidated in the \texttt{data/grid} directory. The configuration 
-is now setup to in a single \texttt{analysis.json} file, which streamlines the definition of planning 
-horizons, annual load growths, and representative weeks selection. 
-
-The grid data is organized in a clear directory structure:
+\paragraph{Folder layout}
 
 \begin{verbatim}
-            data/grid/
-            |-- analysis.json      # Configuration file
-            |-- buses.csv          # Bus parameters and coordinates
-            |-- generators.csv     # Gen. spec (type, lifetime, capex, etc.)
-            |-- lines.csv          # Transmission line
-            |-- loads.csv          # Load nodes and coordinates  
-            `-- storages.csv       # Storage spec. (lifetime, capex, etc.)
-
+data/
+ ├─ grid/                  # static network data
+ │   ├─ analysis.json      # horizon, load-growth, season weights
+ │   ├─ buses.csv
+ │   ├─ lines.csv
+ │   ├─ generators.csv
+ │   ├─ loads.csv
+ │   └─ storage_units.csv
+ └─ profiles/              # time-series in UTC
+     ├─ load-2023.csv
+     ├─ wind-2023.csv
+     └─ solar-2023.csv
 \end{verbatim}
 
-This structure enables straightforward data updates and maintains clear separation of concerns 
-between different grid components.
+\paragraph{Pre-processing flow (\texttt{scripts/pre.py})}
 
-
-The forecasting framework feature has specific pipeline. While the initial photovoltaic (PV) dataset
-covered only one year with a simple two-column format (\texttt{time,value}), the updated approach 
-extended the dataset to over ten years and incorporated a richer set of predictors, including 
-meteorological variables such as temperature, precipitation, cloud cover, and various irradiance 
-measures. This data is fetched using renewables.ninja's API. The configuration for this stage is managed via a dedicated 
-\texttt{config.yaml} file, highlighting the evolution towards standardised structures and more robust pipelines. 
-
-\subsection{Linear to Mixed-Integer Programming Transition}
-
-Described below, the transition from a single-year linear program (LP) to a multi-year mixed-integer linear 
-program (MILP) that embeds investment decisions directly in the optimisation. The migration affects five aspects: 
-the mathematical formulation, capital cost treatment, binary variable design, solver configuration, and the solver 
-back-end. Figure~4-2 gives an overview; each element is detailed below.
-
-\subsubsection{Formulation (Mathematical Model)}
-
-The MILP extends the LP by introducing planning years $y \in Y$, representative seasons $\sigma \in \Sigma$, and 
-binary investment variables. Key sets: $g$ (generators), $s$ (storage), $b$ (buses), $l$ (lines), $y$ (years), 
-$t$ (hours), $\sigma$ (seasons).
-Decision variables include: $\textsf{build}_{g,y},\ \textsf{build}^{\text{stor}}_{s,y} \in \{0,1\}$ 
-(commissioning), $\textsf{inst}_{g,y},\ \textsf{inst}^{\text{stor}}_{s,y} \in \{0,1\}$ (availability), and operational 
-variables for each $(\sigma, y, t)$. The objective minimises operational cost and annualised CAPEX:
-\begin{align*}
-\min\; & \underbrace{\sum_{y\in Y}\sum_{\sigma\in\Sigma}w_\sigma \sum_{t\in T}\sum_{g\in G} c^{\text{marg}}_g\,
-p_{g,\sigma,y,t}}_{\text{operational cost}} \\
-&+ \underbrace{\sum_{y\in Y}\Bigg( \sum_{g\in G}A_g\,\textsf{inst}_{g,y}+ 
-\sum_{s\in S}A_s\,\textsf{inst}^{\text{stor}}_{s,y}\Bigg)}_{\text{annualised CAPEX}}
-\end{align*}
-Constraints include: (1) capacity limits, (2) nodal balance, (3) storage dynamics, and (4) binary linking for asset 
-lifetime. The binary linking ensures at most one build per rolling lifetime window, enforcing realistic replacement 
-logic.
-
-\subsubsection{Lifetime and Annuity CAPEX Handling}
-
-Instead of a lump-sum CAPEX, the MILP internalises an annuity that spreads capital and fixed OPEX over the asset's life. 
-The discount series $D(L,i)$, net-present value $\text{NPV}_a$, and capital-recovery factor $\text{CRF}(L,i)$ yield the 
-annualised cost $A_a$ used in the objective. These are computed once per asset and multiplied by the installed-status binaries, 
-eliminating further discounting in the objective. Implementation is in \texttt{optimization.py} (generators: lines 330--360; 
-storage: 388--413).
-
-\subsubsection{Chunk-based Binary Installation Variables}
-
-The classical year-by-year stock balance scales poorly. The chunk formulation collapses this to one binary per asset-year: 
-$\textsf{build}_{a,y}=1$ activates a whole lifetime chunk, and overlapping chunks are forbidden. This reduces the number of 
-binaries and constraints, eliminates slack variables, and natively supports retirement. Implementation is compact 
-(lines 96--108, 104--118). Benefits: constant binaries per asset, no duplicates, and no load-shedding slack.
-
-\subsubsection{Branch-and-cut Improvements}
-
-Switching to CPLEX enables advanced MIP heuristics: a strict time limit (18 min), parallel threads (10), and tight MIP 
-gap tolerances (1\% relative, $1.0$ absolute). CPLEX's automatic lazy-cut generation accelerates convergence---branch counts 
-dropped from $>100$k (CBC) to $\approx 3$k. The problem remains convex except for binaries, so these features yield substantial 
-speed-ups.
-
-\subsubsection{Solver Change (GLPK $\rightarrow$ CPLEX)}
-
-The API moved from PuLP (CBC, GLPK) to CVXPY 2.0+ (CPLEX). The paradigm shifted from single-scenario LP to multi-year MILP. 
-Academic CPLEX is used via a thin adapter: \texttt{investment\_multi()} wraps the model, calls 
-\texttt{prob.solve(solver=cp.CPLEX, ...)}, and serialises results. Vectorised constraint building (lines 142--206) replaces 
-nested Python loops, leveraging CVXPY's broadcasting for a $7\times$ speed-up in model build time.
-
-\textbf{Recap:} Migrating from LP to MILP enabled discrete investment timing, lifetime-based replacement, and a realistic 
-annuity cost model, while keeping operating constraints linear. Combined with tighter branch-and-cut controls and a 
-high-performance solver, the new formulation solves 10-year planning cases in under 2 minutes, versus 10-20 minutes
-previously.
-
-\subsection{Forecasting Module}
-\label{sec:forecasting-module}
-
-\subsubsection*{a) Feature Engineering}
-
-The forecasting pipeline leverages a rich set of features to capture temporal patterns, physical drivers, and exogenous influences. Table~\ref{tab:feature-engineering} summarises the main feature blocks:
-
-\begin{center}
-\begin{tabular}{llll}
-Block & Variables & Purpose & Implementation Notes \\
-\hline
-Temporal core & hour, month (integer), hour\_sin, hour\_cos, month\_sin, month\_cos & captures diurnal/annual seasonality without sharp jumps & computed in every stage-N script; cyclic encoding reduces tree splits by $\approx$15\% \\
-Lags \& persistence & electricity\_lag\{1,24,48,168\}, irradiance\_direct\_lag\{1,24,48,168\} & provides "yesterday" and "last-week" anchors; improves persistence baseline & generated via a vectorised loop; first rows are dropped to avoid leakage \\
-Rolling means & \{electricity, irradiance\_direct\}\_roll\{24,168\} & noise suppression; exposes diurnal/weekly trend to tree models & min\_periods=w to avoid NaN cascades; yields +0.7 pp MAE gain in Stage-1 \\
-Solar geometry & $\cos(\theta_s)$ (sun-elevation cosine), airmass & orthogonalises irradiance; stabilises winter mornings & computed with PVLib (declination + hour-angle) on-the-fly, cached to DuckDB \\
-Weather drivers & t2m, cldtot, irradiance\_diffuse, wind\_speed & exogenous explanation; key for 24--48~h horizon & raw ECMWF ERA5 hourly grid, bilinearly interpolated to plant \\
-\end{tabular}
-\end{center}
-
-A feature template YAML (Appendix~B) enumerates every candidate column so the pipeline can switch tracks ("basic", "rich", "full") by a single flag.
-
-\subsubsection*{b) Model Pool}
-
-A diverse pool of models is maintained to balance transparency, speed, and predictive power. Table~\ref{tab:model-pool} lists the main candidates:
-
-\begin{center}
-\begin{tabular}{lllll}
-Acronym & Type & Library & Strengths & When Kept \\
-\hline
-SARIMA & statistical & statsmodels & transparent coefficients, quick to benchmark & always --- baseline C against which ML must beat \\
-GBT-C & ensemble & sklearn & fast fit, interpretable importance, robust to collinearity & flagship in Stages 0--4; sets yard-stick \\
-XGBoost & boosted trees & xgboost & better handling of large feature space, native importance + SHAP & activated when feature count $>$ 40 \\
-LSTM \& TCN & deep sequence nets & TensorFlow/Keras & learns long-range patterns, handles non-linearities without heavy engineering & trained only after GBT margin $<$ 0.5 pp MAE gain \\
-Prophet & decomposable model & prophet & plug-and-play seasonality, holiday regressor option & quick sanity check; often out-performed by SARIMA in hourly series \\
-\end{tabular}
-\end{center}
-
-\textbf{Selection logic:} Try SARIMA $\rightarrow$ GBT $\rightarrow$ XGB; deploy LSTM/TCN only if MAE target (Section~3.3) is unbeaten.
-
-\subsubsection*{c) Hyper-parameter Tuning}
-
-Each model undergoes systematic hyper-parameter optimisation, as summarised below:
-
-\begin{center}
-\begin{tabular}{lllll}
-Model & Search Space & Optimiser & Budget & Early-stopping Criterion \\
-\hline
-SARIMA & $p,q \in [0,2]$, $P,Q \in [0,1]$; $d,D$ from ADF; seasonality $S=24$ & grid search & $\leq 12$ configs (Section~4 scripts) & minimum AIC \\
-GBT / XGB & n\_estimators, learning\_rate, max\_depth, subsample, colsample & Optuna TPE & 50 trials $\times$ 5-fold time-CV & $1-\text{MAE}$ plateau $<$ 0.1\% for 10 trials \\
-LSTM / TCN & layers $\in$ [1--3], filters/units $\in$ [32--128], dropout, lr & Optuna + Keras-Pruning & 30 trials & validation MAE on last split; prune after 10 epochs w/o improvement \\
-\end{tabular}
-\end{center}
-
-TimeSeriesSplit (5 $\times$ 30~day) is reused across all searches to respect temporal ordering. The best trial's parameters are persisted to \texttt{mlruns/} for reproducibility.
-
-\subsubsection*{d) Error Propagation Scenarios for MILP}
-
-To assess the impact of forecast uncertainty on system operation and investment, several error-propagation scenarios are implemented:
 \begin{enumerate}
-    \item \textbf{Deterministic run:} Use point forecasts ($\hat{\mu}$) as in Stages~0--4.
-    \item \textbf{Static error bands ($\pm\sigma$):} For each hour, draw upper/lower bounds: $\hat{\mu} \pm k \cdot \text{RMSE}$, with $k=1.28$ ($\approx$80\% coverage). Passed to MILP as robust constraints on renewable availability.
-    \item \textbf{Stochastic realisations (Monte-Carlo):} Fit an empirical residual distribution $\varepsilon = y - \hat{\mu}$. Generate $N=100$ trajectories via block bootstrap (24~h blocks keep autocorrelation). Optimiser is rerun for each trajectory; outputs are aggregated to cost-at-risk (CaR).
-    \item \textbf{Horizon-dependent degradation:} Scale $\sigma$ with lead-time $\lambda$: $\sigma(\lambda) = \sigma_{1h} \cdot (1 + \alpha \lambda)$. Parameter $\alpha$ obtained from Stage-3 "MAE vs horizon" curve. Used for look-ahead $>$24~h where forecast uncertainty widens.
-    \item \textbf{Worst-case envelope:} Combine the 5\%-quantile minima and maxima across Monte-Carlo runs to create a single pessimistic scenario. Ensures security-of-supply constraints remain feasible under extreme, yet plausible, forecast errors.
+\item Load the grid CSVs and \texttt{analysis.json}.  
+\item Read the raw time-series files into pandas, then cut three
+      168\,h blocks, one per season.  
+\item Write the sliced DataFrames into a dictionary \texttt{seasons\_profiles}.  
+      The dictionary holds:
+      \(\{\,\text{loads},\,\text{generators},\,\text{wind\_df},\,\text{solar\_df},\,\text{hours}=168\}\).  
+\item Pass \texttt{grid\_data}, \texttt{seasons\_profiles}, and the season weights
+      to the optimisation layer.
 \end{enumerate}
 
-All scenarios share the same MILP seed to isolate forecast uncertainty from solver randomness. Results are logged to an "error-propagation" tag set in MLflow and summarised in Section~6.
+All heavy joins run inside DuckDB.
+The only cleaning step is a timestamp alignment to full hours; out-of-range
+values are clipped, missing values are linearly interpolated.
 
-\subsection{Architecture}
-% Module map ( pre.py, network.py, optimization.py, forecast2/… )
-% Poetry env, tests, CI pipeline.
-% TODO: Write about:
-% - Module structure and organization
-% - Key modules: pre.py, network.py, optimization.py, forecast2/
-% - Poetry environment management
-% - Testing framework and strategies
-% - CI/CD pipeline implementation
+\subsection{Linear-to-Mixed-Integer Upgrade}
 
-\newpage
+The old LP solved one year and assumed all assets were given.  
+The new MILP decides what to build and when, for several years.
+
+\paragraph{What changed}
+
+\begin{itemize}
+\item \textbf{New binaries}  
+      \(\textsf{build}_{g,y}\), \(\textsf{build}_{s,y}\) – build in year \(y\).  
+      \(\textsf{uc}_{g,y,t}\) – on or off for thermal units.  
+      \(\textsf{installed}_{g,y}\), \(\textsf{installed}_{s,y}\) are implied by
+      the build binaries.  
+\item \textbf{New constraints}  
+      Lifetime chunk rule, one build per asset per rolling lifetime.  
+      UC minimum up and down time.  
+      Annual annuity charge equals \(\textsf{installed}\times A_a\).  
+      Storage end-of-week state free within 10\,\% of capacity.  
+\item \textbf{Solver}  
+      CVXPY \(+\) CPLEX, 10 threads, 18 min limit, 1 % gap.  
+\end{itemize}
+
+The flat dictionaries in \texttt{optimization.py} build one vector per
+asset–year–season, so model size scales linearly.
+
+\subsection{Forecasting Module}
+
+The forecaster runs outside the MILP and supplies day-ahead profiles.
+
+\paragraph{Features}
+
+\begin{itemize}
+\item Calendar: hour\_sin, hour\_cos, month\_sin, month\_cos  
+\item Lags: values at \(t-1\), \(t-24\), \(t-168\)  
+\item Rolling means: 24 h, 168 h  
+\item Weather: ERA5 temperature, cloud, diffuse and direct irradiance  
+\item Solar geometry: sun height and airmass from PVLib  
+\end{itemize}
+
+\paragraph{Model ladder}
+
+Start with SARIMA, then Gradient Boosted Trees, then XGBoost.
+Try LSTM only if MAE is still above the 5 % target.
+Optuna tunes hyper-parameters with a five-fold
+time split.
+
+\paragraph{Error scenarios}
+
+Point forecast, static \(\pm\sigma\) band, 100
+Monte-Carlo draws with block bootstrap, horizon-scaled band,
+and a single worst-case envelope.
+Each scenario re-runs the MILP with the same random seed.
+
+\subsection{Code Architecture}
+
+\begin{itemize}
+\item \texttt{pre.py} – data extraction and season slicing  
+\item \texttt{network.py} – light containers for one season and for the
+      multi-season network  
+\item \texttt{optimization.py} – builds and solves the MILP  
+\item \texttt{post.py} – plots, Gantt timeline, summary JSON  
+\item \texttt{forecast/} – forecasting scripts and MLflow tracking  
+\end{itemize}
+
+Poetry pins all package versions.
+Pytest covers unit conversions, key builders, and output schema.
+A GitHub action runs \texttt{pytest} and \texttt{black --check} on every push.
