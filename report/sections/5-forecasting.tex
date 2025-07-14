@@ -1,0 +1,119 @@
+\section{Forecasting}
+\label{sec:forecasting}
+
+This section details the end-to-end design of the forecasting module, from the exploratory benchmarking of several candidate models to the production-ready hybrid built on \textbf{Gradient Boosting} and a residual \textbf{SARIMA} component.  
+We follow the same four-stage development path used in the project (\texttt{stage0}–\texttt{stage4}) and organise the discussion into three core subsections: (i)~methodology and model logic, (ii)~mathematical formulation, and (iii)~code implementation and MLOps integration.
+
+\subsection{Methodology and Model Logic}
+\label{ssec:fcast-method}
+
+\begin{enumerate}[label=\textbf{Stage \arabic*:},leftmargin=1.9cm]
+  \item \textbf{Exploratory baselines.}  
+        Initial notebooks (\texttt{nn-tensor.py}, \texttt{pv\_gaussian.ipynb}) assessed five families: SARIMA, Prophet, Gaussian Process, shallow MLPs and Gradient Boosting (XGBoost).  
+        Feature sets combined \(\mathtt{lag}_{1\dots24}\), Fourier hour/day-of-year terms and optional weather covariates.  MAE ranking on the 2024 hold-out was  
+        \[
+          \text{GP} \;{>} \; \text{XGBoost} \;{>} \; \text{MLP} \;{>} \; \text{SARIMA} \;{>} \; \text{Prophet},
+        \]
+        but GP was discarded for \(\mathcal{O}(n^3)\) runtime.
+
+  \item \textbf{Systematic tuning.}  
+        A \texttt{keras\_tuner} search improved MLPs yet XGBoost (100–500 trees, depth 4–6, learning-rate 0.05) still delivered the best MAE (${-}6.3\%$ vs.\ tuned SARIMA).  
+        Hyper-parameter sweeps were limited to \(\leq 4\text{ h}\) wall-time on CI hardware.
+
+  \item \textbf{Residual analysis and hybrid concept.}  
+        SARIMA’s seasonal component captured the 24-h harmonic perfectly but systematically under-estimated cloud-induced volatility.  
+        We therefore trained XGBoost on \emph{SARIMA residuals} \(\hat\varepsilon_t\) rather than raw \(y_t\).  
+        This split the problem into (i) low-frequency periodicity (linear, transparent) and (ii) high-frequency nonlinear corrections (tree ensemble).
+
+  \item \textbf{Production pipeline.}  
+        Stage 4 notebooks (\texttt{02\_arima.py}, \texttt{04\_modelcomparison.py}) froze the best SARIMA order \((0,1,0)\!\times\!(1,1,1)_{24}\) and best XGBoost geometry, serialised both models and wrapped them in a single Python class \texttt{HybridForecaster}.
+\end{enumerate}
+
+\subsection{Mathematical Formulation}
+\label{ssec:fcast-math}
+
+Let \(\{y_t\}_{t=1}^T\) denote hourly PV production and \(\mathbf{x}_t\) the engineered feature vector at time~\(t\).
+
+\paragraph{Seasonal ARIMA backbone.}
+After seasonal differencing \(d=1, D=1, s=24\)
+\[
+  \Phi(B^{24})\,(1-B^{24}) (1-B) y_t
+  \;=\;
+  \Theta(B^{24})\,\varepsilon_t,
+\]
+with \(\Phi(B^{24}) = 1 - \Phi_1 B^{24}\) and \(\Theta(B^{24}) = 1 + \Theta_1 B^{24}\).  
+Maximum-likelihood on the training set yielded
+\(\widehat\Phi_1 = 0.41,\; \widehat\Theta_1 = 0.37\).
+
+\paragraph{Gradient-boost residual learner.}
+Define residuals
+\(
+  r_t = y_t - \hat{y}^{\text{SARIMA}}_t.
+\)
+A gradient-boosting machine (GBM) fits
+\[
+  \hat f(\mathbf{x}_t)
+  \;=\;
+  \sum_{m=1}^M \eta\; h_m(\mathbf{x}_t),
+\]
+where \(h_m\) are regression trees, \(\eta\in(0,1]\) the learning rate.  
+Objective:
+\(
+  \min_{h_1,\dots,h_M}\;
+  \sum_{t} \ell\!\bigl(r_t, \hat f(\mathbf{x}_t)\bigr)
+  + \sum_{m} \Omega(h_m)
+\)
+with squared-error loss and regulariser
+\(
+  \Omega(h)=\gamma T + \tfrac{1}{2}\lambda\!\!\sum_{j=1}^T w_j^2
+\)
+(as in XGBoost).
+
+\paragraph{Hybrid forecast.}  The final \(h\)-step prediction combines both parts:
+\[
+  \boxed{\;
+    \hat y_t^{\text{Hybrid}}
+    \;=\;
+    \hat y_t^{\text{SARIMA}}
+    \;+\;
+    \hat f(\mathbf{x}_t)
+  \;}
+\]
+The SARIMA component supplies analytic prediction intervals; GBM corrections are treated as mean-zero with empirical variance \(\widehat{\sigma}_{\text{GB}}^2\).  
+Total forecast variance is summed under independence.
+
+\subsection{Code Implementation and MLOps Integration}
+\label{ssec:fcast-code}
+
+\begin{itemize}
+  \item \textbf{Pipeline orchestration.}  
+        All steps are pure functions inside \texttt{forecast/src}:  
+        \texttt{load\_data} \(\to\) \texttt{FeatureEngineer.make\_features} \(\to\) \texttt{fit\_sarima} / \texttt{fit\_gbm} \(\to\) \texttt{HybridForecaster.forecast}.
+        Stage transitions are YAML-driven; changing lags or tree depth requires only editing \texttt{config.yaml}.
+  \item \textbf{Key libraries.}  
+        \texttt{statsmodels~=0.14}, \texttt{xgboost~=2.0}, \texttt{scikit-learn~=1.4}.  
+        Models persist via \texttt{joblib.dump} (SARIMA) and \texttt{XGBRegressor.save\_model}.
+  \item \textbf{Training script.}
+\begin{minted}[fontsize=\small,breaklines]{python}
+from models.baselines import fit_sarima
+from models.gb import fit_gbm, HybridForecaster
+cfg = load_config("config.yaml")
+
+df   = load_and_process_data(cfg)
+X,y  = FeatureEngineer(cfg).make_features(df, use_weather=True)
+
+sarima = fit_sarima(y, cfg['sarima'])
+gbm    = fit_gbm(X,  y - sarima.fittedvalues, cfg['gbm'])
+
+forecaster = HybridForecaster(sarima, gbm, scaler=cfg['scaler'])
+forecaster.save("models/hybrid.joblib")
+\end{minted}
+  \item \textbf{Experiment tracking.}  
+        Each training run appends a record to \texttt{reports/exp\_log.json} with config hash, Git commit and metrics.  These logs can be imported into MLflow later.
+\end{itemize}
+
+\paragraph{Performance summary.}  On the 2024 hold-out year the hybrid achieved
+\(\mathrm{MAE}=0.098~\text{kW}\) (\(\mathbf{-9.1\%}\) vs.\ pure SARIMA; \(-6.3\%\) vs.\ tuned XGBoost alone) with 95\,\% coverage on its analytic+empirical prediction interval, while retaining SARIMA’s interpretability and GBM’s flexibility.
+
+\bigskip
+In production the module retrains monthly on sliding windows, ships forecasts and variance estimates to the optimisation layer, and logs artefacts in a fully reproducible fashion.

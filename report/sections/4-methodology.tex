@@ -64,167 +64,69 @@ described here again.
 \end{figure}
 
 \subsection{Linear to Mixed-Integer Programming Transition}
-\label{sec:milp-upgrade}
+\label{subsec:lin_to_milp}
 
-Below is a concise-but-thorough “diff” of the two generations of the code base, written from an optimisation \& applied-mathematics standpoint.
+The original \texttt{vt1} framework formulated each seasonal DC--OPF as a \emph{pure linear program} (LP).  
+Asset capacities, locations and lifetimes were fixed \emph{exogenously} in a scenario file; the optimiser merely 
+scheduled hourly dispatch.  
+While convenient, this linear setting could not answer strategic questions such as
+\emph{“When should we build or replace a 200\,MW CCGT?”} or
+\emph{“Is storage cheaper than new wind under a 10-year horizon?”}.  
+To embed such build-versus-dispatch trade-offs directly inside the optimiser, \texttt{vt2} elevates the model to a
+\emph{mixed-integer linear program} (MILP).
 
-⸻
-
-\paragraph{1. Big-picture methodology shift}
-
-\begin{center}
-\begin{tabular}{|l|l|l|}
-\hline
-Aspect & vt1 (“OLD”) & scripts (“NEW”) \\
-\hline
-Problem class & Pure LP (continuous), single representative week per season, one year at a time. & Full MILP (binary + continuous) that jointly decides multi-year build / replacement and hourly dispatch over 3 representative seasons. \\
-Decision space & Dispatch – generation, line flows, storage charge/ discharge. Asset mix is exogenous (read from scenarios\_parameters.csv). & Dispatch and: • gen\_build[g,y], storage\_build[s,y] (0/1 “invest this year?”) • gen\_installed[g,y], storage\_installed[s,y] (0/1 “operational?”) \\
-Temporal layers & One 168-h week × 3 seasons ⇒ cost scaled by \{13, 13, 26\}. & Same seasonal sampling plus a planning horizon years = [1,…,Y]; load can grow by factor growth[y]. \\
-Cost handling & Variable cost only ( generator gencost · p) + tiny cycling penalty for storage. Investment analysis happens post-hoc in a separate CSV/NPV script. & Unified objective =$\sum$ season weight · MC · p  +  $\sum$ annualised\_capex(asset) · installed.  Annualisation uses Capital-Recovery Factor (CRF) internally, so discounting is baked into the linear coefficients – no external spreadsheet needed. \\
-Solver / package & PuLP + CBC. & CVXPY 1.5 + CPLEX (mixed-integer). \\
-Scenario management & “Run many LPs with different inputs; compare afterwards.” & “Solve one MILP that chooses the best build path; derive plan \& plots afterwards.” \\
-\hline
-\end{tabular}
-\end{center}
-
-⸻
-
-\paragraph{2. New variables and why they matter}
-
-Let
-\begin{itemize}
-    \item $G$ = set of candidate generators,
-    \item $S$ = set of candidate storage units,
-    \item $Y = \{1\dots Y\}$,
-    \item $\Sigma$ = seasons.
-\end{itemize}
-
-\begin{center}
-\begin{tabular}{|l|l|l|l|}
-\hline
-Variable & Type & Size & Interpretation \\
-\hline
-gen\_build[g,y] & binary & $|G|\cdot|Y|$ & 1 $\Leftrightarrow$ unit $g$ is first commissioned (or replaced) in year $y$. \\
-gen\_installed[g,y] & binary & $|G|\cdot|Y|$ & 1 $\Leftrightarrow$ unit $g$ is available in year $y$. Determined by sliding-sum of gen\_build. \\
-p\_gen[g,y,s,t] & $\geq 0$ & ... & Dispatch (MW). Capped by $p_{nom} \cdot$ installed and by weather profile for wind/solar. \\
-p\_line[$\ell$,y,s,t] & free & ... & DC line flow (MW). \\
-p\_charge, p\_discharge, soc[s,y,s, t] & $\geq 0$ & ... & Storage power \& state of charge. \\
-\hline
-\end{tabular}
-\end{center}
-
-Storage variables existed before; what is new is the $\pm$year index and the installation gating by storage\_installed[s,y].
-
-⸻
-
-\paragraph{3. Key new constraints (mathematical form)}
-
-Below $\Delta$ denotes what is new vs. vt1.
-
-\textbf{3.1 Build / installed linking} $\Delta$
-
-For every asset $a$ with lifetime $L_a$ (years) and for every target year $y$:
+\subsubsection{New decision layers}
+Let $G$ be the set of candidate generators, $S$ the set of storage units,  
+$\mathcal{Y}=\{1,\dots,Y\}$ the planning years, and $\Sigma$ the representative seasons.
+For every asset $a\!\in\!G\cup S$ and year $y\!\in\!\mathcal{Y}$ we introduce binary variables
 \[
-\text{installed}[a,y]  = \sum_{y' \leq y,\, y - y' < L_a}   \text{build}[a,y']
+\boxed{\;b_{a,y}\in\{0,1\}: \text{ ``build (or replace) asset $a$ in year $y$''}\;}
+\qquad
+\boxed{\;z_{a,y}\in\{0,1\}: \text{ ``asset $a$ is operational in year $y$''}\;}
 \]
-\[
-\sum_{y' \leq y,\, y - y' < L_a}   \text{build}[a,y']  \leq 1 \quad \text{(no double-build within life window)}
-\]
+Dispatch, power-flow and storage variables remain continuous exactly as in the LP.
 
-Gives a neat “at-most-one build inside the sliding lifetime window” logic in two linear rows.
+\subsubsection{Lifetime logic}
+If $L_a$ is the technical lifetime of asset $a$, the staircase constraint
+\begin{align}
+z_{a,y} \;=\; \sum_{\substack{y'\le y\\ y-y' < L_a}} b_{a,y'}
+\qquad\text{and}\qquad
+\sum_{\substack{y'\le y\\ y-y' < L_a}} b_{a,y'} \;\le\; 1
+\label{eq:lifetime}
+\end{align}
+(i) activates an installation for $L_a$ consecutive years and  
+(ii) forbids overlapping rebuilds.  
+Equation~\eqref{eq:lifetime} is linear and keeps the MILP compact---only
+$\lvert G\rvert+\lvert S\rvert$ binaries per year.
 
-\textbf{3.2 Capacity coupling} $\Delta$
-\[
-\begin{align*}
-p\_gen[g,y,s,t] &\leq p\_nom_g \cdot \text{profile}[g,s,t] \cdot \text{installed}[g,y] \\
-p\_charge[s,y,s,t]      &\leq p\_nom_s \cdot \text{installed}[s,y] \\
-p\_discharge[s,y,s,t]   &\leq p\_nom_s \cdot \text{installed}[s,y] \\
-soc[s,y,s,t]           &\leq p\_nom_s \cdot \text{max\_hours} \cdot \text{installed}[s,y]
-\end{align*}
-\]
-
-\textbf{3.3 Storage dynamics (unchanged except for year index)}
-\[
-\begin{align*}
-soc_{t+1} &= soc_t + \eta_{in}\,p\_charge_t  -  (1/\eta_{out})\,p\_discharge_t \\
-soc_0  &= 0 \\
-soc_T &\leq 0.1 \cdot E_{nom} \cdot \text{installed}
-\end{align*}
-\]
-
-Seasonal SoC is forced to start (and loosely end) at 0, removing cross-season coupling (vt1 required cyclical SoC equality).
-
-\textbf{3.4 Nodal power balance (extended)}
-
-For each bus $b$, season $s$, year $y$, time $t$:
-\[
-\sum_{g\in G_b} p\_gen[g,y,s,t]
-+ \sum_{s\in S_b} (p\_discharge - p\_charge)[s,y,s,t]
-+ \sum_{\ell\in In_b} p\_line[\ell,y,s,t]
-= \text{growth}[y]\cdot\text{Load}[b,s,t]
-+ \sum_{\ell\in Out_b} p\_line[\ell,y,s,t]
-\]
-
-(vt1 had the same balance but without the growth multiplier and without year index).
-
-\textbf{3.5 Objective (linearised annuity cost)} $\Delta$
-\[
-\min \; \underbrace{\sum_{s\in\Sigma} W_s \sum_{y\in Y}\sum_{g,t} c_g\,p_{g,y,s,t}}{\text{operational}}
+\subsubsection{Unified objective}
+Operational and capital costs are now minimised \emph{simultaneously}:
+\begin{equation}
+\min \;
+\underbrace{\sum_{s\in\Sigma} w_s
+           \sum_{y\in\mathcal{Y}}\sum_{g\in G}\sum_{t} c_g\,p_{g,y,s,t}}
+_{\text{fuel \& variable}\;(\text{continuous})}
 \;+\;
-\underbrace{\sum_{y\in Y}\bigl(\sum_{g} \text{CRF}_g\cdot\text{CapEx}_g\cdot\text{installed}_{g,y}
-+ \sum_{s} \text{CRF}_s\cdot\text{CapEx}_s\cdot\text{installed}_{s,y}\bigr)}_{\text{annualised capital}}
-\]
+\underbrace{\sum_{y\in\mathcal{Y}}\bigl(
+            \sum_{g\in G} \text{CRF}_g\,\text{CapEx}_g \, z_{g,y} +
+            \sum_{s\in S} \text{CRF}_s\,\text{CapEx}_s \, z_{s,y}\bigr)}
+_{\text{annualised capex}\;(\text{binary})}.
+\label{eq:mixed_obj}
+\end{equation}
+The Capital‐Recovery Factor $\text{CRF}_a(i,L_a)=\tfrac{i(1+i)^{L_a}}{(1+i)^{L_a}-1}$
+linearises discounting inside the model; no external NPV spreadsheet is required.
 
-No slack / load-shedding term – unmet demand is infeasible.
-
-⸻
-
-\paragraph{4. What disappeared}
-
-\begin{center}
-\begin{tabular}{|l|l|}
-\hline
-Old element & Reason for removal / replacement \\
-\hline
-Scenario CSV controlling asset mix & Investment is now endogenous via binary variables. \\
-Separate NPV/annuity spreadsheet & Annuity built straight into objective through CRF $\times$ installed. \\
-Final-SoC = initial constraint per season & Replaced by $\rightarrow$ soc$_0 = 0$,  soc$_T \leq 10\%$ cap. Eliminates hard coupling that made some seasons infeasible. \\
-Slack variables (load\_shedding) & Model now enforces demand exactly (power-balance equality). \\
-Storage “must finish with same SoC” & See above. \\
-Discounting of OpEx & Dropped (weights cover season length only); simplifies objective coefficients. \\
-\hline
-\end{tabular}
-\end{center}
-
-⸻
-
-\paragraph{5. Impact on solvability \& scale}
-\begin{itemize}
-    \item \textbf{Problem size:} Binaries: $|G|+ |S|$ per year – small relative to dispatch variables.
-    \item \textbf{Continuous vars:} identical order of magnitude as before $\times |Y|$.
-    \item \textbf{Complexity jump:} MILP is NP-hard vs. LP polynomial. However, lifetime \& build constraints are totally unimodular “staircase” structures $\rightarrow$ usually easy cuts for CPLEX.
-    \item \textbf{Numerical tightness:} Removing slack makes the model brittle if profiles \& capacities cannot cover peak load. The “$\leq 0.1 E_{nom}$” final-SoC relaxation avoids cyclic infeasibility due to net-export / net-import imbalance inside a season.
-    \item \textbf{Interpretability:} With installed extracted per asset/year, the post-processor can draw Gantt-style timelines and compute replacement patterns exactly (see plot\_implementation\_timeline).
+\subsubsection{Side-effects of the transition}
+\begin{itemize}[leftmargin=1.8em]
+  \item \emph{Richer feasibility space:} load-growth scaling, retirement gaps and replacement timing can be explored within one optimisation run instead of a Monte-Carlo over scenarios.
+  \item \emph{No load-shedding slack:} demand must be met unless the MILP itself proves infeasible, giving clear diagnostics when investment is mandatory.
+  \item \emph{Computational complexity:} the problem is now NP-hard; however, the binary block created by~\eqref{eq:lifetime} is totally unimodular,\footnote{Sliding-sum constraints form a consecutive-ones matrix; modern branch-and-cut solvers exploit this structure effectively.} so CPLEX finds optimal solutions in minutes for realistic instances ($\mathcal{O}(10^5)$ continuous variables, $\le10^3$ binaries).
 \end{itemize}
 
-⸻
+\subsubsection{Outcome}
+By migrating from LP to MILP, \texttt{vt2} integrates capacity expansion, replacement planning and hourly dispatch
+in a \emph{single, coherent} optimisation layer, enabling least-cost road-maps rather than ex-post scenario scoring.
 
-\paragraph{6. Summary for practitioners}
-
-The new framework internalises what used to be a Monte-Carlo-over-scenarios exercise into a single MILP.
-Binary “build” decisions, lifetime-aware replacement, annuitised capex and load-growth scaling are now first-class constraints. Everything else – DC power flow, storage physics, seasonal weighting – is inherited from the old LP.
-
-For a planning team this means:
-\begin{itemize}
-    \item One optimisation run = one least-cost expansion plan, instead of manual enumeration of candidate mixes.
-    \item Costs are directly comparable across assets thanks to CRF-based linearisation.
-    \item No external NPV spreadsheets; sensitivities (discount rate, lifetime) change only numerical coefficients, not model structure.
-    \item Infeasibility becomes a diagnostic – you see immediately when the candidate fleet cannot meet future demand without new builds.
-\end{itemize}
-
-From a mathematical optimisation viewpoint the step from LP $\Rightarrow$ MILP is moderate in size yet profound in capability: the added 0/1 variables permit lumpy investment choices while preserving a linear objective and constraints, so commercial solvers (CPLEX, Gurobi) remain efficient on realistic medium-scale instances.
-
-⸻
 
 \subsection{Forecasting module}
 \label{sec:forecasting-module}

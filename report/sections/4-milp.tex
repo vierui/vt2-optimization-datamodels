@@ -159,3 +159,97 @@ With:
 
 Hence the MILP simultaneously finds the least-cost \emph{dispatch} and the cheapest \emph{build / replace} schedule over the planning horizon. It eliminates the need for external spreadsheets computing NPV and manual scenarios comparison.
 \end{adjustwidth}
+
+\subsection{Code Implementation}
+\label{ssec:MILP_code}
+
+The new MILP layer is achieved with **minimal churn** to the original vt1 code:  
+data ingestion and the DC-OPF core are reused almost verbatim, while a handful of
+Python modules inject the binary-investment logic.  
+Figure~\ref{fig:milp_pipeline} sketches the end-to-end data flow.
+
+\begin{figure}[H]
+\centering
+%\includegraphics[width=.85\textwidth]{images/milp_pipeline.pdf}
+\caption{From CSV to optimisation results: the vt2 MILP pipeline.}
+\label{fig:milp_pipeline}
+\end{figure}
+
+\subsubsection*{A.  File roles and interactions}
+
+\begin{center}\small
+\begin{tabular}{p{3cm}p{9cm}}
+
+\toprule
+\textbf{File / Module} & \textbf{What it does (plain English)} \\ 
+
+\midrule
+\texttt{pre.py} & Reads raw CSVs, slices a \emph{typical} week per season, returns a Python \texttt{dict}. \\
+\texttt{network.py} & Two “data-only” classes:  
+\texttt{Network} (one season) and \texttt{IntegratedNetwork} (many seasons + years).  
+They hold Pandas frames but no optimisation code. \\
+\texttt{optimization.py} & Builds the MILP with CVXPY \(\rightarrow\) CPLEX, extracts all variable
+values into a flat JSON-friendly dictionary. \\
+\texttt{main.py} & Command-line front-end: calls \texttt{pre}\(\rightarrow\)\texttt{Network}\(\rightarrow\)\texttt{optimization},
+then hands results to the plotting/post modules. All logging is wired here. \\
+\texttt{post.py} & Turns the flat result dictionary into a Gantt chart, seasonal plots, and an implementation-plan JSON.\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection*{B.  “Smart” touches in the MILP code}
+
+\begin{itemize}
+    \item \textbf{Lifetime window in two rows.}  
+          Listing~\ref{lst:lifetime} builds the \emph{entire} sliding window once; CPLEX then recognises the
+          resulting matrix block as totally unimodular, so branch-and-bound cuts quickly prune binaries.
+          \begin{lstlisting}[language=Python, caption={Lifetime coupling snippet}, label={lst:lifetime}]
+window = [b[(a,yb)] for yb in years if 0 <= y - yb < L_a]
+constraints += [i[(a,y)] == cp.sum(window), cp.sum(window) <= 1]
+          \end{lstlisting}
+    \item \textbf{Vector variables, not 8 760 scalars.}  
+          One CVXPY vector per *(asset, year, season)* packs all 168 hourly values.  
+          Memory drops from \(\mathcal{O}(T\! \times\! \text{assets})\) scalars to a handful of numpy blocks.
+    \item \textbf{Pre-computed bus dictionaries.}  
+          Look-ups like “which generators sit on bus 5 in summer?” are done \emph{once} in Python, then stored as lists; inner power-balance loops just iterate these lists → no expensive Pandas access.
+    \item \textbf{Relaxed seasonal SoC.}  
+          Replacing the hard \(E_{T}=E_{0}\) with a “≤ 10 \%” band avoids infeasibility when a median week has net import or export; yet the inequality is still linear, so the LP relaxation stays tight.
+    \item \textbf{Capital-Recovery baked in.}  
+          Annual cost \(A_a = \mathrm{CRF}_a \cdot C^{\text{cap}}_a\) is computed \emph{before} it reaches the solver.
+          Discount-rate sensitivity therefore changes only coefficients, not the constraint matrix.
+    \item \textbf{Flat-key result map.}  
+          Each optimisation variable value is exported under a self-describing string  
+          \texttt{p\_gen\_\{season\}\_\{asset\}\_\{year\}\_\{hour\}},  
+          making downstream analysis possible with nothing more than \texttt{dict.get()}.
+\end{itemize}
+
+\subsubsection*{C.  Solver migration: CBC \(\rightarrow\) CPLEX}
+
+\begin{itemize}
+    \item \emph{Why CPLEX?}  We now have \(\approx 700\) binary variables; CBC struggled beyond 1–2 years,
+          whereas CPLEX’s presolve and cut families solve a 10-year horizon in \(< 30\) s on a laptop.
+    \item \emph{Parameter hand-off.}  All tuning lives in one dictionary:  
+          \texttt{\{'threads':10, 'timelimit':1080, 'mipgap':0.01\}} — users override via the CLI
+          \texttt{--solver-options '{"timelimit":3600}'}, no code edits needed.
+    \item \emph{Warm-start ready.}  Because binaries only gate capacities, a feasible LP point is trivial
+          (\(b=i=0\)).  If ever needed, this could be passed to CPLEX to cut root-node time further.
+\end{itemize}
+
+\subsubsection*{4.  Possible next tweaks}
+
+\begin{enumerate}[label=\alph*)]
+    \item Replace the looped SoC update with a single sparse Toeplitz matrix product to
+          accelerate CVXPY canonicalisation.  
+    \item Add a lazy-constraint callback so that line thermal limits are added on
+          demand, reducing root-LP size for large grids.  
+    \item Provide an \texttt{xarray} wrapper around the flat dict for more ergonomic
+          analysis in Python notebooks.
+\end{enumerate}
+
+\vspace{0.5em}
+\noindent
+\textbf{Take-away.}  
+With ca.~600 lines of fresh code the project jumps from an LP “dispatch calculator” to a
+multi-year investment MILP while preserving readability and run-time efficiency —
+exactly the sort of incremental upgrade one expects in professional optimisation
+software development.
