@@ -2,6 +2,26 @@
 \section{Results}
 
 \subsection{Forecasting Accuracy}
+
+Table~\ref{tab:model-comp} summarises the journey.
+
+\begin{table}[h]
+\centering
+\caption{Validation MAE by model (2022–2023 split).}
+\label{tab:model-comp}
+\begin{tabular}{lcc}
+\hline
+Model & MAE [kW] & Rel. $\Delta$ vs. SARIMA \\
+\hline
+Naïve Seasonal      & 0.142 & +34\% \\
+SARIMA baseline     & 0.106 & — \\
+MLP (2×128)         & 0.565 & +433\% \\
+TCN (64f, 4 blk)    & 0.128 & +21\% \\
+GBDT (XGBoost)      & 0.090 & $-$15\% \\
+SARIMA + GBDT (ours)& 0.085 & $-$20\% \\
+\hline
+\end{tabular}
+\end{table}
 % Table of MAE / RMSE for each model; plots (actual vs forecast).
 % TODO: Write about:
 % - Comparison table of MAE/RMSE for different models

@@ -179,11 +179,9 @@ Figure~\ref{fig:milp_pipeline} sketches the end-to-end data flow.
 
 \begin{center}\small
 \begin{tabular}{p{3cm}p{9cm}}
-
-\toprule
+\hline
 \textbf{File / Module} & \textbf{What it does (plain English)} \\ 
-
-\midrule
+\hline
 \texttt{pre.py} & Reads raw CSVs, slices a \emph{typical} week per season, returns a Python \texttt{dict}. \\
 \texttt{network.py} & Two “data-only” classes:  
 \texttt{Network} (one season) and \texttt{IntegratedNetwork} (many seasons + years).  
@@ -193,7 +191,7 @@ values into a flat JSON-friendly dictionary. \\
 \texttt{main.py} & Command-line front-end: calls \texttt{pre}\(\rightarrow\)\texttt{Network}\(\rightarrow\)\texttt{optimization},
 then hands results to the plotting/post modules. All logging is wired here. \\
 \texttt{post.py} & Turns the flat result dictionary into a Gantt chart, seasonal plots, and an implementation-plan JSON.\\
-\bottomrule
+\hline
 \end{tabular}
 \end{center}
 
@@ -208,14 +206,14 @@ window = [b[(a,yb)] for yb in years if 0 <= y - yb < L_a]
 constraints += [i[(a,y)] == cp.sum(window), cp.sum(window) <= 1]
           \end{lstlisting}
     \item \textbf{Vector variables, not 8 760 scalars.}  
-          One CVXPY vector per *(asset, year, season)* packs all 168 hourly values.  
+          One CVXPY vector per $(asset, year, season)$ packs all 168 hourly values.  
           Memory drops from \(\mathcal{O}(T\! \times\! \text{assets})\) scalars to a handful of numpy blocks.
     \item \textbf{Pre-computed bus dictionaries.}  
           Look-ups like “which generators sit on bus 5 in summer?” are done \emph{once} in Python, then stored as lists; inner power-balance loops just iterate these lists → no expensive Pandas access.
     \item \textbf{Relaxed seasonal SoC.}  
-          Replacing the hard \(E_{T}=E_{0}\) with a “≤ 10 \%” band avoids infeasibility when a median week has net import or export; yet the inequality is still linear, so the LP relaxation stays tight.
+          Replacing the hard $E_{T}=E_{0}$ with a “$\leq 10 \%$” band avoids infeasibility when a median week has net import or export; yet the inequality is still linear, so the LP relaxation stays tight.
     \item \textbf{Capital-Recovery baked in.}  
-          Annual cost \(A_a = \mathrm{CRF}_a \cdot C^{\text{cap}}_a\) is computed \emph{before} it reaches the solver.
+          Annual cost $A_a = \mathrm{CRF}_a \cdot C^{\text{cap}}_a$ is computed \emph{before} it reaches the solver.
           Discount-rate sensitivity therefore changes only coefficients, not the constraint matrix.
     \item \textbf{Flat-key result map.}  
           Each optimisation variable value is exported under a self-describing string  
@@ -235,7 +233,7 @@ constraints += [i[(a,y)] == cp.sum(window), cp.sum(window) <= 1]
           (\(b=i=0\)).  If ever needed, this could be passed to CPLEX to cut root-node time further.
 \end{itemize}
 
-\subsubsection*{4.  Possible next tweaks}
+\subsubsection*{D.  Possible next tweaks}
 
 \begin{enumerate}[label=\alph*)]
     \item Replace the looped SoC update with a single sparse Toeplitz matrix product to
