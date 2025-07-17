@@ -1,0 +1,25 @@
+dataset: "../data/renewables/dataset.csv"      # EDIT
+output_dir: "outputs"
+
+time_column: "time"
+target_column: "electricity"
+test_start: "2024-01-01"
+
+cv:
+  n_splits: 5
+  horizon_hours: 720            # 30 d
+
+feature_selection:
+  n_keep: 20                    # top-N gain before BSFS
+  backward_keep: 5              # #features to keep before BSFS
+  forward_pool: 3               # #best features to seed forward SFS
+
+sarima:
+  seasonal_period: 24
+  p_values: [0, 1, 2]
+  q_values: [0, 1, 2]
+  P_values: [0, 1]
+  Q_values: [0, 1]
+
+random_state: 42
+plots_first_n_hours: 72
