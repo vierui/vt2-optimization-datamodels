@@ -2,62 +2,79 @@
 \section{Forecasting}
 \label{sec:forecasting}
 
-This section documents the complete forecasting workflow developed in the
-project, from **raw data** to the final **Gradient-Boosted Decision‐Tree
-(GBDT)** model that outperforms every other candidate (the classical SARIMA
-remains our sanity baseline).
+This section walks through the full forecasting pipeline, starting with the
+\emph{raw} data retrieved and ending with the \textbf{Gradient-Boosted Decision-Tree 
+(GBDT)} model that ultimately ships to production.  Each stage—data enrichment, 
+feature engineering, model prototyping, and mathematical grounding—is documented 
+so that a future engineer can reproduce (or challenge) every decision.  The 
+classical seasonal ARIMA (SARIMA) remains our statistical “baseline” and provides 
+the first sanity check for all machine-learning attempts.
 
 \subsection{Data Enrichment}
 \label{subsec:data-enrich}
 
-\textbf{Raw data set.} \\
-    Since February 2025 we use the \textbf{Renewables.ninja Point API}
-    (latitude ${46.231^{\circ}\mathrm{N}}$, longitude ${7.359^{\circ}\mathrm{E}}$)
-    with the MERRA-2 reanalysis to obtain a fully-featured PV record:
-    %
-    \[
-    \{\texttt{time},\;
-    \texttt{electricity},\;
-    \underbrace{\texttt{t2m},\texttt{temperature}}_{\text{air temp}},
-    \texttt{prectotland},\;
-    \texttt{swgdn},\;
-    \texttt{cldtot},\;
-    \texttt{irradiance\_direct},\;
-    \texttt{irradiance\_diffuse}\}.
-    \]
-    %
-    The new channels enrich the former \emph{electricity-only} CSV with
-    thermodynamic and radiative drivers that a purely statistical model
-    (SARIMA) could not tap into.
+The investment model framework we previously developed offers \textbf{one year of 
+hourly energy demand} that we opt to use as a static baseline and scale per asset.  
+For the \emph{forecasting} task, however, a richer data-context is
+essential.
 
-\textbf{Variables} \\
-    \noindent
-    % Table~\ref{tab:raw-vars} summarises the incoming variables.
+\begin{enumerate}[leftmargin=1.2em]
+  \item \textbf{Meteorological history}\\  
+        We query the \emph{Renewables.ninja} Point API
+        (lat.\,$46.231^{\circ}\mathrm{N}$, lon.\,$7.359^{\circ}\mathrm{E}$,
+        Sion) with the MERRA-2 re-analysis and retrieve \textbf{11 complete
+        years} of hourly weather and PV simulation, January 2014 – December 2024.
+  \item \textbf{New data set} \\ 
+        The original \{\texttt{time}, \texttt{electricity}\} table now includes
+        temperature, rain rate, global and diffuse irradiance, cloud cover, and
+        beam normal irradiance such as : 
+    
+        \begin{table}[h]
+        \centering
+        \caption{API variables and physical meaning.}
+        \label{tab:raw-vars}
+        \begin{tabular}{llc}
+        \hline
+        Symbol & Description & Unit \\ \hline
+        $y_t$  & AC electricity output & kW \\
+        $t2m$  & Air temperature @ 2m & $\si{\celsius}$ \\
+        $P_{rain}$ & Precip.\ rate (\texttt{prectotland}) & $\si{\milli\metre\per\hour}$\\
+        $G_{\!\downarrow}$ & Short-wave global irradiance (\texttt{swgdn}) & $\si{\watt\per\square\metre}$\\
+        $C_{tot}$ & Cloud-cover fraction (\texttt{cldtot}) & [0,1] \\
+        $G_{dir}$ & Beam normal irradiance & u.\,k. \\
+        $G_{diff}$ & Diffuse irradiance & u.\,k. \\
+        \texttt{T} & Air temperature & $\si{\celsius}$ \\
+        \hline
+        \end{tabular}
+        \end{table}
 
-    % \begin{table}[h]
-    % \centering
-    % \caption{API variables and physical meaning.}
-    % \label{tab:raw-vars}
-    % \begin{tabular}{llc}
-    % \hline
-    % Symbol & Description & Unit \\ \hline
-    % $y_t$  & AC electricity output & kW \\
-    % $t2m$  & Air temperature @ 2m & $\si{\celsius}$ \\
-    % $P_{rain}$ & Precip.\ rate (\texttt{prectotland}) & $\si{\milli\metre\per\hour}$\\
-    % $G_{\!\downarrow}$ & Short-wave global irradiance (\texttt{swgdn}) & $\si{\watt\per\square\metre}$\\
-    % $C_{tot}$ & Cloud-cover fraction (\texttt{cldtot}) & [0,1] \\
-    % $G_{dir}$ & Beam normal irradiance & u.\,k. \\
-    % $G_{diff}$ & Diffuse irradiance & u.\,k. \\
-    % \hline
-    % \end{tabular}
-    % \end{table}
+        This means that we now have a data set with 9 features and 11 years of hourly data.
+        The table now looks like this :
+        \[
+            \bigl\{
+            time , y_t,\ t2m,\ P_{\text{rain}},\ G_{\!\downarrow},\ C_{tot},\
+            G_{dir},\ G_{diff}, T, \bigr\}.
+        \]
+\end{enumerate}
+
+Some variables feed the model directly; others only serve as building 
+blocks during feature engineering. Data quality was also assessments were
+also performed.
+
 
 \subsection{Feature Engineering}
 \label{subsec:feature-eng}
+Feature engineering involves transforming raw time series data into informative 
+inputs—such as lag values, rolling averages, or seasonal indicators—that help 
+models capture patterns like trend and seasonality.
+
+For SARIMA, features are built into the model via differencing and seasonal terms, 
+while in machine learning, these engineered features explicitly guide the learning
+process to improve prediction accuracy. Features can be grouped into different groups : 
 
 \begin{itemize}
     \item \textbf{Lagged target features} \\
-    – 9 (predictor) columns - Hourly self‐lags capture short-term autocorrelation:
+    9 additional columns - Hourly self‐lags capture short-term autocorrelation:
     \[
     (y_{t-\ell},\;\ell\in\{1,2,3,4,5,6,12,24,168\}).
     \]
@@ -73,18 +90,17 @@ remains our sanity baseline).
     therefore one week.
 
     \item \textbf{Cyclical calendar encodings} \\
-    - 6 (predictor) columns - $(\sin,\cos)$ for hour, weekday, year-day. (also called harmonics features) :
+    6 additional columns - $(\sin,\cos)$ for hour, weekday, year-day. Commonly called harmonics features:
     \[
     \textsf{hour\_sin}(t)=\sin\!\bigl(2\pi\,\tfrac{\text{hour}(t)}{24}\bigr),\qquad
     \textsf{hour\_cos}(t)=\cos\!\bigl(2\pi\,\tfrac{\text{hour}(t)}{24}\bigr).
     \]
  
-\newpage
     \item \textbf{Weather interaction lags} \\
-    - 14 (predictor) columns - 7 vars $\times$ $\{$1 h, 24 h$\}$.
+    14 additional columns - 7 vars $\times$ $\{$1 h, 24 h$\}$.
     To let the model learn delayed radiative effects we create one–hour and 24-hour lags for 
     \emph{every} meteorological column:
-    \begin{lstlisting}[language=Python,caption={Python snippet: weather lag construction}]
+    \begin{lstlisting}[language=Python,caption={Python snippet -- weather lag construction}]
         weather_cols = ["t2m", "prectotland", "swgdn", "cldtot", "irradiance_direct", 
         "irradiance_diffuse"]
     for col in weather_cols:
@@ -93,10 +109,10 @@ remains our sanity baseline).
     \end{lstlisting}
 
     \item \textbf{Scaling} \\
-    - 1 (predictor) column - 7-day rolling mean of $y_t$ used as trend anchor.
+    1 additional column - 7-day rolling mean of $y_t$ used as trend anchor.
     Standardisation is applied \emph{after} all lags are materialised to avoid data leakage:
 
-    \begin{lstlisting}[language=Python,caption={Python snippet: feature/target scaling}]
+    \begin{lstlisting}[language=Python,caption={Python snippet -- feature/target scaling}]
     from sklearn.preprocessing import StandardScaler
     X_scaler, y_scaler = StandardScaler(), StandardScaler()
     X_scaled = X_scaler.fit_transform(X_raw) # predictor matrix
@@ -111,286 +127,294 @@ rare gaps by forward/backward‐fill the design matrix contains
 p = 37 \;\; \text{predictors per hour, grouped as}
 \]
 
-\medskip
-\noindent
-\textbf{Stage-2 BSFS outcome.}  
-Backward Sequential Feature Selection pruned none of the buckets: the
-Gradient-Boosted tree’s SHAP analysis ranked predictors from \emph{all}
-five groups among the top-15 (e.g.\ $G_{dir\_lag\_1}$, $\textsf{hour\_cos}$,
-$y_{t-24}$), confirming each family’s relevance to PV output dynamics.
+\paragraph{Backward Sequential Feature Selection (BSFS).}%
+\label{par:bsfs}
+Stage-2 BSFS removes entire \emph{groups}, not individual columns, until the
+validation MAE stops decreasing.  In practice \emph{all five} buckets
+(lags, calendar, weather lags, trend scaler, raw weather) survive—
+confirmation that each family explains a distinct slice of variance.
 
-\subsection{Prototyping \& Model Pool}
+
+\subsection{Prototyping \& Machine Learning Models}
 \label{subsec:model-pool}
 
-The semester project evolved through \emph{seven} milestones
-(Fig.~\ref{fig:proto-timeline}), each adding a new hypothesis or model
-family.  A concise ``model–by–model'' retrospective is given below.
+To evaluate the performance of the models we used the Mean Absolute Error (MAE) as a metric.
+A statistical benchmark SARIMA sets the baseline and every ML model should first beat it.
+Our original goal was a neural-network solution, so we iterated through increasingly
+sophisticated architectures but ended up switching to tree ensembles because of their 
+interpretability insensitivity to feature scaling and overfitting.
 
-\begin{itemize}
+\subsubsection*{Neural Network Models}
 
-    \item \textbf{M1. Neural Network (NN)} 
-      First seasonal baseline; $\mathrm{MAE}=0.106$ (validation).  
-      \emph{Good:} captures 24h periodicity with zero feature
-      engineering, transparent parameters.  
-      \emph{Bad:} univariate, cannot exploit weather, error grows after
-      $\approx6$ h.
+\begin{enumerate}
+  \item \textbf{Simple Neural Network (NN)}\\
+        A neural network is a computational model inspired by the human brain. 
+        In our model, it consisted of a single layer of interconnected nodes (neurons) 
+        that process data by applying weights, biases, and activation functions.
+        Predictions are made from patterns learned during training.
 
-    \item \textbf{M2. Multilayer Perceptron (MLP)}  
-      \begin{itemize}
-        \item 2 layers $\times$ 128 units, trained on the same 37-dim matrix.  
-        \item \emph{Good:} multivariate, non-linear.  
-        \item \emph{Bad:} large positive bias ($\approx0.39$ kW),
-        $\mathrm{MAE}=0.56$—worse than SARIMA, over-fit night signal → daytime bias
-      \end{itemize}
+        \emph{Bad:} fails to capture strong seasonality $\rightarrow$ high bias.
+  \item \textbf{Multilayer Perceptron (MLP)}\\
+        MLP is a specific type of neural network: a fully connected feedforward neural 
+        network with one or more hidden layers and nonlinear activation functions.
+        We searched (tuned) for the optimal number of layers and units within an array of 1 
+        to 4 layers $\times$ 1 to 128 units, trained on the same 37-dim matrix.
+
+        \emph{Good:} smooth forecasts; handles non-linearities.\\
+        \emph{Bad:} night-time over-fit despite target scaling tricks.
+  \item \textbf{Temporal Convolutional Network (TCN)}\\
+        TCN is a type of neural network designed for sequential data. It uses 1D causal 
+        convolutions to capture temporal dependencies and are particularly effective for 
+        handling long-term dependencies.
+
+        \emph{Good:} tracks ramps well; long memory.\\
+        \emph{Bad:} 3× GPU time, sensitive to feature scaling, and still
+        overshoots zero generation at night.
+\end{enumerate}
 
 
-    \item \textbf{M3. Backward Sequential Feature Selection (BSFS) (\texttt{stage2.py})}
-      Wrapper around a GradientBoost stub that removed purely redundant
-      columns.  \emph{Outcome:} \emph{no} bucket could be deleted without
-      hurting validation MAE, hinting that all three information sources
-      (lags, weather, calendar) contribute.
+We explicitly set $y_t=0$ between civil dusk and dawn (computed from the
+solar-zenith angle in the weather feed) to remove the night signal forecasting errors.
+Although this removed the worst negative bias, the best TCN still landed at \textrm{MAE}$=4.2\%$ and required
+$>\!90$ min of hyper-parameter tuning. This was not a good trade off.
 
-    \item \textbf{M4. Temporal Convolutional Network (TCN) (\texttt{03\_neuralnet.py})} 
-      Dilated causal convolutions, $4$ blocks $\times$ 64 filters,
-      pinball-loss.  \emph{Good:} fast, catches ramps.  
-      \emph{Bad:} still over-predicts night-time, $\mathrm{MAE}=0.42$.
+\subsubsection*{Pivot to Ensemble Trees}  
+Gradient Boosted Decision Trees (GBDT) is an ensemble machine learning method. meaning in the 
+end, all the trees are combined to make one powerful model where each new tree tries to reduce 
+the errors (called Loss) made by the previous ones. This error is minimized via a technique called
+gradient descent who looks at how the error changes and then adjsuts the next tree based on it.
 
-    \item \textbf{M5. Gradient-Boosted Decision Trees (GBDT) (\texttt{stage3.py}) --- \emph{winner}}  
-      XGBoost, depth $=6$, $\eta=0.05$, $M=1\,000$ trees.  
-      \emph{Good:} lowest MAE (test: 0.034), interpretable via SHAP,
-      robust to missing \texttt{irradiance\_*}.
-      \emph{Bad:} large model size ($\approx4$ MB), needs scaled matrix.
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.5\textwidth]{images/gbdt.png}
+\caption{Gradient boosting decision tree (GBDT) illustration. Source: \cite{SaniAbba2022}}
+\label{fig:gbdt-illustration}
+\end{figure}
 
-    \item \textbf{M6. Hybrid GBDT $+$ SARIMA (\texttt{stage4.py}, \texttt{00-forecast.ipynb})}  
-      Simple convex blend
-      $\hat y_t = \alpha\,\hat y^{\textsc{GBDT}}_t
-                 +(1-\alpha)\,\hat y^{\textsc{SARIMA}}_t$ with
-      $\alpha=0.8$.  \emph{Gain:} reduces rare dawn over-shoots; keeps
-      GBDT’s low daytime error.
+Contrary to Neural Networks, GBDT are then non-parametric, rule-based. They are then lighter and 
+faster to train. The tunnable values are the number of trees, the depth of the trees, the learning 
+rate and the regularization parameter.
 
-    \item \textbf{M7. Daily back-testing harness (\texttt{05\_dailyforecast.py})}  
-      Automates a 24 h rolling window, dumps JSON + PNG per day; acts as
-      CI for model changes.
+The data is split into three parts: the training set, the validation set and the test set. The training set is 
+used to train the model and the validation set is used to evaluate the model. The model is then 
+evaluated on the validation set and the process is repeated until the model is good enough. 
+The model is then used to make predictions on the test set. The test set is used to evaluate the model.
 
-\end{itemize}
+GBDT are usually more interpretatabel and excel with tabular data (structured datasets). Howwever, 
+GBDT does not inherently understand time or sequence, unless time features are manually engineered.
 
-\vspace{0.5em}
-\noindent
-\textbf{Key take-aways}  
+GBDTs use splits on feature values while TCNs use convolutions over time to model dependencies.
 
-\begin{itemize}[leftmargin=1.4em]
-\item Seasonality alone (SARIMA) is a surprisingly strong baseline,
-      yet weather covariates are essential beyond 6-hour horizons.
-\item Dense nets under-perform tabular methods on medium-size data
-      ($\sim$400 k rows); TCN closes half the gap but not all.
-\item GBDT offers the best error/interpretability trade-off; SHAP
-      confirms that \emph{each} feature bucket matters, in line with the
-      BSFS experiment.
-\item A light hybrid keeps SARIMA as a "safety net" for edge
-      cases (sensor drop-outs, sunrise/sunset) without diluting GBDT's
-      daytime accuracy.
-\end{itemize}
 
-After evaluating the models above, we selected the Gradient Boosted Decision 
-Trees (GBDT) model for final deployment. Despite the strengths of the neural 
-network approaches—especially the temporal awareness of TCNs—GBDT outperformed 
-them in terms of accuracy, stability, and ease of tuning on our PV generation 
-dataset. As a tree-based ensemble method, GBDT is particularly effective for 
-structured, tabular data and handles feature interactions and nonlinearity 
-robustly without requiring extensive architecture tuning or preprocessing. Its 
-ability to generalize well to unseen data while maintaining interpretability made 
-it the most suitable choice for our forecasting objective.
+% \textbf{Key take-aways}  
+
+% \begin{itemize}[leftmargin=1.4em]
+% \item Seasonality alone (SARIMA) is a surprisingly strong baseline,
+%       yet weather covariates are essential beyond 6-hour horizons.
+% \item Dense nets under-perform tabular methods on medium-size data
+%       ($\sim$400 k rows); TCN closes half the gap but not all.
+% \item GBDT offers the best error/interpretability trade-off; SHAP
+%       confirms that \emph{each} feature bucket matters, in line with the
+%       BSFS experiment.
+% \item A light hybrid keeps SARIMA as a "safety net" for edge
+%       cases (sensor drop-outs, sunrise/sunset) without diluting GBDT's
+%       daytime accuracy.
+% \end{itemize}
+
+Despite the initial appeal of using neural networks like TCNs for their temporal 
+awareness, the lack of familiarity with advanced libraries such as TensorFlow led 
+to unsatisfying results. This prompted a return to the basics using scikit-learn and 
+an exploration of GBDT, supported by literature highlighting its strengths.
+
+GBDT emerged as the most suitable model due to its strong performance on tabular data,
+ease of capturing seasonality with calendar features, and superior accuracy and 
+training efficiency compared to TCNs. Its minimal tuning requirements and further 
+reinforced its suitability for the forecasting task.
 
 \subsection{Mathematical Underpinnings}
 \label{subsec:math}
 
-\paragraph{Seasonal ARIMA (baseline).}
-Let $B$ be the back-shift operator $B\,y_t = y_{t-1}$.
-A \textsf{SARIMA}$(p,d,q)\!\times\!(P,D,Q)_{s}$ model assumes that the
-\emph{doubly differenced} series
-$\bigl(1-B\bigr)^{d}\bigl(1-B^{s}\bigr)^{D}y_t$ follows an
-\textsf{ARMA}$(p,q)$ driven by white noise~$\varepsilon_t$:
-%
-\[
-\underbrace{\bigl(1-\sum_{i=1}^{p}\phi_i B^{i}\bigr)}_{\text{AR($p$)}}
-\!
-\underbrace{\bigl(1-\sum_{i=1}^{P}\Phi_i B^{is}\bigr)}_{\text{Seasonal AR($P$)}}
-\,\Delta_{d,D}^{(s)} y_t
-=
-\underbrace{\bigl(1+\sum_{j=1}^{q}\theta_j B^{j}\bigr)}_{\text{MA($q$)}}
-\!
-\underbrace{\bigl(1+\sum_{j=1}^{Q}\Theta_j B^{js}\bigr)}_{\text{Seasonal MA($Q$)}}
-\,\varepsilon_t.
-\]
-%
-The six integers
-$(p,d,q)$ and $(P,D,Q)$ control:
-\emph{autoregression order}, \emph{orders of differencing} to enforce
-stationarity, and \emph{moving-average order} for shock smoothing, both
-at the hourly and 24-hour seasonal scale ($s=24$).
+\subsubsection*{Statistical Model - Baseline}
 
-\medskip
-\subsubsection*{Gradient-Boosted Decision Trees (GBDT)}
+We used SARIMA a statistical model as a benchmark. It applies ARMA modeling on a 
+transformed (differenced) version of the time series to capture both short-term 
+dynamics and repeating seasonal patterns. Its power lies in modeling both the temporal 
+structure and seasonal cycles within a single, compact framework.
+
+\textbf{ARMA} $(p, q)$ is a linear combination of two things and works only on 
+stationary data. It means the time series must have constant mean and variance over 
+time. It is written as:
 \begin{itemize}
-    \item \textbf{Intuition and characteristics} \\
-    GBDT is a powerful machine learning algorithm that constructs a strong predictor by combining many 
-    weak learners, specifically shallow decision trees.
-
-    Instead of fitting a single large model, GBDT constructs a sequence of simple models (trees), 
-    each one correcting the errors of its predecessor. This process is akin to iteratively improving 
-    guesses.
-
-    It is know for its ability to handle non-linearity and interactions, and its ability to 
-    outperform SARIMA on complex datasets.
-    
-    However, it is less interpretable, requiring regularization (e.g., limiting tree depth or shrinkage).
-    
-    \begin{figure}[h!]
-    \centering
-    \includegraphics[width=0.5\textwidth]{images/gbdt.png}
-    \caption{Gradient boosting decision tree (GBDT) illustration. Source: \cite{SaniAbba2022}}
-    \label{fig:gbdt-illustration}
-    \end{figure}
-
-    \item \textbf{Mathematical Concept} \\
-    Assume we aim to predict a target $y$ from input features $x \in \mathbb{R}^n$. GBDT minimizes a loss function $L(y, \hat{y})$, often the squared error:
-    \[
-    L(y, \hat{y}) = \frac{1}{2}(y - \hat{y})^2
-    \]
-    \item \textbf{Boosting Procedure} \\
-    Let:
-    \[
-    F_0(x) = \text{initial guess}
-    \]
-
-    For $m = 1$ to $M$ (number of trees):
-
-    \begin{itemize}
-        \item Compute residuals (negative gradients):
-        \[
-        r_i(m) = -\left[\frac{\partial L(y_i, F(x_i))}{\partial F(x_i)}\right]_{F=F_{m-1}}
-        \]
-        For squared error: 
-        \[
-        r_i(m) = y_i - F_{m-1}(x_i)
-        \]
-        \item Fit a decision tree $h_m(x)$ to the residuals $r_i(m)$.
-        \item Update the model:
-        \[
-        F_m(x) = F_{m-1}(x) + \nu \cdot h_m(x)
-        \]
-        Where $\nu \in (0, 1]$ is the learning rate, controlling the step size.
-    \end{itemize}
-
-    \item \textbf{Final Prediction} \\
-    \[
-    \hat{y} = F_M(x) = F_0(x) + \sum_{m=1}^{M} \nu \cdot h_m(x)
-    \]
-    Each tree addresses the shortcomings of the previous model, leading to gradual improvement.
-
+    \item an \emph{autoregressive (AR)} part of order $p$ $\rightarrow$ how past values influence the present
+    \item a \emph{moving average (MA)} part of order $q$ $\rightarrow$ how past errors influence the present
+\end{itemize}
+The ARMA model is written as:
+$$
+y_t = c + \sum_{i=1}^{p} \phi_i y_{t-i} + \varepsilon_t + \sum_{j=1}^{q} \theta_j \varepsilon_{t-j}
+$$
+\begin{itemize}
+    \item $c$: constant term (mean of the process, if not differenced)
+    \item $\phi_i$: AR coefficients
+    \item $\varepsilon_t$: white noise error term at time $t$
+    \item $\theta_j$: MA coefficients
 \end{itemize}
 
-
-GBDT is an \emph{additive} function estimator where small regression
-trees $h_m(x)$ are stacked to minimise a loss
-$\mathcal{L}(y,F)$ (here: squared error) by
-\emph{gradient descent in function space}:
-
-\[
-\begin{aligned}
-F_0(x) &= \arg\!\min_c \sum_{i}\mathcal{L}(y_i,c) \quad (\text{initial bias}),\\
-r_{im} &= -\bigl[\partial_F\mathcal{L}(y_i,F_{m-1}(x_i))\bigr] \quad
-        (\text{pseudo-residuals}),\\
-h_m    &= \text{fitTree}\bigl(\{(x_i,r_{im})\}\bigr),\\
-\gamma_m &= \arg\!\min_\gamma \sum_{i}
-           \mathcal{L}\bigl(y_i, F_{m-1}(x_i)+\gamma\,h_m(x_i)\bigr),\\
-F_m(x) &= F_{m-1}(x) + \eta\,\gamma_m\,h_m(x),
-\end{aligned}
-\]
-%
-with learning-rate $\eta\in(0,1]$.  Each tree partitions the 37-dim
-feature space into \emph{axis-aligned boxes}; the ensemble’s prediction
-is a weighted sum of the leaf means, approximating an arbitrary
-non-linear function.
-
-\medskip
-\paragraph{Hybrid forecaster (production).}
-Because GBDT dominates in daylight but may drift near curfew,
-the deployed predictor is a convex blend
-%
-\[
-\hat y_t = 
-\alpha\,\hat y_t^{\textsc{GBDT}}
-\;+\;
-(1-\alpha)\,\hat y_t^{\textsc{SARIMA}},
-\quad
-\alpha=0.8,
-\]
-%
-found via a one-dimensional grid-search on the 2024 validation year.
-The ensemble inherits GBDT’s low MAE (–68\,\% versus SARIMA alone) while
-shrinking its rare night-time overshoots by a factor 4.
-
-\medskip
-\noindent
-\textbf{Take-away.}  
-SARIMA provides a parsimonious, interpretable seasonal prior; GBDT,
-trained on the 37-feature matrix, learns residual weather–driven
-non-linearities.  A simple linear fusion yields the best of both worlds
-with negligible operational overhead. 
-
-\subsection{Implementation Details}
-\label{subsec:impl}
-
+\textbf{SARIMA} $(p,d,q)\times(P,D,Q)_s$ extends ARMA to handle trends and 
+seasonality, in two ways: 
 \begin{enumerate}
-\item \textbf{Repository layout.}  
-      \texttt{src/}\{data\_io,features,models,eval\} mirror the
-      methodology; notebooks live under \texttt{notebooks/}.
-\item \textbf{Data pipeline.}  
-      \texttt{data\_io.py} cleans $>10$M rows in a
-      streaming fashion, then \texttt{FeatureEngineer} creates the
-      37-column table and serialises scalers with
-      \texttt{joblib} for reuse in prod.
-\item \textbf{Time-series CV.}  
-      Rolling splits (\texttt{RollingOriginEvaluator}) preserve causality:
-      train $\to$ validate windows grow by 24h each step.
-\item \textbf{Hyper-parameter tuning.}  
-      \emph{Bayesian optimisation} (\texttt{optuna}) over
-      \{\#trees, depth, $\eta$, col\_sample, $\lambda$\} maximises
-      negative validation MAE; 50 trials finish in 3.2h on CPU.
-\item \textbf{Training.}  
-      With tuned params the full train+val set (2014–2023) is fit; model
-      size $\approx$ 3.6MB.
-\item \textbf{Inference \& evaluation.}  
-      A single \texttt{predict\_day.py} script generates a
-      24-step forecast, plots four-panel diagnostics and writes
-      JSON +\;PNG to \texttt{reports/daily\_tests/}.
-\item \textbf{MLOps hooks.}  
-      GitHub Actions run the daily notebook on the latest data dump;
-      threshold alarms fire on MAE drift $>10\%$ vs rolling median.
+    \item \textbf{Differencing} for trend removal \\
+        To remove non-stationary trends, SARIMA applies ordinary differencing $d$ times:
+        \[
+        y_t' = (1 - L)^d y_t = y_t - y_{t-1} \quad \text{(if } d = 1\text{)}
+        \]
+    \item \textbf{Seasonal differencing} for repeating patterns \\
+        To remove seasonal effects (e.g., daily or yearly patterns), it applies 
+        seasonal differencing $D$ times with period $s$:
+        \[
+        y_t'' = (1 - L^s)^D y_t' = y_t' - y_{t-s}' \quad \text{(if } D = 1\text{)}
+        \]
 \end{enumerate}
 
-\subsection{Key Take-Aways}
-\label{subsec:key-takeaways}
+The six hyperparameters $(p,d,q)$ and $(P,D,Q)$ define the orders of autoregression, 
+differencing, and moving-average smoothing at both the regular (hourly) and seasonal 
+(daily) levels, with $s = 24$ reflecting the daily cycle. If the model residuals 
+resemble white noise—i.e., they are uncorrelated and pattern-free—the model is 
+considered to have successfully extracted all systematic, predictable structure.
 
-\begin{itemize}
-  \item \textbf{Seasonality explains most variance.}
-        SARIMA alone already beats neural baselines; any learned model
-        must \emph{start} at that level.
-  \item \textbf{Non-linear weather interactions matter.}
-        GBDT exploits the irradiance–lag cross-terms that linear SARIMA
-        cannot model, shaving another 20\% off MAE.
-  \item \textbf{Hybrid stacking is cheap and wins.}  
-        Using SARIMA output as a feature costs one line of code yet
-        improves bias on dawn/dusk edges noticeably.
-  \item \textbf{EDAs saved us weeks.}  
-        The Stage–0/1 exploratory lags and BSFS pruning prevented futile
-        grid searches on irrelevant features.
-  \item \textbf{Trees > deep nets for tabular.}  
-        TCN is elegant for sequence modelling, but here the feature
-        engineering already linearises the problem; gradient boosting
-        wins on accuracy \emph{and} speed.
-\end{itemize}
+\subsubsection*{Machine Learning Model - GBDT}
+Assume we aim to predict a target $y$ from input features $x \in \mathbb{R}^n$. 
+GBDT minimizes a loss function $L(y, \hat{y})$. (Minimizing mean absolute error via 
+gradient descent between a predicted $\hat{y}$ and true $y$ value).
 
-The resulting solution is reproducible end-to-end, MLOps compliant and
-ready for deployment on the plant’s SCADA edge server.
+Let:
+\[
+F_0(x) = \text{initial guess} \quad\quad \text{for } m = 1 \text{ to } M
+\]
+
+Boosting builds many shallow trees \emph{sequentially}.  
+Each tree tries to predict the \emph{errors} the previous trees made:
+    \[
+    r_i^{(m)} = y_i - F_{m-1}(x_i)
+    \]
+At each boosting step $m$, we compute the residual $r_i^{(m)}$, which is the difference 
+between the true value $y_i$ and the current model’s prediction $F_{m-1}(x_i)$.
+This residual guides the new tree $h_m$ to correct errors made so far.
+
+The new model $F_m$ is updated by adding a fraction $\nu$ $\in (0, 1]$ (learning rate, 
+controlling the step size) of the new tree $h_m(x)$ to the previous model’s output.
+This sequential additive approach allows gradual improvement while avoiding overfitting.
+    \[
+    F_m(x) = F_{m-1}(x) + \nu\,h_m(x)
+    \]
+After $M$ trees, the final prediction is:
+    \[
+    \hat{y} = F_M(x) = F_0(x) + \sum_{m=1}^{M} \nu \cdot h_m(x)
+    \] 
+The final prediction $\hat{y}$ is the initial model $F_0(x)$ (often a constant 
+like the mean of $y$) plus the sum of all $M$ trees' predictions scaled by $\nu$.
+This ensemble aggregates weak learners into a strong one. 
+
+Because every tree focuses on what is still unexplained, the ensemble
+gradually improves until additional trees no longer cut the validation loss.
+
+
+Why GBDT wins here? With 37 engineered predictors the relationship to $y_t$ is mostly
+\textit{piece-wise} and \textit{non-linear}. Rule-based splits excel at that,
+while requiring almost no architecture design—only \{\#trees, depth,~$\nu$\}
+need tuning. The GBDT is then a good choice because it is non-parametric, rule-based, 
+light and fast to train.
+
+% with learning-rate $\eta\in(0,1]$.  Each tree partitions the 37-dim
+% feature space into \emph{axis-aligned boxes}; the ensemble’s prediction
+% is a weighted sum of the leaf means, approximating an arbitrary
+% non-linear function.
+
+% \medskip
+% \paragraph{Hybrid forecaster (production).}
+% Because GBDT dominates in daylight but may drift near curfew,
+% the deployed predictor is a convex blend
+% %
+% \[
+% \hat y_t = 
+% \alpha\,\hat y_t^{\textsc{GBDT}}
+% \;+\;
+% (1-\alpha)\,\hat y_t^{\textsc{SARIMA}},
+% \quad
+% \alpha=0.8,
+% \]
+% %
+% found via a one-dimensional grid-search on the 2024 validation year.
+% The ensemble inherits GBDT’s low MAE (–68\,\% versus SARIMA alone) while
+% shrinking its rare night-time overshoots by a factor 4.
+
+% \medskip
+% \noindent
+% \textbf{Take-away.}  
+% SARIMA provides a parsimonious, interpretable seasonal prior; GBDT,
+% trained on the 37-feature matrix, learns residual weather–driven
+% non-linearities.  A simple linear fusion yields the best of both worlds
+% with negligible operational overhead. 
+
+\subsection{Implementation Details}
+
+
+
+
+
+% !!!! MENTION TIMESERIES UNDERSTANDING + MANUAL LAGS BECAUSE WEAKNESS OF THE MODEL
+
+
+% \label{subsec:impl}
+
+% \begin{enumerate}
+% \item \textbf{Repository layout.}  
+%       \texttt{src/}\{data\_io,features,models,eval\} mirror the
+%       methodology; notebooks live under \texttt{notebooks/}.
+% \item \textbf{Data pipeline.}  
+%       \texttt{data\_io.py} cleans $>10$M rows in a
+%       streaming fashion, then \texttt{FeatureEngineer} creates the
+%       37-column table and serialises scalers with
+%       \texttt{joblib} for reuse in prod.
+% \item \textbf{Time-series CV.}  
+%       Rolling splits (\texttt{RollingOriginEvaluator}) preserve causality:
+%       train $\to$ validate windows grow by 24h each step.
+% \item \textbf{Hyper-parameter tuning.}  
+%       \emph{Bayesian optimisation} (\texttt{optuna}) over
+%       \{\#trees, depth, $\eta$, col\_sample, $\lambda$\} maximises
+%       negative validation MAE; 50 trials finish in 3.2h on CPU.
+% \item \textbf{Training.}  
+%       With tuned params the full train+val set (2014–2023) is fit; model
+%       size $\approx$ 3.6MB.
+% \item \textbf{Inference \& evaluation.}  
+%       A single \texttt{predict\_day.py} script generates a
+%       24-step forecast, plots four-panel diagnostics and writes
+%       JSON +\;PNG to \texttt{reports/daily\_tests/}.
+% \item \textbf{MLOps hooks.}  
+%       GitHub Actions run the daily notebook on the latest data dump;
+%       threshold alarms fire on MAE drift $>10\%$ vs rolling median.
+% \end{enumerate}
+
+% \subsection{Key Take-Aways}
+% \label{subsec:key-takeaways}
+
+% \begin{itemize}
+%   \item \textbf{Seasonality explains most variance.}
+%         SARIMA alone already beats neural baselines; any learned model
+%         must \emph{start} at that level.
+%   \item \textbf{Non-linear weather interactions matter.}
+%         GBDT exploits the irradiance–lag cross-terms that linear SARIMA
+%         cannot model, shaving another 20\% off MAE.
+%   \item \textbf{Hybrid stacking is cheap and wins.}  
+%         Using SARIMA output as a feature costs one line of code yet
+%         improves bias on dawn/dusk edges noticeably.
+%   \item \textbf{EDAs saved us weeks.}  
+%         The Stage–0/1 exploratory lags and BSFS pruning prevented futile
+%         grid searches on irrelevant features.
+%   \item \textbf{Trees > deep nets for tabular.}  
+%         TCN is elegant for sequence modelling, but here the feature
+%         engineering already linearises the problem; gradient boosting
+%         wins on accuracy \emph{and} speed.
+% \end{itemize}
+
+% The resulting solution is reproducible end-to-end, MLOps compliant and
+% ready for deployment on the plant’s SCADA edge server.
