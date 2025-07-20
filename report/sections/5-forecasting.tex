@@ -37,13 +37,13 @@ essential.
         \hline
         Symbol & Description & Unit \\ \hline
         $y_t$  & AC electricity output & kW \\
-        $t2m$  & Air temperature @ 2m & $\si{\celsius}$ \\
-        $P_{rain}$ & Precip.\ rate (\texttt{prectotland}) & $\si{\milli\metre\per\hour}$\\
-        $G_{\!\downarrow}$ & Short-wave global irradiance (\texttt{swgdn}) & $\si{\watt\per\square\metre}$\\
+        $t2m$  & Air temperature @ 2m & \degree C \\
+        $P_{rain}$ & Precip.\ rate (\texttt{prectotland}) & mm/h \\
+        $G_{\!\downarrow}$ & Short-wave global irradiance (\texttt{swgdn}) & W/m\textsuperscript{2} \\
         $C_{tot}$ & Cloud-cover fraction (\texttt{cldtot}) & [0,1] \\
-        $G_{dir}$ & Beam normal irradiance & u.\,k. \\
-        $G_{diff}$ & Diffuse irradiance & u.\,k. \\
-        \texttt{T} & Air temperature & $\si{\celsius}$ \\
+        $G_{dir}$ & Beam normal irradiance & \text{W/m\textsuperscript{2}} \\
+        $G_{diff}$ & Diffuse irradiance & \text{W/m\textsuperscript{2}} \\
+        \texttt{T} & Air temperature & \degree C \\
         \hline
         \end{tabular}
         \end{table}
@@ -356,12 +356,323 @@ light and fast to train.
 % with negligible operational overhead. 
 
 \subsection{Implementation Details}
+\label{ssec:impl_details}
+
+This subsection provides a detailed description of the forecasting pipeline's code structure, its main 
+components, and their interactions. The implementation is organized to streamline data ingestion, 
+exploratory data analysis, feature engineering, model training with cross-validation, and evaluation.
+
+\subsubsection*{A.\ Overview and roles}
+
+\begin{figure}[h!]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1.2cm and 1.6cm,
+        every node/.style={font=\small, rounded corners},
+        io/.style={draw, fill=blue!20, minimum height=1cm, minimum width=2.1cm, align=center},
+        process/.style={draw, fill=green!20, minimum height=1cm, minimum width=2.6cm, align=center},
+        module/.style={draw, fill=orange!20, minimum height=1cm, minimum width=2.6cm, align=center},
+        output/.style={draw, fill=purple!20, minimum height=1cm, minimum width=2.6cm, align=center},
+        file/.style={draw, fill=gray!10, minimum height=0.8cm, minimum width=2.1cm, align=center, font=\scriptsize},
+        arrow/.style={->, thick}
+    ]
+
+    % Nodes
+    \node[io] (config) {config.yaml\\\scriptsize settings};
+    \node[process, right=of config] (runpy) {run.py\\\scriptsize orchestration};
+    \node[file, below=1.2cm of runpy] (data) {dataset.csv\\\scriptsize hourly weather and energy data};
+    \node[module, right=of runpy, text=red] (src) {src/\\\scriptsize eda, features, models};
+    \node[output, right=of src] (out) {outputs/\\\scriptsize plots, metrics, predictions};
+
+    % Arrows
+    \draw[arrow] (config) -- (runpy);
+    \draw[arrow] (data.north) -- (runpy.south);
+    \draw[arrow] (runpy) -- (src);
+    \draw[arrow] (src) -- (out);
+
+    \end{tikzpicture}
+    \caption{Compact overview of the forecasting pipeline.}
+    \label{fig:forecast_flow_compact}
+\end{figure}
+
+
+\begin{itemize}
+    \item \texttt{config.yaml}\\
+    acts as the central knobboard, holding configuration values such as dataset path, cut-off date for the test set,
+    and cross-validation horizon.
+    \item \texttt{run.py}\\
+    controls the workflow in seven sequential steps, from loading data to model evaluation, while logging progress 
+    and writing output artefacts.
+    \item \texttt{src/}\\
+    contains the core logic with modules for exploratory data analysis (EDA), feature engineering, model training, 
+    and evaluation metrics.
+    \item \texttt{outputs/}\\
+    stores generated plots (e.g., heatmaps and pairplots) and evaluation reports (metrics and JSON summaries).
+\end{itemize}
+
+
+\subsubsection*{B.\ Implementation}
+The detailed flow inside \texttt{src/} is illustrated in Figure~\ref{fig:src_flow_final_clean}. The implementation 
+distinguishes three main phases:
+
+
+\begin{figure}[h!]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1.2cm and 1.2cm,
+        every node/.style={font=\small, rounded corners},
+        srcbox/.style={draw, fill=orange!40, minimum height=1cm, minimum width=2.6cm, align=center},
+        modelbox/.style={draw, fill=orange!25, minimum height=1cm, minimum width=2.6cm, align=center},
+        evalbox/.style={draw, fill=orange!5, minimum height=1cm, minimum width=2.6cm, align=center},
+        outputbox/.style={draw, fill=purple!20, minimum height=1cm, minimum width=2.4cm, align=center},
+        arrow/.style={->, thick},
+        looplabel/.style={font=\scriptsize\itshape}
+    ]
+
+    % Main nodes
+    \node[srcbox] (features) at (0, 0.6) {features.py};
+    \node[srcbox, below=of features] (eda) {eda.py};
+    \node[modelbox, right=1.0cm of eda, yshift=0.99cm, text=red] (models) {models/\\\scriptsize \texttt{gbdt.py}, \texttt{sarima.py}};
+    \node[evalbox, right=of models] (eval) {evaluation.py};
+    \node[outputbox, right=of eval] (out) {outputs/};
+
+    % Arrows from eda/features
+    \draw[arrow] (features.east) -- ++(0.7,0) |- (models.west);
+    \draw[arrow] (eda.east) -- ++(0.7,0) |- (models.west);
+
+    % Flow to evaluation/output
+    \draw[arrow] (models) -- (eval);
+    \draw[arrow] (eval) -- (out);
+
+    % Feedback loop
+    \draw (eval.north) -- ++(0,0.5);
+    \draw[arrow] (eval.north) ++(0,0.5) -| (models);
+
+    % Envelope around src files + evaluation
+    \begin{pgfonlayer}{background}
+        \node[draw=orange, thick, rounded corners, inner sep=0.4cm, 
+              fit=(features) (eda) (models) (eval), 
+              label=above:{\textbf{\texttt{src/} block}}] {};
+    \end{pgfonlayer}
+
+    \end{tikzpicture}
+    \caption{Final horizontal \texttt{src/} flow: feature engineering and EDA enter the \texttt{models/} block, with evaluation and feedback for optimization.}
+    \label{fig:src_flow_final_clean}
+\end{figure}
+  
+\begin{itemize}
+    \item \texttt{features.py}\\
+    constructs engineered features including calendar-based sin/cos transforms, lagged variables, and rolling 
+    means to capture temporal dependencies.
+    \item \texttt{eda.py}\\
+    performs quick exploratory data analysis by saving visual summaries such as correlation heatmaps and pair 
+    plots for a sanity check on input data.
+    \item The \texttt{models/} subfolder houses the modeling scripts (\texttt{gbdt.py} and \texttt{sarima.py}), 
+    where gradient boosting and SARIMA models are trained respectively.
+    \item \texttt{evaluation.py}\\
+    wraps common regression metrics like MAE, RMSE, and $R^2$, and formats output tables for CLI display.
+\end{itemize}
+
+The pipeline is designed with a feedback loop from evaluation back to modeling, allowing iterative tuning or 
+refinement of models based on evaluation outcomes.
+
+\subsubsection*{C.\ Models implementation}
+Figure~\ref{fig:gbdt_flow_aligned} details the flow in \texttt{gbdt.py}, the main machine learning component. 
+The process starts by loading and splitting the dataset into training and validation sets. 
+Importantly, instead of a standard k-fold split, a \emph{time series split} is used to preserve temporal ordering 
+and avoid leakage across time in the validation procedure. This approach better reflects real-world forecasting 
+challenges where future data is never accessible during training.
+
+\begin{figure}[h!]
+    \centering
+    \begin{tikzpicture}[
+        font=\small,
+        node distance=1.5cm and 1.5cm,
+        every node/.style={align=center, rounded corners, minimum height=1.0cm, draw},
+        box/.style={fill=orange!10},
+        arrow/.style={->, thick}
+    ]
+
+    % Nodes
+    \node[box] (load) {Load\\ data};
+    \node[box, right=of load] (split) {Split\\ data};
+
+    \node[box, right=1.5cm of split, yshift=1.2cm] (tune) {Hyperparameter\\ tuning (GridSearch)};
+    \node[box, below=1.5cm of tune] (default) {pre-set\\ params};
+
+    \node[box, right=6cm of split] (train) {Train\\ model};
+
+    % Arrows
+    \draw[arrow] (load) -- (split);
+
+    % Branch to tuning and default
+    \draw[arrow] (split.east) -- ++(0.8,0) coordinate (branch);
+    \draw[arrow] (branch) |- (tune.west);
+    \draw[arrow] (branch) |- (default.west);
+
+    % From tuning to training
+    \draw[arrow] (tune.east) -- ++(0.7,0) |- (train.west);
+    \draw[arrow] (default.east) -- ++(0.7,0) |- (train.west);
+
+    \begin{pgfonlayer}{background}
+        \node[draw=grey!20, thick, rounded corners, inner sep=0.2cm, 
+              fit=(tune) (default), (load), (split), (train), 
+              label=above:{\textcolor{gray}{\textbf{\texttt{Cross-validation ?} }}}] {};
+        \node[draw=black, thick, rounded corners, inner sep=1cm, 
+              fit=(tune) (default) (split) (load) (train), 
+              label=below:{\textbf{\texttt{gbdt.py} }}] {};     
+    \end{pgfonlayer}
+
+    \end{tikzpicture}
+    \caption{Flow of \texttt{gbdt.py}: load and split data, explore default or tuned parameters, and train the model.}
+    \label{fig:gbdt_flow_aligned}
+\end{figure}
+
+The model explores two training regimes: one with pre-set default hyperparameters, and another involving an 
+explicit grid search over hyperparameters to find the optimal configuration. Both approaches culminate in training 
+the final model on the training data.
+
+Cross-validation is central to the feature selection and model tuning process. Several feature subsets are 
+constructed and evaluated, including:
+
+\begin{itemize}
+    \item \textbf{Manual}: A fixed set of manually chosen features.
+    \item \textbf{Backward Sequential Feature Selection (BSFS)}: Starts from a large feature pool and iteratively removes less important features.
+    \item \textbf{Forward Sequential Feature Selection (FwdSFS)}: Begins with a small seed set and adds features progressively.
+    \item \textbf{Bayesian Optimization (BayesOpt)}: Searches over subset sizes $k$ to optimize performance.
+\end{itemize}
+
+Each subset undergoes cross-validation using the \texttt{TimeSeriesSplit} strategy with multiple splits and a defined 
+forecast horizon, ensuring robust evaluation respecting the temporal structure.
+
+Figure~\ref{fig:sarima_flow} illustrates the SARIMA pipeline flow. Unlike the gradient boosting pipeline, SARIMA 
+training does not require explicit splitting of the data, as the seasonal periods are incorporated during model 
+specification. A grid search over seasonal orders $(p,q,P,Q)$ identifies the best parameters based on the Akaike 
+Information Criterion (AIC). After training, the model is evaluated on the test set, and results are exported for 
+comparison.
+
+Overall, the implementation balances between a fully automated pipeline and flexibility for manual adjustments and 
+analysis, focusing on robust ML methods for time series forecasting.
 
 
 
 
 
-% !!!! MENTION TIMESERIES UNDERSTANDING + MANUAL LAGS BECAUSE WEAKNESS OF THE MODEL
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+% In the development of our forecasting models, we encountered several unique 
+% challenges that required special consideration. These challenges stemmed from 
+% the nature of time-series data and the need for robust model performance. 
+% Below, we highlight some of the key aspects that were addressed to ensure the 
+% accuracy and reliability of our forecasts.
+
+% \begin{adjustwidth}{1em}{0pt}
+% \textbf{Cross-validation with time-series data} \\
+% Cross-validation is a crucial technique for evaluating the performance of 
+% time-series models. It helps us understand how well our model will perform 
+% on unseen data. Classical $k$-fold—where all slices mingle chronology—with 
+% our data requires us to use a \texttt{TimeSeriesSplit}, which "never looks 
+% into the future".  
+
+% Our pipeline’s 5‐fold setting keeps a fixed 720-h (1 month worth) test window in 
+% each split. Figure~\ref{fig:cv} illustrates the two approaches differences. 
+
+% \begin{figure}[h!]
+% \centering
+% \includegraphics[width=.46\linewidth]{images/timeseriesplit.png}
+% \hfill
+% \includegraphics[width=.46\linewidth]{images/kfold.png}
+% \caption{Left: chronology-respecting TimeSeries CV. Right: ordinary $k$-fold mixing. 
+% Ref. \cite{stackexchange_timeseries_cv}.}
+% \label{fig:cv}
+% \end{figure}
+  
+% \textbf{Correlation pruning}  
+% We remove highly correlated predictors to avoid multicollinearity. It prevents 
+% overfitting and speeds up the training process. While tree models sometimes may handle 
+% multicollinearity, it is still a good practice to remove it and our statistical model 
+% (SARIMA) requires so.
+% The correlation matrix which returns a matrix pair-wise correlation values.
+% It evaluates how well two variables move together along a straight line if correlated.
+
+% \begin{lstlisting}[language=Python,basicstyle=\ttfamily\footnotesize]
+% import seaborn as sns
+% import matplotlib.pyplot as plt
+
+% # Compute the correlation matrix
+% corr_matrix = df.select_dtypes('number').corr()
+
+% # Plot the heatmap
+% plt.figure(figsize=(10, 8))
+% sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm', cbar_kws={'label': 'Correlation Coefficient'})
+% plt.title('Correlation Matrix of Predictors')
+% plt.show()
+% \end{lstlisting}
+% The heatmap provides a visual representation of the correlation coefficients between pairs of features, aiding in the decision-making process for feature selection and pruning.
+
+% Only numeric predictors enter the heat-map; protected columns (\texttt{y}, 
+% whitelisted lags) survive even if highly correlated.
+
+% \textbf{Selection of Predictors} \\
+% Choosing the right predictors is crucial for a robust model. 
+% Too many can cause overfitting, while too few may lead to underfitting, both 
+% resulting in poor forecasts.
+
+% In this pipeline, four different sets of predictors sets are evaluated to find the 
+% optimal balance:
+  
+% \begin{figure}[h!]
+%   \centering
+%   \begin{tikzpicture}[node distance=14mm, box/.style={draw, rounded corners,
+%                         align=center, minimum width=2.4cm, minimum height=1cm}]
+%     \node[box, fill=blue!10]  (man)  {Manual\\\footnotesize 10 feats};
+%     \node[box, right=of man, fill=orange!10] (bsfs) {BSFS\\\footnotesize backward SFS};
+%     \node[box, right=of bsfs, fill=green!10] (fwd)  {FwdSFS\\\footnotesize forward SFS};
+%     \node[box, right=of fwd, fill=red!10]    (bay)  {BayesOpt\\\footnotesize $k\!\in[3,12]$};
+%   \end{tikzpicture}
+%   \caption{The four feature sets evaluated.}
+% \end{figure}
+  
+%   \textbf{Parameter selection snippet}
+%   \begin{lstlisting}[language=Python,basicstyle=\ttfamily\footnotesize]
+%   best_lbl = min(gbt_metrics, key=lambda k: gbt_metrics[k]['MAE'])
+%   \end{lstlisting}
+
+% \textbf{SARIMA grid \& training} \\
+
+% First, the helper performs an exhaustive grid search
+% over \(p,q\in\{0,1,2\}\) and \(P,Q\in\{0,1\}\) with seasonal period \(s=24\),
+% keeping \(d=D=0\).
+% The candidate that minimises AIC is retained.  
+
+% Second, a single model is re-fit on the \emph{full} training series with that
+% \((p,q,P,Q)\) order—using 
+% \texttt{enforce
+% \_stationarity=False} and
+% \texttt{enforce\_invertibility=False}—and its predictions populate the
+% 2024 hold-out window.
+
+% \vspace{0.5em}
+% \noindent\textbf{Critique}  
+% The pipeline is pragmatic yet minimal: it skips data-type validation, missing-value imputation, 
+% and GPU-accelerated boosters—which may matter on noisier or larger grids.  Still, for a clean 
+% renewables feed the current structure delivers repeatable, inspectable forecasts with zero hidden 
+% state.
 
 
 % \label{subsec:impl}

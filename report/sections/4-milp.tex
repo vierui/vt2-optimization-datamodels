@@ -160,94 +160,216 @@ With:
 Hence the MILP simultaneously finds the least-cost \emph{dispatch} and the cheapest \emph{build / replace} schedule over the planning horizon. It eliminates the need for external spreadsheets computing NPV and manual scenarios comparison.
 \end{adjustwidth}
 
-\subsection{Code Implementation}
-\label{ssec:MILP_code}
+%----------------------------------------------------------
+\subsection{Implementation Details (MILP pipeline)}
+\label{ssec:milp_impl}
+%----------------------------------------------------------
+%
+% This subsection mirrors the structure used for forecasting
+% (\S\ref{ssec:impl_details}), but now focuses on the
+% mixed-integer linear optimisation workflow that sizes,
+% installs and dispatches power-system assets over a
+% multi-year horizon.
 
-The new MILP layer is achieved with **minimal churn** to the original vt1 code:  
-data ingestion and the DC-OPF core are reused almost verbatim, while a handful of
-Python modules inject the binary-investment logic.  
-Figure~\ref{fig:milp_pipeline} sketches the end-to-end data flow.
+\subsubsection*{A.\ Overview and roles}
 
-\begin{figure}[H]
-\centering
-%\includegraphics[width=.85\textwidth]{images/milp_pipeline.pdf}
-\caption{From CSV to optimisation results: the vt2 MILP pipeline.}
-\label{fig:milp_pipeline}
+\begin{figure}[h!]
+      \centering
+      \begin{tikzpicture}[
+          node distance=1.2cm and 1.6cm,
+          every node/.style={font=\small, rounded corners},
+          io/.style={draw, fill=blue!20, minimum height=1cm, minimum width=2.1cm, align=center},
+          main/.style={draw, fill=green!20, minimum height=1cm, minimum width=2.6cm, align=center},
+          opti/.style={draw, fill=orange!20, minimum height=1cm, minimum width=2.6cm, align=center},
+          output/.style={draw, fill=purple!20, minimum height=1cm, minimum width=2.6cm, align=center},
+          data/.style={draw, fill=gray!10, minimum height=1cm, minimum width=2.6cm, align=center},
+          arrow/.style={->, thick}
+      ]
+  
+      % Nodes
+      \node[io] (grid) {grid/\\\scriptsize grid config};
+      \node[main, right=of grid] (main) {main.py\\\scriptsize orchestration};
+      \node[opti, right=of main, text=red] (opti) {scripts/\\\scriptsize Optimization framework};
+      \node[data, below=1.2cm of opti] (data) {data/\\\scriptsize generation and loads profiles};
+      \node[output, right=of opti] (out) {outputs/\\\scriptsize plots, metrics, predictions, results};
+  
+      % Arrows
+      \draw[arrow] (grid) -- (main);
+      \draw[arrow] (data.north) -- (opti.south);
+      \draw[arrow] (main) -- (opti);
+      \draw[arrow] (opti) -- (out);
+  
+      \end{tikzpicture}
+      \caption{Compact overview of the forecasting pipeline.}
+      \label{fig:forecast_flow_compact}
+  \end{figure}
+
+\begin{itemize}
+    \item \texttt{main.py} –\- **driver script** accepting CLI flags, steering the four logical stages:
+          preprocessing, network assembly, optimisation, and post-processing/logging.  
+    \item \texttt{pre.py} –\- slices three \mbox{168-h} representative weeks, matches
+          profiles to assets, and attaches analysis meta-data (years, season weights, load-growth).
+    \item \texttt{optimization.py} –\- builds the **DC-OPF MILP** with annualised CAPEX,
+          solves it via \textsc{Cplex}, then serialises all variables back into the
+          \texttt{IntegratedNetwork}.
+    \item \texttt{post.py} –\- turns the raw decision variables into human-readable
+          implementation plans, generation-mix graphics and asset timelines.
+    \item \texttt{analysis/production\_costs.py} –\- converts dispatch into MWh,
+          adds annuitised investment streams, and prints/plots per-asset
+          cost breakdowns.
+    \item \texttt{results/} –\- central drop-zone for logs, JSON artefacts and figures.
+\end{itemize}
+
+\subsubsection*{B.\ Implementation}
+
+Figure~\ref{fig:scripts_block} shows the deeper call graph inside the
+\texttt{scripts/} package, highlighting the \emph{three}
+execution phases:
+
+\begin{figure}[h!]
+    \centering
+    \begin{tikzpicture}[
+        node distance=1.2cm and 1.2cm,
+        every node/.style={font=\small, rounded corners},
+        io/.style={draw, fill=green!20, minimum height=1cm, minimum width=2cm, align=center},
+        phase/.style={draw, fill=orange!40, minimum height=1cm, minimum width=2.8cm, align=center},
+        sub/.style={draw, fill=pink!10, minimum height=1cm, minimum width=3.0cm, align=center},
+        helper/.style={draw, fill=orange!5,  minimum height=1cm, minimum width=3.0cm, align=center},
+        output/.style={draw, fill=purple!20, minimum height=1cm, minimum width=2.6cm, align=center},
+        data/.style={draw, fill=gray!10, minimum height=1cm, minimum width=2.6cm, align=center},
+        arrow/.style={->, thick},
+        looplabel/.style={font=\scriptsize\itshape}
+    ]
+
+    % Nodes -----------------------------------------------
+    \node[phase] (prep)      {pre.py\\\scriptsize \#1 Pre-process};
+    \node[io, below=of prep, yshift=-4.4cm] (raw) {main.py};
+    \node[phase, right=of prep] (net)   {network.py\\\scriptsize \#2 Build objects};
+    \node[phase, right=of net]  (milp)  {optimization.py\\\scriptsize \#3 Solve MILP};
+    \node[phase, right=of milp] (post)  {post.py\\\scriptsize \#5 Post-proc};
+    \node[sub, below=of milp] (integ) {IntegratedNetwork()};
+    \node[phase, below=of integ] (analysis) {costs.py \\\scriptsize \#4 Costs analysis};
+    \node[output, below=of analysis] (out) {results/};
+    \node[data, above=of prep] (data) {data/};
+
+      % data inputs
+      \draw[arrow, dashed] (raw) -- (prep);
+      \draw[arrow, dashed] (raw) |- (analysis.west);
+      \draw[arrow] (data) -- (prep);
+
+      % build & optimisation flow
+      \draw[arrow] (prep) -- (net);
+      \draw[arrow] (net)  -- (milp);
+      \draw[arrow] (milp) -- (post);
+      \draw[arrow] (milp) -- ++(0,-1.5) node[midway, left] {\scriptsize writes} -- (integ.north);
+      \draw[arrow] (net.south) -- ++(0,-1.7) node[midway, left] {\scriptsize builds} -- (integ.west);
+      \draw[arrow] (integ.south) -- (analysis.north);
+      \draw[arrow] (post.south) |- ++(0,-6.14) -- (out.east);
+      \draw[arrow] (analysis.south) -- (out.north);
+
+    % Envelope
+    \begin{pgfonlayer}{background}
+        \node[draw=orange, thick, rounded corners, inner sep=0.4cm, 
+              fit=(prep) (net) (milp) (post) (integ) (analysis), 
+              label=above:{\textbf{\texttt{scripts/}}}] {};
+    \end{pgfonlayer}
+    \end{tikzpicture}
+    \caption{Detailed flow inside \texttt{scripts/}: preprocessing \(\rightarrow\) object construction \(\rightarrow\) MILP solution \(\rightarrow\) reporting.}
+    \label{fig:scripts_block}
 \end{figure}
 
-\subsubsection*{A.  File roles and interactions}
 
-\begin{center}\small
-\begin{tabular}{p{3cm}p{9cm}}
-\hline
-\textbf{File / Module} & \textbf{What it does (plain English)} \\ 
-\hline
-\texttt{pre.py} & Reads raw CSVs, slices a \emph{typical} week per season, returns a Python \texttt{dict}. \\
-\texttt{network.py} & Two “data-only” classes:  
-\texttt{Network} (one season) and \texttt{IntegratedNetwork} (many seasons + years).  
-They hold Pandas frames but no optimisation code. \\
-\texttt{optimization.py} & Builds the MILP with CVXPY \(\rightarrow\) CPLEX, extracts all variable
-values into a flat JSON-friendly dictionary. \\
-\texttt{main.py} & Command-line front-end: calls \texttt{pre}\(\rightarrow\)\texttt{Network}\(\rightarrow\)\texttt{optimization},
-then hands results to the plotting/post modules. All logging is wired here. \\
-\texttt{post.py} & Turns the flat result dictionary into a Gantt chart, seasonal plots, and an implementation-plan JSON.\\
-\hline
-\end{tabular}
-\end{center}
 
-\subsubsection*{B.  “Smart” touches in the MILP code}
+\begin{description}
+    \item[Phase~1 – Pre-processing]  
+          \texttt{pre.py} converts raw CSV/time-series into
+          \texttt{grid\_data} \(+\) \texttt{seasons\_profiles}.  
+          A light sanity-check now ensures the
+          \texttt{representative\_weeks} sum to 52; otherwise a
+          default \(13/13/26\) split is injected.
 
-\begin{itemize}
-    \item \textbf{Lifetime window in two rows.}  
-          Listing~\ref{lst:lifetime} builds the \emph{entire} sliding window once; CPLEX then recognises the
-          resulting matrix block as totally unimodular, so branch-and-bound cuts quickly prune binaries.
-          \begin{lstlisting}[language=Python, caption={Lifetime coupling snippet}, label={lst:lifetime}]
-window = [b[(a,yb)] for yb in years if 0 <= y - yb < L_a]
-constraints += [i[(a,y)] == cp.sum(window), cp.sum(window) <= 1]
-          \end{lstlisting}
-    \item \textbf{Vector variables, not 8 760 scalars.}  
-          One CVXPY vector per $(asset, year, season)$ packs all 168 hourly values.  
-          Memory drops from \(\mathcal{O}(T\! \times\! \text{assets})\) scalars to a handful of numpy blocks.
-    \item \textbf{Pre-computed bus dictionaries.}  
-          Look-ups like “which generators sit on bus 5 in summer?” are done \emph{once} in Python, then stored as lists; inner power-balance loops just iterate these lists → no expensive Pandas access.
-    \item \textbf{Relaxed seasonal SoC.}  
-          Replacing the hard $E_{T}=E_{0}$ with a “$\leq 10 \%$” band avoids infeasibility when a median week has net import or export; yet the inequality is still linear, so the LP relaxation stays tight.
-    \item \textbf{Capital-Recovery baked in.}  
-          Annual cost $A_a = \mathrm{CRF}_a \cdot C^{\text{cap}}_a$ is computed \emph{before} it reaches the solver.
-          Discount-rate sensitivity therefore changes only coefficients, not the constraint matrix.
-    \item \textbf{Flat-key result map.}  
-          Each optimisation variable value is exported under a self-describing string  
-          \texttt{p\_gen\_\{season\}\_\{asset\}\_\{year\}\_\{hour\}},  
-          making downstream analysis possible with nothing more than \texttt{dict.get()}.
-\end{itemize}
+    \item[Phase 2 – Object assembly]  
+          \texttt{network.py} wraps every season in a
+          \texttt{Network} (data-only) and records them inside a
+          global \texttt{IntegratedNetwork}.  Tweaks that proved
+          essential:
+          \begin{itemize}
+              \item robust bus-ID matching (string vs.\ integer);
+              \item automatic snapshot creation with length \(T\);
+              \item load-growth factors attached for later scaling.
+          \end{itemize}
 
-\subsubsection*{C.  Solver migration: CBC \(\rightarrow\) CPLEX}
+    \item[Phase 3 – MILP formulation \& solve]  
+          \texttt{optimization.py} hosts two core functions:
+          \texttt{dcopf()} builds the model, while
+          \texttt{investement\_multi()} (sic) solves, extracts and
+          stores all variables.  Key modelling choices:
 
-\begin{itemize}
-    \item \emph{Why CPLEX?}  We now have \(\approx 700\) binary variables; CBC struggled beyond 1–2 years,
-          whereas CPLEX’s presolve and cut families solve a 10-year horizon in \(< 30\) s on a laptop.
-    \item \emph{Parameter hand-off.}  All tuning lives in one dictionary:  
-          \texttt{\{'threads':10, 'timelimit':1080, 'mipgap':0.01\}} — users override via the CLI
-          \texttt{--solver-options '{"timelimit":3600}'}, no code edits needed.
-    \item \emph{Warm-start ready.}  Because binaries only gate capacities, a feasible LP point is trivial
-          (\(b=i=0\)).  If ever needed, this could be passed to CPLEX to cut root-node time further.
-\end{itemize}
+          \begin{itemize}
+              \item \emph{at-most-one-build-per-lifetime} window  
+                    \(\Rightarrow\) removes legacy multi-binary logic.
+              \item Annualised CAPEX via CRF \(\bigl(\)\texttt{compute\_crf}\(\bigr)\);
+                    operational costs weighted by season-weeks.
+              \item No slack variables; nodal balances must close.
+              \item Storage SoC forced to zero at each season edge,
+                    breaking cross-season energy loops.
+          \end{itemize}
 
-\subsubsection*{D.  Possible next tweaks}
+    \item[Phase 4 – Post-processing]  
+          \texttt{post.py} renders a Gantt-like timeline, seasonal
+          generation mixes and an implementation plan, whereas
+          \texttt{analysis/production\_costs.py} computes MWh and
+          \$ flows, re-using the same CRF/discount helpers to stay
+          consistent with the objective.
+\end{description}
 
-\begin{enumerate}[label=\alph*)]
-    \item Replace the looped SoC update with a single sparse Toeplitz matrix product to
-          accelerate CVXPY canonicalisation.  
-    \item Add a lazy-constraint callback so that line thermal limits are added on
-          demand, reducing root-LP size for large grids.  
-    \item Provide an \texttt{xarray} wrapper around the flat dict for more ergonomic
-          analysis in Python notebooks.
-\end{enumerate}
+\subsubsection*{C.\ MILP model structure}
 
-\vspace{0.5em}
-\noindent
-\textbf{Take-away.}  
-With ca.~600 lines of fresh code the project jumps from an LP “dispatch calculator” to a
-multi-year investment MILP while preserving readability and run-time efficiency —
-exactly the sort of incremental upgrade one expects in professional optimisation
-software development.
+Figure~\ref{fig:milp_internal_flow} sketches the internal control
+flow inside \texttt{dcopf()}.  It shows how build binaries cascade
+into installed status, which then gate capacity and dispatch
+variables before everything is funnelled into a single cost
+function.
+
+\begin{tikzpicture}[
+      font=\small,
+      node distance=1.4cm and 1.8cm,
+      every node/.style={align=center, rounded corners, minimum height=1.0cm, draw},
+      box/.style={fill=blue!10},
+      arrow/.style={->, thick}
+  ]
+  % Nodes ------------------------------------------------
+  \node[box] (zbuild)  {Create binaries\\ \(z_{\text{build}}\)};
+  \node[box, right=of zbuild] (zinst)  {Link to\\ installed status\\ \(z_{\text{inst}}\)};
+  \node[box, right=of zinst]  (cap)   {Capacity\\ constraints};
+  \node[box, below=of cap]    (dispatch) {Dispatch vars\\ \((p_{\text{gen}},\,p_{\text{line}},\,p_{\text{stor}})\)};
+  \node[box, left=of dispatch] (balance) {Nodal\\ balances};
+  \node[box, right=of dispatch]    (cost) {Cost\\ function};
+  \node[box, below=of cost]   (solve) {Solve with\\ \textsc{Cplex}};
+  \node[box, below=of dispatch]  (extract) {Results\\ (JSON)};
+  
+  % Arrows ------------------------------------------------
+  \draw[arrow] (zbuild) -- (zinst);
+  \draw[arrow] (zinst) -- (cap);
+  \draw[arrow] (cap) -- (dispatch.north);
+  \draw[arrow] (balance) -- (dispatch.west);
+  \draw[arrow] (zbuild.north) |- ++(0,0.5) -| (cost.north);      % CAPEX
+  \draw[arrow] (dispatch.east) -- (cost.west);                   % OPEX
+  \draw[arrow] (cost) -- (solve);
+  \draw[arrow] (solve) -- (extract);
+  
+  % Background frame
+  \begin{pgfonlayer}{background}
+      \node[draw=orange, thick, rounded corners, inner sep=1cm, 
+            fit=(zbuild) (zinst) (cap) (dispatch) (balance) (cost) (solve) (extract), 
+            label=above:{\textcolor{orange}{\textbf{\texttt{Optimization workflow}}}}] {};
+      \node[draw=grey!20, thick, rounded corners, inner sep=0.2cm, 
+            fit=(zbuild) (zinst) (cap) (dispatch) (balance) (extract), 
+            label=below:{\textcolor{gray}{\textbf{\texttt{IntegratedNetwork()}}}}] {};
+  \end{pgfonlayer}
+  \end{tikzpicture}
+
+\bigskip
+The resulting MILP stack therefore mirrors the earlier
+forecasting-pipeline layout while obeying power-system specific
+lifetimes, energy conservation and investment logic.
