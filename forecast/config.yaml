@@ -1,6 +1,6 @@
 dataset: "../data/renewables/dataset.csv"      # EDIT
 output_dir: "outputs"
-
+ 
 time_column: "time"
 target_column: "electricity"
 test_start: "2024-01-01"
@@ -10,9 +10,9 @@ cv:
   horizon_hours: 720            # 30 d
 
 feature_selection:
-  n_keep: 20                    # top-N gain before BSFS
-  backward_keep: 5              # #features to keep before BSFS
-  forward_pool: 3               # #best features to seed forward SFS
+  n_keep:        20        # gain-ranking pool sent to SFS / BO
+  forward_pool:   3        # seed size for forward SFS
+  k:             12        # BayesOpt will search k_opt ∈ [3 , k]
 
 sarima:
   seasonal_period: 24
