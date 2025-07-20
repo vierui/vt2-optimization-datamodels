@@ -2,39 +2,73 @@
 \section{Introduction}
 
 \subsection{Context \& Motivation}
-% Rising share of renewables → need for integrated planning and short-term forecasting
-% TODO: Write about:
-% - Energy-system planning challenges
-% - Why multi-year, multi-season optimization matters
-% - Rising renewable penetration requiring integrated planning
-% - Need for short-term forecasting capabilities
+Electricity powers everything: homes, factories, even the servers running the latest 
+AI tools. The world's hunger for energy keeps rising, and the shift to renewables 
+like solar and wind is only speeding up. But that switch brings headaches: solar and 
+wind aren't predictable, and as more things go digital, unpredictable spikes can shake 
+the whole grid. Recent blackouts have made us realize how dependent we are on 
+the grid and often forget that internet is for now no existing without electricity.
+It's clear: we need to get better at planning for both the next hour and the next decade, 
+while also pushing for the integration of renewables sources of energy into the grid.
 
-\subsection{VT1 Recaps}
-% DC-power-flow LP prototype; static demand; manual scenario handling, solver, key data flows
-% TODO: Write about:
-% - DC-power-flow LP prototype characteristics
-% - Static demand assumptions
-% - Manual scenario handling approach
-% - Solver and key data flows
-% - System architecture and limitations
+\subsection{VT1 Bottlenecks}
+In the first version (VT1), we built a model that handled power flow and investment, 
+testing it on a handful of scenarios we set up by hand. The basics worked:
+\begin{itemize}
+    \item Demand was fixed and didn’t adapt.
+    \item Each scenario had to be loaded and managed manually.
+    \item The math (LP) let us solve problems, but skipped things like startup costs or 
+    on/off states for power plants.
+    \item We had to glue things together with custom scripts.
+\end{itemize}
+This setup proved the idea, but it missed the mark when it came to real-world details—
+especially picking the best grid setup based on cost and performance.
 
-\subsubsection{Bottlenecks}
-% TODO: Write about:
-% - Performance bottlenecks in VT1
-% - Areas where VT1 was slow
-% - Investment logic misrepresentations
-% - Specific problems that motivated VT2 development
+\subsection{Goals and Scope of VT2}
+VT2 takes a major step forward, tackling the main gaps from the first version 
+with a more advanced and realistic approach:
 
-\subsection{Goals}
-% (i) migrate optimisation core from LP to MILP with realistic unit-commitment and investment decisions
-% (ii) add data-driven PV/Wind forecasting to feed the optimiser
-% (iii) consolidate codebase (Poetry + tests) -> Not a goal but genuinely improved
-% TODO: Write about:
-% - Goal (i): Migrate optimization core from LP to MILP
-% - Realistic unit-commitment and investment decisions
-% - Goal (ii): Add data-driven PV/Wind forecasting
-% - Integration of forecasting to feed the optimizer
-% - Goal (iii): Consolidate codebase (Poetry + tests)
-% - Code quality improvements and testing infrastructure
+\begin{itemize}
+    \item \textbf{Realistic operational modeling:} Instead of only using 
+    continuous variables, VT2 upgrades to mixed-integer linear programming (MILP). 
+    This lets us explicitly represent unit commitment—so power plants can 
+    switch on or off, model asset retirements and simulate maintenance.
+    Once the logic implemented, we are a few code lines away of also introducing minimum up/down times, 
+    or start-up costs models but these were not implemented in this version.
+    \item \textbf{Data-driven renewable integration:} the new version now incorporates 
+    historical and reanalysis weather data to generate realistic wind and 
+    solar production forecasts. This means we’re not just simulating “average” 
+    days, but capturing the variability and uncertainty that challenge the grid.
+    making it possible to stress-test decisions against extreme events, 
+    seasonal lows, and sudden surges in demand.
+    \item \textbf{Modular, robust codebase:} The entire model has been 
+    refactored into a modular Python package using \texttt{Poetry}. Automated 
+    testing and continuous integration ensure that every change is checked for consistency and reliability. This not only speeds up development but makes it easier to extend—whether that’s adding new assets, market mechanisms, or scenario types.
+\end{itemize}
+
+With these improvements, VT2 shifts from a simple prototype to a more robust 
+planning and decision-support tool. It can now assess investment and operational 
+strategies under high renewable shares, tight operational constraints, and 
+uncertain future conditions—laying the groundwork for future features like 
+demand response and market-clearing simulation.
 
 \newpage
+
+\section{Introduction, Context, and Literature Review}
+\label{sec:intro_lit}
+
+\subsection{Context and Motivation}
+Electricity powers everything: homes, factories, and even the servers running the latest AI tools. Global energy demand is rising, and the shift to renewables like solar and wind is accelerating. But this transition brings new challenges—renewables are unpredictable, and increasing digitalization means more volatile and less controllable demand. Recent blackouts have exposed how dependent we are on the grid, and how easily disruptions cascade to other critical infrastructure, including the internet. This makes planning—both short- and long-term—and robust renewable integration more urgent than ever.
+
+\subsection{Modeling Approaches: From LP to MILP}
+The initial model (VT1) handled power flow and investment with a linear programming (LP) framework, using fixed demand, hand-crafted scenarios, and continuous variables for all decisions. This allowed proof-of-concept studies but missed essential real-world constraints: manual scenario management, the absence of unit commitment (on/off states, start-up costs), and limited operational realism.
+
+The new version (VT2) adopts Mixed-Integer Linear Programming (MILP), where discrete (binary) variables enable us to model on/off states, asset retirements, maintenance cycles, and investment decisions in a unified, realistic manner~\cite{andersson2004power, wood2013power}. MILP co-optimizes capital and operational expenditure (CAPEX and OPEX), preventing suboptimal investment timing or dispatch caused by treating planning and operation separately.
+
+\subsection{Data-Driven Forecasting and Python Ecosystem}
+Short-term forecasting of PV and wind is critical for grid operation. Methods range from simple persistence baselines to advanced ML models. We benchmarked several, ultimately using gradient boosting (XGBoost) for primary forecasting and SARIMA as a baseline~\cite{grzebyk2021xgboost, zhong2020xgboost}. This enables the model to capture realistic renewable variability and test robustness against extremes.
+
+Python’s mature ecosystem makes it the dominant platform for optimization and ML in energy systems. We leverage libraries such as docplex (for CPLEX integration), scikit-learn, XGBoost, and statsmodels. Commercial solvers (CPLEX, Gurobi) dramatically outperform open-source options for large MILPs, making them the default for this project~\cite{mitchell2011pulp, mittelmann2023benchmarks}.
+
+\subsection{VT2 Model Advancements}
+VT2 refactors the model into a modular Python package (using \texttt{Poetry}), with automated tests and continuous integration for reliability and extensibility. The new formulation supports high renewable shares, explicit unit commitment, and richer scenario modeling—setting the stage for further extensions such as demand response or market simulation.

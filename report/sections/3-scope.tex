@@ -92,3 +92,52 @@ The following indicators are tracked to assess the value of the MILP and the for
     \item \textbf{Transparency:} The share of total cost by asset class is reported to support sensitivity analysis.
 \end{itemize}
 % ---
+
+\newpage
+\section{Scope, Model Structure, and Key Performance Indicators}
+\label{sec:scope_model}
+
+\subsection{Scope and Boundaries}
+The study focuses on grid investment and operation under high renewable shares, explicitly modeling both long-term asset decisions and short-term operational constraints. The boundaries are as follows:
+\begin{itemize}
+    \item \textbf{Strategic planning horizon:} Multi-year, typically 1–10 years, capturing asset builds, retirements, and their timing.
+    \item \textbf{Operational resolution:} Each year is represented by three typical weeks (winter, summer, spring/autumn), balancing MILP tractability and seasonal fidelity.
+    \item \textbf{Forecasting:} Day-ahead (24h) renewable and demand forecasting, with additional checks at 48, 72, and 168 hours to assess degradation.
+    \item \textbf{System boundaries:} The model runs on a fixed test grid (buses, lines, assets), with retail tariffs and ancillary services excluded. Everything behind the grid connection point is out of scope.
+\end{itemize}
+
+\subsection{Model Structure and Variables}
+The MILP jointly optimizes investment (CAPEX) and operational (OPEX) decisions:
+\begin{itemize}
+    \item \textbf{Investment variables:} Binary decisions for whether to build generators ($b_{g,y}$) or storage ($b_{s,y}$) in each year.
+    \item \textbf{Unit commitment:} Binary on/off states for thermal units ($u_{g,y,t}$), supporting future extensions (min up/down, start costs).
+    \item \textbf{Operational dispatch:} Continuous variables for generator output, storage charging/discharging, state-of-charge, and DC line flow.
+\end{itemize}
+Key new/changed constraints:
+\begin{itemize}
+    \item \textbf{Asset lifetime:} Enforces non-overlapping rebuilds and tracks active years.
+    \item \textbf{Unit commitment:} Enforces commitment logic, linking minimum up/down and future start costs.
+    \item \textbf{CAPEX annuity:} Investment cost spread using a capital recovery factor.
+    \item \textbf{Storage:} Final state-of-charge relaxed within 10\% of nominal, improving solver speed.
+\end{itemize}
+All core physical and economic constraints (power balance, line limits, storage, renewables) remain, now referencing new binary variables as needed.
+
+\subsection{Forecasting Module}
+A stand-alone ML forecasting module predicts exogenous series (load, wind, PV) with the following features:
+\begin{itemize}
+    \item \textbf{Targets:} 24 hourly values for the next day, plus 48h, 72h, and 7-day checks.
+    \item \textbf{Features:} Calendar indicators, recent lags, rolling means, weather proxies.
+    \item \textbf{Models:} Linear, random forest, gradient boosting, LSTM (all use common splits/scaling).
+\end{itemize}
+Accuracy is quantified via MAE and RMSE, with day-ahead targets set to $<$5\% (MAE) and $<$7\% (RMSE) of mean load.
+
+\subsection{Key Performance Indicators (KPIs) and Assessment}
+The following metrics are tracked to evaluate the planning and forecasting framework:
+\begin{itemize}
+    \item \textbf{System cost:} Total discounted cost (CAPEX annuity + OPEX) as main optimization objective.
+    \item \textbf{Solver performance:} MILP wall-clock time and optimality gap for each scenario.
+    \item \textbf{Forecast accuracy:} MAE and RMSE for each horizon and time series.
+    \item \textbf{Robustness:} Number of hours with unmet demand or line overloads (should be zero).
+    \item \textbf{Transparency:} Share of total system cost by asset class for scenario analysis.
+\end{itemize}
+These indicators validate the model’s ability to recommend robust, cost-effective investment and operational strategies under uncertainty.

@@ -515,8 +515,8 @@ challenges where future data is never accessible during training.
     \draw[arrow] (default.east) -- ++(0.7,0) |- (train.west);
 
     \begin{pgfonlayer}{background}
-        \node[draw=grey!20, thick, rounded corners, inner sep=0.2cm, 
-              fit=(tune) (default), (load), (split), (train), 
+        \node[draw=gray!20, thick, rounded corners, inner sep=0.2cm, 
+              fit=(tune) (default) (load) (split) (train), 
               label=above:{\textcolor{gray}{\textbf{\texttt{Cross-validation ?} }}}] {};
         \node[draw=black, thick, rounded corners, inner sep=1cm, 
               fit=(tune) (default) (split) (load) (train), 

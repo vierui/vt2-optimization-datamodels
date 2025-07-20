@@ -1,25 +1,100 @@
-dataset: "../data/renewables/dataset.csv"      # EDIT
-output_dir: "outputs"
- 
-time_column: "time"
-target_column: "electricity"
-test_start: "2024-01-01"
-
+output_dir: outputs
+dataset: ../data/renewables/dataset.csv
+time_column: time
+target_column: electricity
+test_start: '2024-01-01 00:00:00'
+test_weeks: 3
+feature_selection:
+  n_keep: 20
+  forward_pool: 3
+  k: 15
 cv:
   n_splits: 5
-  horizon_hours: 720            # 30 d
-
-feature_selection:
-  n_keep:        20        # gain-ranking pool sent to SFS / BO
-  forward_pool:   3        # seed size for forward SFS
-  k:             12        # BayesOpt will search k_opt ∈ [3 , k]
-
+  horizon_hours: 720
 sarima:
+  p_values:
+  - 0
+  - 1
+  - 2
+  - 3
+  q_values:
+  - 0
+  - 1
+  - 2
+  P_values:
+  - 0
+  - 1
+  - 2
+  Q_values:
+  - 0
+  - 1
   seasonal_period: 24
-  p_values: [0, 1, 2]
-  q_values: [0, 1, 2]
-  P_values: [0, 1]
-  Q_values: [0, 1]
-
-random_state: 42
+  n_jobs: 4
 plots_first_n_hours: 72
+random_state: 42
+tuned:
+  bsfs_feats:
+  - irradiance_direct
+  - irradiance_diffuse
+  - hour_cos
+  - y_lag24
+  - y_lag1
+  - hour
+  - hour_sin
+  - month
+  - t2m
+  - month_sin
+  - y_lag168
+  - prectotland
+  - month_cos
+  - irradiance_direct_lag1
+  - cldtot
+  - irradiance_direct_lag24
+  - irradiance_direct_lag168
+  - irradiance_direct_lag48
+  - y_roll24
+  fwdsfs_feats:
+  - irradiance_direct
+  - irradiance_diffuse
+  - t2m
+  bayesopt_feats:
+  - irradiance_direct
+  - irradiance_diffuse
+  - hour_cos
+  - y_lag24
+  - y_lag1
+  - hour
+  - hour_sin
+  - month
+  - t2m
+  - month_sin
+  - y_lag168
+  - prectotland
+  bo_trace:
+  - - 3
+    - 0.004906689423652534
+  - - 4
+    - 0.004838054775104975
+  - - 5
+    - 0.004769631280659724
+  - - 6
+    - 0.004663671383219067
+  - - 7
+    - 0.004679820109036925
+  - - 8
+    - 0.003951796221663627
+  - - 9
+    - 0.00342687805391153
+  - - 10
+    - 0.00342415250014961
+  - - 11
+    - 0.003422949774079323
+  - - 12
+    - 0.003346939467962694
+  - - 13
+    - 0.003391059295836156
+  - - 14
+    - 0.00337926269297684
+  - - 15
+    - 0.003401477345355835
+  timestamp: '2025-07-20T20:48:35+00:00'
