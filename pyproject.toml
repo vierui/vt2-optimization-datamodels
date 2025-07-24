@@ -29,6 +29,7 @@ pvlib = "^0.10.2"
 optuna = "^3.0.0"
 plotly = "^5.0.0"
 tensorflow = "^2.15.0"
+scikit-optimize = "^0.10.2"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"
@@ -37,3 +38,7 @@ pytest = "^8.3.5"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+packages = [
+  { include = "src", from = "forecast" }
+]

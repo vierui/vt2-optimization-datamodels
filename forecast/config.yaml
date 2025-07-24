@@ -70,6 +70,11 @@ tuned:
   - month_sin
   - y_lag168
   - prectotland
+  time_feats:
+  - hour
+  - month
+  - hour_sin
+  - hour_cos
   bo_trace:
   - - 3
     - 0.004906689423652534
@@ -98,3 +103,8 @@ tuned:
   - - 15
     - 0.003401477345355835
   timestamp: '2025-07-20T20:48:35+00:00'
+  sarima_order:
+  - 2
+  - 2
+  - 2
+  - 1
