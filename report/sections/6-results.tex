@@ -1,18 +1,198 @@
 \newpage
 \section{Results}
 
-\subsection{Forecasting Accuracy}
+\subsection{Forecasting module}
 
-\subsubsection*§{Metrics overview}
-\subsubsection{Forecast vs Actual Plot}
+To progressively improve the photovoltaic (PV) generation forecast, we implemented a 
+sequence of increasingly sophisticated feature sets, each motivated by operational needs 
+and time series forecasting best practices. Below, we summarize the evolution of the 
+forecasting module, briefly explaining the rationale for each stage and presenting visual 
+and quantitative results.
 
-\subsubsection*{Residual Diagnostics}
+%------------------------------------------
+\paragraph{Set 1: Time Features Only}
+We began with a minimal model using only time-related features (hour and day). This 
+provided a simple benchmark and captured regular daily and weekly patterns but did not 
+account for weather effects or recent historical trends.
 
-\subsubsection*{Feature & Model Info}
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set1_forecast_profile.pdf}
+        \caption{Forecast profile: Actual vs Predicted}
+    \end{subfigure}
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set1_residuals.pdf}
+        \caption{Residuals: True vs Predicted}
+    \end{subfigure}
+    \caption{Set 1 - Time features only: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+\end{figure}
 
-\subsubsection*{CV Performance}
+\begin{table}[H]
+    \centering
+    \caption{Set 1 - Daily Performance Metrics}
+    \begin{tabular}{lccc}
+        \toprule
+        Date        & MAE    & RMSE   & R\textsuperscript{2} \\
+        \midrule
+        2024-01-01  &        &        &       \\
+        2024-01-02  &        &        &       \\
+        2024-01-03  &        &        &       \\
+        \bottomrule
+    \end{tabular}
+\end{table}
 
-\subsubsection*{Forecast Interval or Scenario Analysis}
+%------------------------------------------
+\paragraph{Set 2: Time + Lagged Features}
+Recognizing the autocorrelated nature of PV output, we next included lagged values of 
+electricity generation (e.g., previous hour, previous day, previous week). Incorporating 
+these lags enabled the model to better leverage recent behavior and short-term trends, 
+leading to notable improvements in accuracy.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set2_forecast_profile.pdf}
+        \caption{Forecast profile: Actual vs Predicted}
+    \end{subfigure}
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set2_residuals.pdf}
+        \caption{Residuals: True vs Predicted}
+    \end{subfigure}
+    \caption{Set 2 - Time + lagged features: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \caption{Set 2 - Daily Performance Metrics}
+    \begin{tabular}{lccc}
+        \toprule
+        Date        & MAE    & RMSE   & R\textsuperscript{2} \\
+        \midrule
+        2024-01-01  &        &        &       \\
+        2024-01-02  &        &        &       \\
+        2024-01-03  &        &        &       \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+%------------------------------------------
+\paragraph{Set 3: Feature Selection (Bayesian Optimization + CV)}
+To avoid redundancy and overfitting, we performed feature selection using Bayesian 
+optimization and cross-validation. By retaining only the most relevant lags and features, 
+the model became both more robust and efficient, maintaining strong predictive performance 
+with a reduced input set.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set3_forecast_profile.pdf}
+        \caption{Forecast profile: Actual vs Predicted}
+    \end{subfigure}
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set3_residuals.pdf}
+        \caption{Residuals: True vs Predicted}
+    \end{subfigure}
+    \caption{Set 3 - Selected features: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \caption{Set 3 - Daily Performance Metrics}
+    \begin{tabular}{lccc}
+        \toprule
+        Date        & MAE    & RMSE   & R\textsuperscript{2} \\
+        \midrule
+        2024-01-01  &        &        &       \\
+        2024-01-02  &        &        &       \\
+        2024-01-03  &        &        &       \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+%------------------------------------------
+\paragraph{Set 4: Recursive Prediction}
+In operational settings, future values of lagged features are unavailable at prediction 
+time. We therefore tested a recursive prediction approach, using the model’s own forecasts as 
+lagged inputs for subsequent hours. While this better reflects real-world forecasting 
+constraints, it led to increased forecast errors due to the accumulation of prediction uncertainty.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set4_forecast_profile.pdf}
+        \caption{Forecast profile: Actual vs Predicted}
+    \end{subfigure}
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set4_residuals.pdf}
+        \caption{Residuals: True vs Predicted}
+    \end{subfigure}
+    \caption{Set 4 - Recursive prediction: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \caption{Set 4 - Daily Performance Metrics}
+    \begin{tabular}{lccc}
+        \toprule
+        Date        & MAE    & RMSE   & R\textsuperscript{2} \\
+        \midrule
+        2024-01-01  &        &        &       \\
+        2024-01-02  &        &        &       \\
+        2024-01-03  &        &        &       \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+%------------------------------------------
+\paragraph{Set 5: Enhanced Features with POA Clear-Sky}
+Finally, we extended the feature set to include physics-based drivers—specifically, 
+plane-of-array (POA) clear-sky irradiance. By combining these weather-driven variables 
+with the selected lags and time features, the model could account for both physical 
+potential and recent variability, resulting in the best overall performance.
+
+\begin{figure}[H]
+    \centering
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set5_forecast_profile.pdf}
+        \caption{Forecast profile: Actual vs Predicted}
+    \end{subfigure}
+    \begin{subfigure}{0.49\textwidth}
+        \includegraphics[width=\linewidth]{figures/set5_residuals.pdf}
+        \caption{Residuals: True vs Predicted}
+    \end{subfigure}
+    \caption{Set 5 - Enhanced features with POA clear-sky: (a) 48-hour forecast profile; 
+    (b) Residuals scatter plot.}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \caption{Set 5 - Daily Performance Metrics}
+    \begin{tabular}{lccc}
+        \toprule
+        Date        & MAE    & RMSE   & R\textsuperscript{2} \\
+        \midrule
+        2024-01-01  &        &        &       \\
+        2024-01-02  &        &        &       \\
+        2024-01-03  &        &        &       \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+%------------------------------------------
+
+The figures above illustrate 48-hour forecast trajectories and residual plots for 
+each feature set. Quantitative results for three representative days are summarized in 
+the tables. Further discussion of these results is presented in the following section.
+
+
+
+
+
+
+
+
+
 
 
 
