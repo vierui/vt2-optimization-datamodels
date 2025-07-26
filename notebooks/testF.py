@@ -458,8 +458,8 @@ for i, (_, row) in enumerate(feature_importance.head(15).iterrows()):
     print(f"{i+1:2d}. {row['feature']:<30} {row['importance']:.4f} ({feat_type})")
 
 # Plot feature importance with color coding
-plt.figure(figsize=(12, 10))
-top_features = feature_importance.head(20)
+plt.figure(figsize=(12, 6))
+top_features = feature_importance.head(8)
 
 # Color code by feature type
 colors = []

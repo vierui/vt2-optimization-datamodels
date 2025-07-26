@@ -1,151 +1,207 @@
 \newpage
 \section{Results}
 
-\subsection{Forecasting module}
+\subsection{Investment module using MILP optimization}
 
-To progressively improve the photovoltaic (PV) generation forecast, we implemented a 
-sequence of increasingly sophisticated feature sets, each motivated by operational needs 
-and time series forecasting best practices. Below, we summarize the evolution of the 
-forecasting module, briefly explaining the rationale for each stage and presenting visual 
-and quantitative results.
+
+
+
+
+\subsection{Forecasting module}
+A series of models were developed and compared for operational forecasting of electricity generation. 
+Performance was evaluated over a 7-day period starting 2024-01-01. The principal metrics considered are RMSE, 
+MAE, and $R^2$, computed both overall and per day. Table~\ref{tab:forecast-metrics} summarizes the test results 
+for all model variants.
+
+\begin{table}[h!]
+    \centering
+    \begin{tabular}{lccc}
+        \textbf{Model} & \textbf{RMSE} & \textbf{MAE} & $\mathbf{R^2}$ \\
+        \hline
+        A. Time only & 0.130 & 0.070 & 0.095 \\
+        B. Time + Lag (Bayesian opt.) & 0.022 & 0.011 & 0.973 \\
+        C. Bayes Opt. + CV (Time + Lag) & 0.022 & 0.013 & 0.973 \\
+        D. Recursive (not used) & 0.119 & 0.053 & -0.281 \\
+        E. D + POA Clear-Sky feature & 0.024 & 0.010 & 0.970 \\
+    \end{tabular}
+    \caption{Forecasting model performance on test set (7 days).}
+    \label{tab:forecast-metrics}
+\end{table}
 
 %------------------------------------------
-\paragraph{Set 1: Time Features Only}
+\subsubsection*{A. Time Features Only}
+The baseline model (A), relying solely on time features, achieved poor predictive performance ($R^2=0.095$), 
+with substantial errors for certain days (see daily breakdowns). 
+
 We began with a minimal model using only time-related features (hour and day). This 
 provided a simple benchmark and captured regular daily and weekly patterns but did not 
-account for weather effects or recent historical trends.
+account for weather effects or recent historical trends. It achieved poor performance. 
 
 \begin{figure}[H]
     \centering
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set1_forecast_profile.pdf}
-        \caption{Forecast profile: Actual vs Predicted}
-    \end{subfigure}
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set1_residuals.pdf}
-        \caption{Residuals: True vs Predicted}
-    \end{subfigure}
-    \caption{Set 1 - Time features only: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+    \includegraphics[width=\linewidth]{images/set_time.png}
+    \caption{Set 1 - Time features only}
+    \label{fig:set1-forecast-profile}
 \end{figure}
 
 \begin{table}[H]
     \centering
-    \caption{Set 1 - Daily Performance Metrics}
     \begin{tabular}{lccc}
-        \toprule
         Date        & MAE    & RMSE   & R\textsuperscript{2} \\
-        \midrule
-        2024-01-01  &        &        &       \\
-        2024-01-02  &        &        &       \\
-        2024-01-03  &        &        &       \\
-        \bottomrule
+        \hline
+        2024-01-01  & 0.045  & 0.076  & 0.693 \\
+        2024-01-02  & 0.098  & 0.169  & -15.138 \\
+        2024-01-03  & 0.036  & 0.064  & 0.922 \\
     \end{tabular}
+    \caption{Set A - Daily Performance Metrics}
 \end{table}
 
 %------------------------------------------
-\paragraph{Set 2: Time + Lagged Features}
+\subsubsection*{B. Time + Lagged Features}
 Recognizing the autocorrelated nature of PV output, we next included lagged values of 
 electricity generation (e.g., previous hour, previous day, previous week). Incorporating 
-these lags enabled the model to better leverage recent behavior and short-term trends, 
-leading to notable improvements in accuracy.
+these lags enabled the model to better understand night/time patterns (no sub-zero values). However, 
+significant errors remained on some days, indicating the model's limited ability to 
+capture complex temporal dependencies.
 
 \begin{figure}[H]
     \centering
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set2_forecast_profile.pdf}
-        \caption{Forecast profile: Actual vs Predicted}
-    \end{subfigure}
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set2_residuals.pdf}
-        \caption{Residuals: True vs Predicted}
-    \end{subfigure}
-    \caption{Set 2 - Time + lagged features: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+    \includegraphics[width=\linewidth]{images/set_lags.png}
+    \caption{Set B - Time + time/cyclical features (before feature selection)}
 \end{figure}
 
 \begin{table}[H]
     \centering
-    \caption{Set 2 - Daily Performance Metrics}
     \begin{tabular}{lccc}
-        \toprule
         Date        & MAE    & RMSE   & R\textsuperscript{2} \\
-        \midrule
-        2024-01-01  &        &        &       \\
-        2024-01-02  &        &        &       \\
-        2024-01-03  &        &        &       \\
-        \bottomrule
+        \hline
+        2024-01-01  & 0.043  & 0.078  & 0.677 \\
+        2024-01-02  & 0.087  & 0.156  & -12.658 \\
+        2024-01-03  & 0.037  & 0.069  & 0.908 \\
     \end{tabular}
+    \caption{Set 2 - Daily Performance Metrics}
 \end{table}
 
-%------------------------------------------
-\paragraph{Set 3: Feature Selection (Bayesian Optimization + CV)}
-To avoid redundancy and overfitting, we performed feature selection using Bayesian 
-optimization and cross-validation. By retaining only the most relevant lags and features, 
-the model became both more robust and efficient, maintaining strong predictive performance 
-with a reduced input set.
+\textbf{Feature Importance Analysis} Understanding which features 
+most significantly impact the model's predictions is crucial for 
+interpretability and further model refinement. We conducted a feature 
+importance analysis by keeping only the most important features in the 
+training set.
+
+We conducted  the feature optimization number by using the Bayesian optimization search.
+It learns from previous trials, improving efficiency over brute-force methods sucha grid 
+search or back-/front- ward elimination which are more expensive.
+
+\begin{figure}[h!]
+    \centering
+    \includegraphics[width=0.75\linewidth]{images/feature-importance-cyclic.png}
+    \caption{Feature Importance derived from the Bayesian optimization search}
+    \label{fig:feature-importance}
+\end{figure}
+
+The decrease of the error in this step is highly significant. Not only does it 
+show that over 95\% of the model's predictive power was explained by just three 
+features: \texttt{electricity\_lag1}, \texttt{electricity\_lag24}, and \texttt{hour\_sin} 
+but it also highlights the relevance of removing noise (excessive features) in the prediction
+to avoid overfitting. 
 
 \begin{figure}[H]
     \centering
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set3_forecast_profile.pdf}
-        \caption{Forecast profile: Actual vs Predicted}
-    \end{subfigure}
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set3_residuals.pdf}
-        \caption{Residuals: True vs Predicted}
-    \end{subfigure}
-    \caption{Set 3 - Selected features: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+    \includegraphics[width=\linewidth]{images/set_lags2.png}
+    \caption{Set B - Time + time/cyclical features (after feature selection)}
+    \label{fig:set2-forecast-profile}
+\end{figure}
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{lccc}
+        Date        & MAE    & RMSE   & R\textsuperscript{2} \\
+        \hline
+        2024-01-01  & 0.013  & 0.025  & 0.967 \\
+        2024-01-02  & 0.013  & 0.023  & 0.693 \\
+        2024-01-03  & 0.012  & 0.019  & 0.993 \\
+    \end{tabular}
+    \caption{Set 2 - Daily Performance Metrics}
+\end{table}
+
+%------------------------------------------
+\subsubsection*{C. Parameter tuning and cross-validation}
+To evaluate how well your model is likely to perform on unseen data, we performed 
+cross validation (evaluation mechanism). It splits the data into several parts (folds), 
+trains on some, and tests on others. It should prevent overfitting. It requires a peticular
+attention when it comes to time series data so the splits are not randomly picked but rather 
+sequential in time.
+
+Hyperparameter tuning is the search process to find the best hyperparameters for the model.
+Its robustness is improved. Again, we used a Bayesian optimization search to find the 
+best hyperparameters.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=\linewidth]{images/set_bayesian1.png}
+    \caption{Set C - Features selected by Bayesian optimization}
+    \label{fig:set3-forecast-profile}
 \end{figure}
 
 \begin{table}[H]
     \centering
     \caption{Set 3 - Daily Performance Metrics}
     \begin{tabular}{lccc}
-        \toprule
         Date        & MAE    & RMSE   & R\textsuperscript{2} \\
-        \midrule
-        2024-01-01  &        &        &       \\
-        2024-01-02  &        &        &       \\
-        2024-01-03  &        &        &       \\
-        \bottomrule
+        \hline
+        2024-01-01  & 0.009  & 0.023  & 0.972 \\
+        2024-01-02  & 0.010  & 0.022  & 0.732 \\
+        2024-01-03  & 0.011  & 0.019  & 0.993 \\
     \end{tabular}
 \end{table}
 
+Ironically, these steps could lead to overfitting and poor generalization. 
+Simultaneous optimization of hyperparameters with limited evaluation 
+calls may not fully explore the searchspace, leading to suboptimal solutions. 
+These methods are computationally expensive and using too wide ranges or too 
+little cv folds may lead to poor results. It's a trade-off between exploration and 
+exploitation. 
+
+We see here, that despite the (expensive) cross-validation and hyperparameter tuning, 
+the model does not generalize much better than the one with feature selection only. 
+
 %------------------------------------------
-\paragraph{Set 4: Recursive Prediction}
-In operational settings, future values of lagged features are unavailable at prediction 
-time. We therefore tested a recursive prediction approach, using the model’s own forecasts as 
-lagged inputs for subsequent hours. While this better reflects real-world forecasting 
-constraints, it led to increased forecast errors due to the accumulation of prediction uncertainty.
+\subsubsection*{D. Recursive Prediction}
+In operational settings, true future lag values are unknown; predictions must be generated recursively, 
+using model outputs as future lag inputs. This recursive prediction (Model D) more accurately reflects 
+real-world constraints, but error accumulation can occur, leading to degraded performance.
 
 \begin{figure}[H]
     \centering
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set4_forecast_profile.pdf}
-        \caption{Forecast profile: Actual vs Predicted}
-    \end{subfigure}
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set4_residuals.pdf}
-        \caption{Residuals: True vs Predicted}
-    \end{subfigure}
-    \caption{Set 4 - Recursive prediction: (a) 48-hour forecast profile; (b) Residuals scatter plot.}
+    \includegraphics[width=\linewidth]{images/set_recursive.png}
+    \caption{Set 4 - Recursive prediction}
+    \label{fig:set4-forecast-profile}
 \end{figure}
 
 \begin{table}[H]
     \centering
-    \caption{Set 4 - Daily Performance Metrics}
     \begin{tabular}{lccc}
-        \toprule
         Date        & MAE    & RMSE   & R\textsuperscript{2} \\
-        \midrule
-        2024-01-01  &        &        &       \\
-        2024-01-02  &        &        &       \\
-        2024-01-03  &        &        &       \\
-        \bottomrule
+        \hline
+        2024-01-01  & 0.080  & 0.160  & -0.353 \\
+        2024-01-02  & 0.027  & 0.052  & -0.499 \\
+        2024-01-03  & \textit{NaN}    & \textit{NaN}    & \textit{NaN} \\
     \end{tabular}
+    \caption{Set 4 - Daily Performance Metrics}
 \end{table}
 
+The model seemed successfully implemented including the preprocessing of time-series 
+data (removing nighttime hours), aligning input-output sequences, and setting up the loop 
+logic to feed previous predictions into future steps. However, the model did not yield 
+stable or reliable results. 
+
+It remained flat. This behavior is most likely due error accumulation and feedback saturation, 
+where early incorrect low predictions suppress the entire sequence. Broken temporal continuity 
+from removing nighttime data, represents a clear challenge in the modeling too. We tried to 
+implement the method but not extensive research was done.  
+
 %------------------------------------------
-\paragraph{Set 5: Enhanced Features with POA Clear-Sky}
+\subsubsection*{E. Enhanced Features with POA Clear-Sky}
 Finally, we extended the feature set to include physics-based drivers—specifically, 
 plane-of-array (POA) clear-sky irradiance. By combining these weather-driven variables 
 with the selected lags and time features, the model could account for both physical 
@@ -153,108 +209,99 @@ potential and recent variability, resulting in the best overall performance.
 
 \begin{figure}[H]
     \centering
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set5_forecast_profile.pdf}
-        \caption{Forecast profile: Actual vs Predicted}
-    \end{subfigure}
-    \begin{subfigure}{0.49\textwidth}
-        \includegraphics[width=\linewidth]{figures/set5_residuals.pdf}
-        \caption{Residuals: True vs Predicted}
-    \end{subfigure}
-    \caption{Set 5 - Enhanced features with POA clear-sky: (a) 48-hour forecast profile; 
-    (b) Residuals scatter plot.}
+    \includegraphics[width=\linewidth]{images/set_poa.png}
+    \caption{Set 5 - Enhanced features with POA clear-sky}
+    \label{fig:set5-forecast-profile}
 \end{figure}
 
 \begin{table}[H]
     \centering
-    \caption{Set 5 - Daily Performance Metrics}
     \begin{tabular}{lccc}
-        \toprule
         Date        & MAE    & RMSE   & R\textsuperscript{2} \\
-        \midrule
-        2024-01-01  &        &        &       \\
-        2024-01-02  &        &        &       \\
-        2024-01-03  &        &        &       \\
-        \bottomrule
+        \hline
+        2024-01-01  & 0.008  & 0.026  & 0.970 \\
+        2024-01-02  & 0.009  & 0.022  & 0.725 \\
+        2024-01-03  & 0.015  & 0.028  & 0.985 \\
     \end{tabular}
+    \caption{Set 5 - Daily Performance Metrics}
 \end{table}
 
-%------------------------------------------
+Error and accuracy metrics are improved. However, the model is still far from being perfect 
+and computational expense is high for a sole 0.1\% improvement of the MAE-error for the day ahead 
+prediction horizon. 
 
-The figures above illustrate 48-hour forecast trajectories and residual plots for 
-each feature set. Quantitative results for three representative days are summarized in 
-the tables. Further discussion of these results is presented in the following section.
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.75\linewidth]{images/feature-importance-weather.png}
+    \caption{Feature Importance including weather-features}
+    \label{fig:feature-importance-weather}
+\end{figure}
+
+We performed a feature selection with the new weather-features based to understand their importance 
+compare to the previous time-only-lags. We notice 7 additional "POA"-features in the top 20 and we see 
+that within out parameter array seach we manage to quantify the the sum of their importance which 
+improves the prediction performance by 0.2\% of the MAE-error. In average POA-features impact is +0.003.
 
 
+% \begin{table}[h]
+% \centering
+% \caption{Validation MAE by model (2022–2023 split).}
+% \label{tab:model-comp}
+% \begin{tabular}{lcc}
+% \hline
+% Model & MAE [kW] & Rel. $\Delta$ vs. SARIMA \\
+% \hline
+% Naïve Seasonal      & 0.142 & +34\% \\
+% SARIMA baseline     & 0.106 & — \\
+% MLP (2×128)         & 0.565 & +433\% \\
+% TCN (64f, 4 blk)    & 0.128 & +21\% \\
+% GBDT (XGBoost)      & 0.090 & $-$15\% \\
+% SARIMA + GBDT (ours)& 0.085 & $-$20\% \\
+% \hline
+% \end{tabular}
+% \end{table}
+% % Table of MAE / RMSE for each model; plots (actual vs forecast).
+% % TODO: Write about:
+% % - Comparison table of MAE/RMSE for different models
+% % - Actual vs forecast plots and visualizations
+% % - Model performance across different seasons
+% % - Accuracy metrics for different forecast horizons
+% % - Statistical significance of improvements
 
+% \subsection{MILP vs Legacy LP}
+% % Cost reduction, unit-commitment realism, run-time overhead.
+% % TODO: Write about:
+% % - Total system cost comparisons
+% % - Unit-commitment decision realism improvements
+% % - Investment decision quality analysis
+% % - Run-time overhead assessment
+% % - Solution quality and optimality gaps
 
+% \subsection{Solver Impact (CPLEX vs GLPK)}
+% % Solve time, mipgap convergence, memory footprint.
+% % TODO: Write about:
+% % - Solve time performance comparisons
+% % - MIP gap convergence analysis
+% % - Memory footprint differences
+% % - Scalability improvements
+% % - Robustness and reliability comparisons
 
+% \subsection{Sensitivity and Scenario Analysis}
+% % Congestion pricing, Lifetime sensitivity, discount-rate sweep.
+% % TODO: Write about:
+% % - Congestion pricing impact analysis
+% % - Asset lifetime sensitivity studies
+% % - Discount rate parameter sweeps
+% % - Load growth scenario comparisons
+% % - Renewable penetration sensitivity
 
+% \subsection{Integrated Workflow Demo}
+% % End-to-end run + gantt like result.
+% % TODO: Write about:
+% % - Complete workflow demonstration
+% % - End-to-end execution results
+% % - Timeline and scheduling visualization
+% % - Integration performance metrics
+% % - Workflow automation benefits
 
-
-
-
-
-
-\begin{table}[h]
-\centering
-\caption{Validation MAE by model (2022–2023 split).}
-\label{tab:model-comp}
-\begin{tabular}{lcc}
-\hline
-Model & MAE [kW] & Rel. $\Delta$ vs. SARIMA \\
-\hline
-Naïve Seasonal      & 0.142 & +34\% \\
-SARIMA baseline     & 0.106 & — \\
-MLP (2×128)         & 0.565 & +433\% \\
-TCN (64f, 4 blk)    & 0.128 & +21\% \\
-GBDT (XGBoost)      & 0.090 & $-$15\% \\
-SARIMA + GBDT (ours)& 0.085 & $-$20\% \\
-\hline
-\end{tabular}
-\end{table}
-% Table of MAE / RMSE for each model; plots (actual vs forecast).
-% TODO: Write about:
-% - Comparison table of MAE/RMSE for different models
-% - Actual vs forecast plots and visualizations
-% - Model performance across different seasons
-% - Accuracy metrics for different forecast horizons
-% - Statistical significance of improvements
-
-\subsection{MILP vs Legacy LP}
-% Cost reduction, unit-commitment realism, run-time overhead.
-% TODO: Write about:
-% - Total system cost comparisons
-% - Unit-commitment decision realism improvements
-% - Investment decision quality analysis
-% - Run-time overhead assessment
-% - Solution quality and optimality gaps
-
-\subsection{Solver Impact (CPLEX vs GLPK)}
-% Solve time, mipgap convergence, memory footprint.
-% TODO: Write about:
-% - Solve time performance comparisons
-% - MIP gap convergence analysis
-% - Memory footprint differences
-% - Scalability improvements
-% - Robustness and reliability comparisons
-
-\subsection{Sensitivity and Scenario Analysis}
-% Congestion pricing, Lifetime sensitivity, discount-rate sweep.
-% TODO: Write about:
-% - Congestion pricing impact analysis
-% - Asset lifetime sensitivity studies
-% - Discount rate parameter sweeps
-% - Load growth scenario comparisons
-% - Renewable penetration sensitivity
-
-\subsection{Integrated Workflow Demo}
-% End-to-end run + gantt like result.
-% TODO: Write about:
-% - Complete workflow demonstration
-% - End-to-end execution results
-% - Timeline and scheduling visualization
-% - Integration performance metrics
-% - Workflow automation benefits
-
-\newpage 
+% \newpage 
