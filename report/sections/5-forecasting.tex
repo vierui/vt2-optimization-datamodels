@@ -2,150 +2,44 @@
 \section{Forecasting}
 \label{sec:forecasting}
 
-This section walks through the full forecasting pipeline, starting with the
-\emph{raw} data retrieved and ending with the \textbf{Gradient-Boosted Decision-Tree 
-(GBDT)} model that ultimately ships to production.  Each stage—data enrichment, 
-feature engineering, model prototyping, and mathematical grounding—is documented 
-so that a future engineer can reproduce (or challenge) every decision.  The 
-classical seasonal ARIMA (SARIMA) remains our statistical “baseline” and provides 
-the first sanity check for all machine-learning attempts.
-
-\subsection{Data Enrichment}
-\label{subsec:data-enrich}
-
-The investment model framework we previously developed offers \textbf{one year of 
-hourly energy demand} that we opt to use as a static baseline and scale per asset.  
-For the \emph{forecasting} task, however, a richer data-context is
-essential.
-
-\begin{enumerate}[leftmargin=1.2em]
-  \item \textbf{Meteorological history}\\  
-        We query the \emph{Renewables.ninja} Point API
-        (lat.\,$46.231^{\circ}\mathrm{N}$, lon.\,$7.359^{\circ}\mathrm{E}$,
-        Sion) with the MERRA-2 re-analysis and retrieve \textbf{11 complete
-        years} of hourly weather and PV simulation, January 2014 – December 2024.
-  \item \textbf{New data set} \\ 
-        The original \{\texttt{time}, \texttt{electricity}\} table now includes
-        temperature, rain rate, global and diffuse irradiance, cloud cover, and
-        beam normal irradiance such as : 
+In this project, the forecasting pipeline is structured not as a monolithic Python 
+package, but as a set of iterative improvements and notebooks organized in a 
+\texttt{notebooks/} directory:
+\begin{lstlisting}[language=bash, numbers=none, backgroundcolor=\color{white}]
+    notebooks/
+      |-- setA.ipynb    # Time features only
+      |-- setB.ipynb    # Lag + cyclic features
+      |-- setC.ipynb    # Bayesian-optimized feature set
+      |-- setD.ipynb    # Recursive prediction (failed)
+      |-- setE.ipynb    # POA clear-sky and weather features
+      `-- setF.ipynb    # XGBoost library
+\end{lstlisting}
     
-        \begin{table}[h]
-        \centering
-        \caption{API variables and physical meaning.}
-        \label{tab:raw-vars}
-        \begin{tabular}{llc}
-        \hline
-        Symbol & Description & Unit \\ \hline
-        $y_t$  & AC electricity output & kW \\
-        $t2m$  & Air temperature @ 2m & \degree C \\
-        $P_{rain}$ & Precip.\ rate (\texttt{prectotland}) & mm/h \\
-        $G_{\!\downarrow}$ & Short-wave global irradiance (\texttt{swgdn}) & W/m\textsuperscript{2} \\
-        $C_{tot}$ & Cloud-cover fraction (\texttt{cldtot}) & [0,1] \\
-        $G_{dir}$ & Beam normal irradiance & \text{W/m\textsuperscript{2}} \\
-        $G_{diff}$ & Diffuse irradiance & \text{W/m\textsuperscript{2}} \\
-        \texttt{T} & Air temperature & \degree C \\
-        \hline
-        \end{tabular}
-        \end{table}
+Each notebook implements and tests its own set of features or single 
+“forecasting strategy,” incrementally building up from trivial baselines (like 
+time-only) to advanced feature sets including weather derived features. 
 
-        This means that we now have a data set with 9 features and 11 years of hourly data.
-        The table now looks like this :
-        \[
-            \bigl\{
-            time , y_t,\ t2m,\ P_{\text{rain}},\ G_{\!\downarrow},\ C_{tot},\
-            G_{dir},\ G_{diff}, T, \bigr\}.
-        \]
-\end{enumerate}
+\subsection{Operational Forecasting Principle}
+Forecasting in the operational sense means predicting the next $h$ hours 
+(day-ahead or week-ahead) using only historical and current data available up to time 
+$t$. Unlike “offline” statistical analyses, operational forecasts must avoid all data 
+leakage: only lagged, cyclical, and weather-driven features that would be available 
+before the forecast time can be used. 
 
-Some variables feed the model directly; others only serve as building 
-blocks during feature engineering. Data quality was also assessments were
-also performed.
-
-
-\subsection{Feature Engineering}
-\label{subsec:feature-eng}
-Feature engineering involves transforming raw time series data into informative 
-inputs—such as lag values, rolling averages, or seasonal indicators—that help 
-models capture patterns like trend and seasonality.
-
-For SARIMA, features are built into the model via differencing and seasonal terms, 
-while in machine learning, these engineered features explicitly guide the learning
-process to improve prediction accuracy. Features can be grouped into different groups : 
-
-\begin{itemize}
-    \item \textbf{Lagged target features} \\
-    9 additional columns - Hourly self‐lags capture short-term autocorrelation:
-    \[
-    (y_{t-\ell},\;\ell\in\{1,2,3,4,5,6,12,24,168\}).
-    \]
-
-    \begin{itemize}
-        \item fine‐grain: $\ell\!\in\!\{1,2,3,4,5,6,12\}$\,h  
-        \item diurnal:   $\ell=24$\,h  
-        \item weekly:    $\ell=168$\,h
-    \end{itemize}
-
-    Each lag adds one column
-    $y_{t-\ell}=\texttt{electricity}(t-\ell)$.  The longest history window is
-    therefore one week.
-
-    \item \textbf{Cyclical calendar encodings} \\
-    6 additional columns - $(\sin,\cos)$ for hour, weekday, year-day. Commonly called harmonics features:
-    \[
-    \textsf{hour\_sin}(t)=\sin\!\bigl(2\pi\,\tfrac{\text{hour}(t)}{24}\bigr),\qquad
-    \textsf{hour\_cos}(t)=\cos\!\bigl(2\pi\,\tfrac{\text{hour}(t)}{24}\bigr).
-    \]
- 
-    \item \textbf{Weather interaction lags} \\
-    14 additional columns - 7 vars $\times$ $\{$1 h, 24 h$\}$.
-    To let the model learn delayed radiative effects we create one–hour and 24-hour lags for 
-    \emph{every} meteorological column:
-    \begin{lstlisting}[language=Python,caption={Python snippet -- weather lag construction}]
-        weather_cols = ["t2m", "prectotland", "swgdn", "cldtot", "irradiance_direct", 
-        "irradiance_diffuse"]
-    for col in weather_cols:
-        df[f"{col}_lag_1"]  = df[col].shift(1)   # sensor latency
-        df[f"{col}_lag_24"] = df[col].shift(24)  # diurnal memory
-    \end{lstlisting}
-
-    \item \textbf{Scaling} \\
-    1 additional column - 7-day rolling mean of $y_t$ used as trend anchor.
-    Standardisation is applied \emph{after} all lags are materialised to avoid data leakage:
-
-    \begin{lstlisting}[language=Python,caption={Python snippet -- feature/target scaling}]
-    from sklearn.preprocessing import StandardScaler
-    X_scaler, y_scaler = StandardScaler(), StandardScaler()
-    X_scaled = X_scaler.fit_transform(X_raw) # predictor matrix
-    y_scaled = y_scaler.fit_transform(y_raw[:,None])[:,0] # target vector
-    \end{lstlisting}
-\end{itemize}
-
-\paragraph{Resulting feature matrix.}
-After dropping the first 168 rows (to satisfy the longest lag) and filling
-rare gaps by forward/backward‐fill the design matrix contains
-\[
-p = 37 \;\; \text{predictors per hour, grouped as}
-\]
-
-\paragraph{Backward Sequential Feature Selection (BSFS).}%
-\label{par:bsfs}
-Stage-2 BSFS removes entire \emph{groups}, not individual columns, until the
-validation MAE stops decreasing.  In practice \emph{all five} buckets
-(lags, calendar, weather lags, trend scaler, raw weather) survive—
-confirmation that each family explains a distinct slice of variance.
-
+The predictive model is retrained on the historical period. Then, it is rolled forward 
+to generate and evaluate true out-of-sample predictions, mimicking a real operational 
+workflow.
 
 \subsection{Prototyping \& Machine Learning Models}
 \label{subsec:model-pool}
 
-To evaluate the performance of the models we used the Mean Absolute Error (MAE) as a metric.
-A statistical benchmark SARIMA sets the baseline and every ML model should first beat it.
-Our original goal was a neural-network solution, so we iterated through increasingly
-sophisticated architectures but ended up switching to tree ensembles because of their 
-interpretability insensitivity to feature scaling and overfitting.
+To benchmark our operational forecasting framework, we used MAE and required all 
+machine learning models to outperform a SARIMA baseline. Although we began with 
+neural networks, we ultimately switched to gradient boosted trees for their 
+interpretability and practical strengths with engineered time features. Detailed below,
+both modeling approaches and the feature design supporting them.
 
 \subsubsection*{Neural Network Models}
-
 \begin{enumerate}
   \item \textbf{Simple Neural Network (NN)}\\
         A neural network is a computational model inspired by the human brain. 
@@ -191,47 +85,113 @@ gradient descent who looks at how the error changes and then adjsuts the next tr
 \label{fig:gbdt-illustration}
 \end{figure}
 
-Contrary to Neural Networks, GBDT are then non-parametric, rule-based. They are then lighter and 
-faster to train. The tunnable values are the number of trees, the depth of the trees, the learning 
-rate and the regularization parameter.
+GBDTs differ fundamentally from neural networks. They are non-parametric and rule-based, 
+meaning they do not require extensive scaling or normalization of inputs and are typically 
+much faster and lighter to train. Their main tunable hyperparameters include the number of 
+trees, the maximum depth per tree, the learning rate, and regularization settings.
 
-The data is split into three parts: the training set, the validation set and the test set. The training set is 
-used to train the model and the validation set is used to evaluate the model. The model is then 
-evaluated on the validation set and the process is repeated until the model is good enough. 
-The model is then used to make predictions on the test set. The test set is used to evaluate the model.
+For model development, we split our data into three sets: training, validation, and test. 
+The training set is used to fit the model, the validation set guides hyperparameter tuning 
+and prevents overfitting, and the final evaluation is performed on the test set.
 
-GBDT are usually more interpretatabel and excel with tabular data (structured datasets). Howwever, 
-GBDT does not inherently understand time or sequence, unless time features are manually engineered.
+Tree ensembles have distinct strengths: they tend to be more interpretable, naturally 
+handle tabular (structured) data, and are robust to irrelevant features or collinearity. 
+However, unlike neural networks that can automatically model sequential dependencies, 
+GBDTs require us to explicitly engineer time-based features (such as lags and calendar 
+variables) to capture temporal effects.
 
-GBDTs use splits on feature values while TCNs use convolutions over time to model dependencies.
+In summary, the switch to GBDT was motivated by both practical considerations and 
+empirical results. Tree ensembles offered consistently higher accuracy, much faster 
+training, and easier interpretability than neural networks in our forecasting task. 
+This made GBDT the clear choice for our prototyping and final model selection.
+
+\subsection{Feature Engineering}
+
+Feature engineering is a critical step in time-series forecasting models, as it enables 
+the extraction of temporal patterns, cyclic behavior, and relevant dependencies from the 
+raw data. In this project, feature engineering focused on three main strategies: 
+time features (including cyclical encoding), lagged features of the target variable, 
+and engineered weather/irradiance features.
+
+\subsubsection*{A. Cyclical Time Features}
+Hourly, daily, and seasonal periodicity in electricity generation and demand is well-known. 
+To encode these periodic effects, we transformed the raw time variables into their 
+cyclical (sin/cosine) representations:
+\[
+\begin{aligned}
+\text{hour\_sin}  &= \sin\left(2\pi \cdot \frac{\text{hour}}{24}\right) 
+\quad \text{,} \quad 
+\text{hour\_cos}  = \cos\left(2\pi \cdot \frac{\text{hour}}{24}\right) \\
+\end{aligned}
+\]
+This encoding allows the model to learn periodicity without artificial jumps between 
+boundary values (e.g., hour 23 to hour 0). The 'hour' feature can be replaced by the 
+month, day of week and day of year in our equation.
+
+\subsubsection*{B. Lag Features}
+To capture autocorrelation and persistence effects in the target time series, we 
+included lagged values of the target variable (electricity generation) as additional 
+features. For each time $t$, we added the previous values at selected time intervals:
+\[
+\text{electricity\_lag}_\ell[t] = y_{t-\ell}
+\]
+where $y_t$ denotes the target value at time $t$, and $\ell$ is the lag in hours.
+
+In the final feature set, we included lags of $\ell \in \{1,\, 2,\, 3,\, 6,\, 
+12,\, 24,\, 48,\, 168\}$, corresponding to 1 hour up to 1 week (168 hours), i.e.:
+\[
+\mathcal{L} = \{1, 2, 3, 6, 12, 24, 48, 168\}
+\]
+This means the model, at each prediction time, has access to the target value for up 
+to the past 7 days.
+
+\subsubsection*{C. Weather and Irradiance Features}
+For the advanced models (e.g., Set E and F in our code), we engineered domain-specific 
+features using both direct measurements and physical models:
+\begin{itemize}
+    \item Plane of Array (POA) Irradiance: calculated with the \texttt{pvlib} library using 
+    local site, solar position parameters and the weather data from the 
+    \texttt{Renewables.ninja} API.
+    \item Clear-sky Index: computed as the ratio between measured POA and modeled 
+    clear-sky POA :
+    \[
+    \text{POA clear-sky index}[t] = \frac{\text{poa\_total}[t]}{\text{poa\_clearsky}[t]}
+    \]
+\end{itemize}  
+For both the target and key weather features (especially POA clear-sky index), we also 
+included recent lags (e.g., 1h, 2h, 3h, 6h, 12h, 24h) and 24h rolling means.
+\[
+\text{poa\_clearsky\_index\_lag}_k[t] = \text{poa\_clearsky\_index}[t-k]
+\]
+
+\subsubsection*{D. Maximum Lag and Buffering}
+A critical implementation detail is the handling of missing data at the start of each 
+split due to lagging. For any feature with maximum lag $\ell_{max}$, at least 
+$\ell_{max}$ time steps are dropped at the beginning of each set (e.g.
+\vspace{-0.4cm}
+\begin{itemize}
+    \item $\ell_{max}=168$ for target lags in most models 
+    \item $\ell_{max}=24$ for POA lags in Set F 
+\end{itemize}
+\vspace{-0.4cm}
+During forecasting, a lag buffer window is reserved so that the first prediction is always 
+made with valid historical context.
+
+\subsubsection*{E. Feature Set Size and Selection}
+Adding engineered features significantly increases the dimensionality of the input 
+data matrix. While richer features can boost model accuracy, including too many can 
+introduce noise or lead to overfitting. To ensure our models focused on the most 
+relevant information, we performed feature selection prior to training.
+
+Several approaches exist for feature selection, such as forward selection (adding 
+features one at a time) or backward elimination (removing the less important features step
+by step). In our workflow, we used a more efficient method: Bayesian optimization.
+\cite{sklearn_feature_selection}. It searches for the subset of features (and 
+hyperparameters) that minimize validation error, reducing computational burden and 
+maximizing forecast skill.
 
 
-% \textbf{Key take-aways}  
-
-% \begin{itemize}[leftmargin=1.4em]
-% \item Seasonality alone (SARIMA) is a surprisingly strong baseline,
-%       yet weather covariates are essential beyond 6-hour horizons.
-% \item Dense nets under-perform tabular methods on medium-size data
-%       ($\sim$400 k rows); TCN closes half the gap but not all.
-% \item GBDT offers the best error/interpretability trade-off; SHAP
-%       confirms that \emph{each} feature bucket matters, in line with the
-%       BSFS experiment.
-% \item A light hybrid keeps SARIMA as a "safety net" for edge
-%       cases (sensor drop-outs, sunrise/sunset) without diluting GBDT's
-%       daytime accuracy.
-% \end{itemize}
-
-Despite the initial appeal of using neural networks like TCNs for their temporal 
-awareness, the lack of familiarity with advanced libraries such as TensorFlow led 
-to unsatisfying results. This prompted a return to the basics using scikit-learn and 
-an exploration of GBDT, supported by literature highlighting its strengths.
-
-GBDT emerged as the most suitable model due to its strong performance on tabular data,
-ease of capturing seasonality with calendar features, and superior accuracy and 
-training efficiency compared to TCNs. Its minimal tuning requirements and further 
-reinforced its suitability for the forecasting task.
-
-\subsection{Mathematical Underpinnings}
+\subsection{Mathematical Background}
 \label{subsec:math}
 
 \subsubsection*{Statistical Model - Baseline}
@@ -318,414 +278,68 @@ Because every tree focuses on what is still unexplained, the ensemble
 gradually improves until additional trees no longer cut the validation loss.
 
 
-Why GBDT wins here? With 37 engineered predictors the relationship to $y_t$ is mostly
-\textit{piece-wise} and \textit{non-linear}. Rule-based splits excel at that,
-while requiring almost no architecture design—only \{\#trees, depth,~$\nu$\}
-need tuning. The GBDT is then a good choice because it is non-parametric, rule-based, 
-light and fast to train.
 
-% with learning-rate $\eta\in(0,1]$.  Each tree partitions the 37-dim
-% feature space into \emph{axis-aligned boxes}; the ensemble’s prediction
-% is a weighted sum of the leaf means, approximating an arbitrary
-% non-linear function.
+\subsection{Implementation Workflow}
+\label{subsec:implementation}
 
-% \medskip
-% \paragraph{Hybrid forecaster (production).}
-% Because GBDT dominates in daylight but may drift near curfew,
-% the deployed predictor is a convex blend
-% %
-% \[
-% \hat y_t = 
-% \alpha\,\hat y_t^{\textsc{GBDT}}
-% \;+\;
-% (1-\alpha)\,\hat y_t^{\textsc{SARIMA}},
-% \quad
-% \alpha=0.8,
-% \]
-% %
-% found via a one-dimensional grid-search on the 2024 validation year.
-% The ensemble inherits GBDT’s low MAE (–68\,\% versus SARIMA alone) while
-% shrinking its rare night-time overshoots by a factor 4.
+The full forecasting workflow was implemented in Python using open-source libraries 
+(\texttt{pandas}, \texttt{scikit-learn}, \texttt{xgboost}, etc.), following a 
+reproducible, modular structure. Each notebook (\texttt{setA}–\texttt{setF}) 
+developed and tested a distinct feature set or model. The core implementation steps 
+are as follows:
 
-% \medskip
-% \noindent
-% \textbf{Take-away.}  
-% SARIMA provides a parsimonious, interpretable seasonal prior; GBDT,
-% trained on the 37-feature matrix, learns residual weather–driven
-% non-linearities.  A simple linear fusion yields the best of both worlds
-% with negligible operational overhead. 
+\begin{enumerate}
+    \item \textbf{Data Loading:} Import and preprocess the raw data, including handling timestamps and missing values.
+    \item \textbf{Feature Engineering:} Generate cyclical time features, target and weather lags, rolling means, and any additional domain-specific variables.
+    \item \textbf{Data Splitting:} Partition the dataset into training, validation, and test sets, reserving lag buffers to avoid information leakage.
+    \item \textbf{Feature Selection:} Use methods such as SelectKBest or Bayesian optimization to identify the most informative subset of features.
+    \item \textbf{Hyperparameter Tuning:} Optimize model hyperparameters (e.g., number of trees, learning rate, max depth) using cross-validation.
+    \item \textbf{Model Training:} Fit the selected model (NN, MLP, TCN, or GBDT) on the training data.
+    \item \textbf{Validation and Evaluation:} Evaluate the model on the validation and test sets using MAE and other relevant metrics.
+    \item \textbf{Recursive Forecasting:} For operational scenarios, generate out-of-sample predictions step-by-step, recursively updating lag features.
+    \item \textbf{Analysis:} Analyze feature importance, daily error metrics, and compare model performance to baseline.
+\end{enumerate}
 
-\subsection{Implementation Details}
-\label{ssec:impl_details}
-
-This subsection provides a detailed description of the forecasting pipeline's code structure, its main 
-components, and their interactions. The implementation is organized to streamline data ingestion, 
-exploratory data analysis, feature engineering, model training with cross-validation, and evaluation.
-
-\subsubsection*{A.\ Overview and roles}
+This modular workflow enables systematic experimentation, rigorous benchmarking, and easy extension with new features or algorithms.
 
 \begin{figure}[h!]
-    \centering
-    \begin{tikzpicture}[
-        node distance=1.2cm and 1.6cm,
-        every node/.style={font=\small, rounded corners},
-        io/.style={draw, fill=blue!20, minimum height=1cm, minimum width=2.1cm, align=center},
-        process/.style={draw, fill=green!20, minimum height=1cm, minimum width=2.6cm, align=center},
-        module/.style={draw, fill=orange!20, minimum height=1cm, minimum width=2.6cm, align=center},
-        output/.style={draw, fill=purple!20, minimum height=1cm, minimum width=2.6cm, align=center},
-        file/.style={draw, fill=gray!10, minimum height=0.8cm, minimum width=2.1cm, align=center, font=\scriptsize},
-        arrow/.style={->, thick}
-    ]
-
+\centering
+\begin{tikzpicture}[node distance=1.2cm, every node/.style={font=\footnotesize}]
     % Nodes
-    \node[io] (config) {config.yaml\\\scriptsize settings};
-    \node[process, right=of config] (runpy) {run.py\\\scriptsize orchestration};
-    \node[file, below=1.2cm of runpy] (data) {dataset.csv\\\scriptsize hourly weather and energy data};
-    \node[module, right=of runpy, text=red] (src) {src/\\\scriptsize eda, features, models};
-    \node[output, right=of src] (out) {outputs/\\\scriptsize plots, metrics, predictions};
+    \node (data) [draw, rounded corners, fill=blue!10] {Raw Data};
+    \node (prep) [draw, rounded corners, below=of data, fill=gray!10] {Preprocessing};
+    \node (features) [draw, rounded corners, below=of prep, fill=yellow!10] {Feature Engineering};
+    \node (split) [draw, rounded corners, below=of features, fill=orange!10] {Train / Val / Test Split (with Lag Buffer)};
+    \node (fselect) [draw, rounded corners, right=3cm of features, fill=yellow!20] {Feature Selection};
+    \node (htune) [draw, rounded corners, below=of fselect, fill=red!10] {Hyperparameter Tuning (CV)};
+    \node (model) [draw, rounded corners, below=of split, fill=green!10] {Model Training};
+    \node (val) [draw, rounded corners, below=of model, fill=purple!10] {Validation / Evaluation};
+    \node (recursive) [draw, rounded corners, below=of val, fill=cyan!10] {Recursive Forecasting};
+    \node (output) [draw, rounded corners, below=of recursive, fill=lime!10] {Results \& Analysis};
 
     % Arrows
-    \draw[arrow] (config) -- (runpy);
-    \draw[arrow] (data.north) -- (runpy.south);
-    \draw[arrow] (runpy) -- (src);
-    \draw[arrow] (src) -- (out);
+    \draw[->] (data) -- (prep);
+    \draw[->] (prep) -- (features);
+    \draw[->] (features) -- (split);
+    \draw[->] (split) -- (model);
+    \draw[->] (model) -- (val);
+    \draw[->] (val) -- (recursive);
+    \draw[->] (recursive) -- (output);
 
-    \end{tikzpicture}
-    \caption{Compact overview of the forecasting pipeline.}
-    \label{fig:forecast_flow_compact}
+    % Feature Selection and Hyperparameter Tuning Branch
+    \draw[->] (features) -- (fselect);
+    \draw[->] (fselect) -- (htune);
+    \draw[->] (htune) |- (model);
+
+    % Legend/Side notes (optional)
+    % \node[align=left, right=4.3cm of output, font=\scriptsize] (legend) {%
+    %     \textbf{Notes:} \\
+    %     - All steps modular \\
+    %     - Easy to swap models / features
+    % };
+
+\end{tikzpicture}
+\caption{End-to-end forecasting pipeline: from raw data and feature engineering, through feature selection and model training, to evaluation and operational recursive forecasting.}
+\label{fig:forecasting-workflow}
 \end{figure}
 
-
-\begin{itemize}
-    \item \texttt{config.yaml}\\
-    acts as the central knobboard, holding configuration values such as dataset path, cut-off date for the test set,
-    and cross-validation horizon.
-    \item \texttt{run.py}\\
-    controls the workflow in seven sequential steps, from loading data to model evaluation, while logging progress 
-    and writing output artefacts.
-    \item \texttt{src/}\\
-    contains the core logic with modules for exploratory data analysis (EDA), feature engineering, model training, 
-    and evaluation metrics.
-    \item \texttt{outputs/}\\
-    stores generated plots (e.g., heatmaps and pairplots) and evaluation reports (metrics and JSON summaries).
-\end{itemize}
-
-
-\subsubsection*{B.\ Implementation}
-The detailed flow inside \texttt{src/} is illustrated in Figure~\ref{fig:src_flow_final_clean}. The implementation 
-distinguishes three main phases:
-
-
-\begin{figure}[h!]
-    \centering
-    \begin{tikzpicture}[
-        node distance=1.2cm and 1.2cm,
-        every node/.style={font=\small, rounded corners},
-        srcbox/.style={draw, fill=orange!40, minimum height=1cm, minimum width=2.6cm, align=center},
-        modelbox/.style={draw, fill=orange!25, minimum height=1cm, minimum width=2.6cm, align=center},
-        evalbox/.style={draw, fill=orange!5, minimum height=1cm, minimum width=2.6cm, align=center},
-        outputbox/.style={draw, fill=purple!20, minimum height=1cm, minimum width=2.4cm, align=center},
-        arrow/.style={->, thick},
-        looplabel/.style={font=\scriptsize\itshape}
-    ]
-
-    % Main nodes
-    \node[srcbox] (features) at (0, 0.6) {features.py};
-    \node[srcbox, below=of features] (eda) {eda.py};
-    \node[modelbox, right=1.0cm of eda, yshift=0.99cm, text=red] (models) {models/\\\scriptsize \texttt{gbdt.py}, \texttt{sarima.py}};
-    \node[evalbox, right=of models] (eval) {evaluation.py};
-    \node[outputbox, right=of eval] (out) {outputs/};
-
-    % Arrows from eda/features
-    \draw[arrow] (features.east) -- ++(0.7,0) |- (models.west);
-    \draw[arrow] (eda.east) -- ++(0.7,0) |- (models.west);
-
-    % Flow to evaluation/output
-    \draw[arrow] (models) -- (eval);
-    \draw[arrow] (eval) -- (out);
-
-    % Feedback loop
-    \draw (eval.north) -- ++(0,0.5);
-    \draw[arrow] (eval.north) ++(0,0.5) -| (models);
-
-    % Envelope around src files + evaluation
-    \begin{pgfonlayer}{background}
-        \node[draw=orange, thick, rounded corners, inner sep=0.4cm, 
-              fit=(features) (eda) (models) (eval), 
-              label=above:{\textbf{\texttt{src/} block}}] {};
-    \end{pgfonlayer}
-
-    \end{tikzpicture}
-    \caption{Final horizontal \texttt{src/} flow: feature engineering and EDA enter the \texttt{models/} block, with evaluation and feedback for optimization.}
-    \label{fig:src_flow_final_clean}
-\end{figure}
-  
-\begin{itemize}
-    \item \texttt{features.py}\\
-    constructs engineered features including calendar-based sin/cos transforms, lagged variables, and rolling 
-    means to capture temporal dependencies.
-    \item \texttt{eda.py}\\
-    performs quick exploratory data analysis by saving visual summaries such as correlation heatmaps and pair 
-    plots for a sanity check on input data.
-    \item The \texttt{models/} subfolder houses the modeling scripts (\texttt{gbdt.py} and \texttt{sarima.py}), 
-    where gradient boosting and SARIMA models are trained respectively.
-    \item \texttt{evaluation.py}\\
-    wraps common regression metrics like MAE, RMSE, and $R^2$, and formats output tables for CLI display.
-\end{itemize}
-
-The pipeline is designed with a feedback loop from evaluation back to modeling, allowing iterative tuning or 
-refinement of models based on evaluation outcomes.
-
-\subsubsection*{C.\ Models implementation}
-Figure~\ref{fig:gbdt_flow_aligned} details the flow in \texttt{gbdt.py}, the main machine learning component. 
-The process starts by loading and splitting the dataset into training and validation sets. 
-Importantly, instead of a standard k-fold split, a \emph{time series split} is used to preserve temporal ordering 
-and avoid leakage across time in the validation procedure. This approach better reflects real-world forecasting 
-challenges where future data is never accessible during training.
-
-\begin{figure}[h!]
-    \centering
-    \begin{tikzpicture}[
-        font=\small,
-        node distance=1.5cm and 1.5cm,
-        every node/.style={align=center, rounded corners, minimum height=1.0cm, draw},
-        box/.style={fill=orange!10},
-        arrow/.style={->, thick}
-    ]
-
-    % Nodes
-    \node[box] (load) {Load\\ data};
-    \node[box, right=of load] (split) {Split\\ data};
-
-    \node[box, right=1.5cm of split, yshift=1.2cm] (tune) {Hyperparameter\\ tuning (GridSearch)};
-    \node[box, below=1.5cm of tune] (default) {pre-set\\ params};
-
-    \node[box, right=6cm of split] (train) {Train\\ model};
-
-    % Arrows
-    \draw[arrow] (load) -- (split);
-
-    % Branch to tuning and default
-    \draw[arrow] (split.east) -- ++(0.8,0) coordinate (branch);
-    \draw[arrow] (branch) |- (tune.west);
-    \draw[arrow] (branch) |- (default.west);
-
-    % From tuning to training
-    \draw[arrow] (tune.east) -- ++(0.7,0) |- (train.west);
-    \draw[arrow] (default.east) -- ++(0.7,0) |- (train.west);
-
-    \begin{pgfonlayer}{background}
-        \node[draw=gray!20, thick, rounded corners, inner sep=0.2cm, 
-              fit=(tune) (default) (load) (split) (train), 
-              label=above:{\textcolor{gray}{\textbf{\texttt{Cross-validation ?} }}}] {};
-        \node[draw=black, thick, rounded corners, inner sep=1cm, 
-              fit=(tune) (default) (split) (load) (train), 
-              label=below:{\textbf{\texttt{gbdt.py} }}] {};     
-    \end{pgfonlayer}
-
-    \end{tikzpicture}
-    \caption{Flow of \texttt{gbdt.py}: load and split data, explore default or tuned parameters, and train the model.}
-    \label{fig:gbdt_flow_aligned}
-\end{figure}
-
-The model explores two training regimes: one with pre-set default hyperparameters, and another involving an 
-explicit grid search over hyperparameters to find the optimal configuration. Both approaches culminate in training 
-the final model on the training data.
-
-Cross-validation is central to the feature selection and model tuning process. Several feature subsets are 
-constructed and evaluated, including:
-
-\begin{itemize}
-    \item \textbf{Manual}: A fixed set of manually chosen features.
-    \item \textbf{Backward Sequential Feature Selection (BSFS)}: Starts from a large feature pool and iteratively removes less important features.
-    \item \textbf{Forward Sequential Feature Selection (FwdSFS)}: Begins with a small seed set and adds features progressively.
-    \item \textbf{Bayesian Optimization (BayesOpt)}: Searches over subset sizes $k$ to optimize performance.
-\end{itemize}
-
-Each subset undergoes cross-validation using the \texttt{TimeSeriesSplit} strategy with multiple splits and a defined 
-forecast horizon, ensuring robust evaluation respecting the temporal structure.
-
-Figure~\ref{fig:sarima_flow} illustrates the SARIMA pipeline flow. Unlike the gradient boosting pipeline, SARIMA 
-training does not require explicit splitting of the data, as the seasonal periods are incorporated during model 
-specification. A grid search over seasonal orders $(p,q,P,Q)$ identifies the best parameters based on the Akaike 
-Information Criterion (AIC). After training, the model is evaluated on the test set, and results are exported for 
-comparison.
-
-Overall, the implementation balances between a fully automated pipeline and flexibility for manual adjustments and 
-analysis, focusing on robust ML methods for time series forecasting.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-% In the development of our forecasting models, we encountered several unique 
-% challenges that required special consideration. These challenges stemmed from 
-% the nature of time-series data and the need for robust model performance. 
-% Below, we highlight some of the key aspects that were addressed to ensure the 
-% accuracy and reliability of our forecasts.
-
-% \begin{adjustwidth}{1em}{0pt}
-% \textbf{Cross-validation with time-series data} \\
-% Cross-validation is a crucial technique for evaluating the performance of 
-% time-series models. It helps us understand how well our model will perform 
-% on unseen data. Classical $k$-fold—where all slices mingle chronology—with 
-% our data requires us to use a \texttt{TimeSeriesSplit}, which "never looks 
-% into the future".  
-
-% Our pipeline’s 5‐fold setting keeps a fixed 720-h (1 month worth) test window in 
-% each split. Figure~\ref{fig:cv} illustrates the two approaches differences. 
-
-% \begin{figure}[h!]
-% \centering
-% \includegraphics[width=.46\linewidth]{images/timeseriesplit.png}
-% \hfill
-% \includegraphics[width=.46\linewidth]{images/kfold.png}
-% \caption{Left: chronology-respecting TimeSeries CV. Right: ordinary $k$-fold mixing. 
-% Ref. \cite{stackexchange_timeseries_cv}.}
-% \label{fig:cv}
-% \end{figure}
-  
-% \textbf{Correlation pruning}  
-% We remove highly correlated predictors to avoid multicollinearity. It prevents 
-% overfitting and speeds up the training process. While tree models sometimes may handle 
-% multicollinearity, it is still a good practice to remove it and our statistical model 
-% (SARIMA) requires so.
-% The correlation matrix which returns a matrix pair-wise correlation values.
-% It evaluates how well two variables move together along a straight line if correlated.
-
-% \begin{lstlisting}[language=Python,basicstyle=\ttfamily\footnotesize]
-% import seaborn as sns
-% import matplotlib.pyplot as plt
-
-% # Compute the correlation matrix
-% corr_matrix = df.select_dtypes('number').corr()
-
-% # Plot the heatmap
-% plt.figure(figsize=(10, 8))
-% sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap='coolwarm', cbar_kws={'label': 'Correlation Coefficient'})
-% plt.title('Correlation Matrix of Predictors')
-% plt.show()
-% \end{lstlisting}
-% The heatmap provides a visual representation of the correlation coefficients between pairs of features, aiding in the decision-making process for feature selection and pruning.
-
-% Only numeric predictors enter the heat-map; protected columns (\texttt{y}, 
-% whitelisted lags) survive even if highly correlated.
-
-% \textbf{Selection of Predictors} \\
-% Choosing the right predictors is crucial for a robust model. 
-% Too many can cause overfitting, while too few may lead to underfitting, both 
-% resulting in poor forecasts.
-
-% In this pipeline, four different sets of predictors sets are evaluated to find the 
-% optimal balance:
-  
-% \begin{figure}[h!]
-%   \centering
-%   \begin{tikzpicture}[node distance=14mm, box/.style={draw, rounded corners,
-%                         align=center, minimum width=2.4cm, minimum height=1cm}]
-%     \node[box, fill=blue!10]  (man)  {Manual\\\footnotesize 10 feats};
-%     \node[box, right=of man, fill=orange!10] (bsfs) {BSFS\\\footnotesize backward SFS};
-%     \node[box, right=of bsfs, fill=green!10] (fwd)  {FwdSFS\\\footnotesize forward SFS};
-%     \node[box, right=of fwd, fill=red!10]    (bay)  {BayesOpt\\\footnotesize $k\!\in[3,12]$};
-%   \end{tikzpicture}
-%   \caption{The four feature sets evaluated.}
-% \end{figure}
-  
-%   \textbf{Parameter selection snippet}
-%   \begin{lstlisting}[language=Python,basicstyle=\ttfamily\footnotesize]
-%   best_lbl = min(gbt_metrics, key=lambda k: gbt_metrics[k]['MAE'])
-%   \end{lstlisting}
-
-% \textbf{SARIMA grid \& training} \\
-
-% First, the helper performs an exhaustive grid search
-% over \(p,q\in\{0,1,2\}\) and \(P,Q\in\{0,1\}\) with seasonal period \(s=24\),
-% keeping \(d=D=0\).
-% The candidate that minimises AIC is retained.  
-
-% Second, a single model is re-fit on the \emph{full} training series with that
-% \((p,q,P,Q)\) order—using 
-% \texttt{enforce
-% \_stationarity=False} and
-% \texttt{enforce\_invertibility=False}—and its predictions populate the
-% 2024 hold-out window.
-
-% \vspace{0.5em}
-% \noindent\textbf{Critique}  
-% The pipeline is pragmatic yet minimal: it skips data-type validation, missing-value imputation, 
-% and GPU-accelerated boosters—which may matter on noisier or larger grids.  Still, for a clean 
-% renewables feed the current structure delivers repeatable, inspectable forecasts with zero hidden 
-% state.
-
-
-% \label{subsec:impl}
-
-% \begin{enumerate}
-% \item \textbf{Repository layout.}  
-%       \texttt{src/}\{data\_io,features,models,eval\} mirror the
-%       methodology; notebooks live under \texttt{notebooks/}.
-% \item \textbf{Data pipeline.}  
-%       \texttt{data\_io.py} cleans $>10$M rows in a
-%       streaming fashion, then \texttt{FeatureEngineer} creates the
-%       37-column table and serialises scalers with
-%       \texttt{joblib} for reuse in prod.
-% \item \textbf{Time-series CV.}  
-%       Rolling splits (\texttt{RollingOriginEvaluator}) preserve causality:
-%       train $\to$ validate windows grow by 24h each step.
-% \item \textbf{Hyper-parameter tuning.}  
-%       \emph{Bayesian optimisation} (\texttt{optuna}) over
-%       \{\#trees, depth, $\eta$, col\_sample, $\lambda$\} maximises
-%       negative validation MAE; 50 trials finish in 3.2h on CPU.
-% \item \textbf{Training.}  
-%       With tuned params the full train+val set (2014–2023) is fit; model
-%       size $\approx$ 3.6MB.
-% \item \textbf{Inference \& evaluation.}  
-%       A single \texttt{predict\_day.py} script generates a
-%       24-step forecast, plots four-panel diagnostics and writes
-%       JSON +\;PNG to \texttt{reports/daily\_tests/}.
-% \item \textbf{MLOps hooks.}  
-%       GitHub Actions run the daily notebook on the latest data dump;
-%       threshold alarms fire on MAE drift $>10\%$ vs rolling median.
-% \end{enumerate}
-
-% \subsection{Key Take-Aways}
-% \label{subsec:key-takeaways}
-
-% \begin{itemize}
-%   \item \textbf{Seasonality explains most variance.}
-%         SARIMA alone already beats neural baselines; any learned model
-%         must \emph{start} at that level.
-%   \item \textbf{Non-linear weather interactions matter.}
-%         GBDT exploits the irradiance–lag cross-terms that linear SARIMA
-%         cannot model, shaving another 20\% off MAE.
-%   \item \textbf{Hybrid stacking is cheap and wins.}  
-%         Using SARIMA output as a feature costs one line of code yet
-%         improves bias on dawn/dusk edges noticeably.
-%   \item \textbf{EDAs saved us weeks.}  
-%         The Stage–0/1 exploratory lags and BSFS pruning prevented futile
-%         grid searches on irrelevant features.
-%   \item \textbf{Trees > deep nets for tabular.}  
-%         TCN is elegant for sequence modelling, but here the feature
-%         engineering already linearises the problem; gradient boosting
-%         wins on accuracy \emph{and} speed.
-% \end{itemize}
-
-% The resulting solution is reproducible end-to-end, MLOps compliant and
-% ready for deployment on the plant’s SCADA edge server.

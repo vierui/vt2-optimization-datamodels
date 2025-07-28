@@ -210,24 +210,26 @@ its broad library ecosystem. Key packages in this project include:
 \subsection{Scope and Boundaries of the Study}
 The project’s scope covers:
 \begin{itemize}
-    \item \textbf{Strategic horizon} Multi-year (typically 1--10 years), with three representative 
-    weeks per year (winter, summer, intermediate) to keep the MILP tractable but seasonally realistic.
-    \item \textbf{System boundaries:} A fixed test grid with predefined buses, lines, and asset 
-    candidates; retail tariffs and ancillary services are excluded.
-    \item \textbf{Decisions:} Investment timing and size (build binaries), operational scheduling 
+    \item \textbf{Strategic Horizon} Multi-year (typically 1--30 years but could be adapted), with three
+    representative weeks per year (winter, summer, spring/autumn) to keep the MILP tractable but seasonally realistic.
+    \item \textbf{System Boundaries} A fixed test grid with predefined buses, lines, and asset 
+    candidates; retail tariffs and ancillary services are excluded. The grid is fixed during 
+    the optimization but configured before.
+    \item \textbf{Decisions} Investment timing and size (build binaries), operational scheduling 
     (dispatch, unit commitment), and storage operation.
-    \item \textbf{Forecasting:} Stand-alone module producing day-ahead (and longer) forecasts for 
-    PV, wind, and load series, with accuracy assessed by MAE and RMSE.
-    \item \textbf{Key Performance Indicators:} Total system cost (discounted), solver performance 
+    \item \textbf{Forecasting} Stand-alone module producing day-ahead (visually up to 2 days and 
+    metrics up to 1 week) forecasts for Photovoltaic (PV) availability with accuracy assessed by 
+    MAE, RMSE and R\textsuperscript{2}.
+    \item \textbf{Performance indicators} Total system cost (objective function), solver performance 
     (solve time, optimality gap), and forecast error (MAE, RMSE).
 \end{itemize}
 
 Elements outside scope include demand-side management, real-time balancing, grid expansion, and 
 non-economic reliability constraints. All implementation and testing are performed in a reproducible 
-Python workflow.
+Python workflow using \texttt{Poetry} for project and dependency management. Project metadata and 
+dependencies are in the \texttt{pyproject.toml} file ; similar to VT1.
 
-\vspace{1em}
-\noindent
 In summary, the methodology rests on (i) an integrated MILP model for joint investment and operation 
-planning, (ii) a modern, Python-based ML/statistical forecasting pipeline, and (iii) robust solver and 
-workflow choices. Technical details and results for each major block are presented in subsequent sections.
+planning for a multi-year horizon, (ii) a day-ahead, Python-based ML/statistical forecasting pipeline, and (iii)
+robust solver and workflow choices. Technical details and results for each major block are presented in 
+subsequent sections.
