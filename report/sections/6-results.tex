@@ -519,66 +519,25 @@ compare to the previous time-only-lags. We notice 7 additional "POA"-features in
 that within out parameter array seach we manage to quantify the the sum of their importance which 
 improves the prediction performance by 0.2\% of the MAE-error. In average POA-features impact is +0.003.
 
+% \subsubsection*{F. }
 
-% \begin{table}[h]
-% \centering
-% \caption{Validation MAE by model (2022–2023 split).}
-% \label{tab:model-comp}
-% \begin{tabular}{lcc}
-% \hline
-% Model & MAE [kW] & Rel. $\Delta$ vs. SARIMA \\
-% \hline
-% Naïve Seasonal      & 0.142 & +34\% \\
-% SARIMA baseline     & 0.106 & — \\
-% MLP (2×128)         & 0.565 & +433\% \\
-% TCN (64f, 4 blk)    & 0.128 & +21\% \\
-% GBDT (XGBoost)      & 0.090 & $-$15\% \\
-% SARIMA + GBDT (ours)& 0.085 & $-$20\% \\
-% \hline
-% \end{tabular}
+% \begin{figure}[H]
+%     \centering
+%     \includegraphics[width=\linewidth]{images/set_xgboost.png}
+%     \caption{Set F - XGBoost}
+%     \label{fig:set6-forecast-profile}
+% \end{figure}
+
+% \begin{table}[H]
+%     \centering
+%     \begin{tabular}{lccc}
+%         Date        & MAE    & RMSE   & R\textsuperscript{2} \\
+%         \hline
+%         2024-01-01  & 0.002  & 0.004  & 0.999 \\
+%         2024-01-02  & 0.001  & 0.003  & 0.996 \\
+%         2024-01-03  & 0.003  & 0.006  & 0.999 \\
+%     \end{tabular}
+%     \caption{Set F - Daily Performance Metrics (XGBoost + Blending)}
 % \end{table}
-% % Table of MAE / RMSE for each model; plots (actual vs forecast).
-% % TODO: Write about:
-% % - Comparison table of MAE/RMSE for different models
-% % - Actual vs forecast plots and visualizations
-% % - Model performance across different seasons
-% % - Accuracy metrics for different forecast horizons
-% % - Statistical significance of improvements
 
-% \subsection{MILP vs Legacy LP}
-% % Cost reduction, unit-commitment realism, run-time overhead.
-% % TODO: Write about:
-% % - Total system cost comparisons
-% % - Unit-commitment decision realism improvements
-% % - Investment decision quality analysis
-% % - Run-time overhead assessment
-% % - Solution quality and optimality gaps
 
-% \subsection{Solver Impact (CPLEX vs GLPK)}
-% % Solve time, mipgap convergence, memory footprint.
-% % TODO: Write about:
-% % - Solve time performance comparisons
-% % - MIP gap convergence analysis
-% % - Memory footprint differences
-% % - Scalability improvements
-% % - Robustness and reliability comparisons
-
-% \subsection{Sensitivity and Scenario Analysis}
-% % Congestion pricing, Lifetime sensitivity, discount-rate sweep.
-% % TODO: Write about:
-% % - Congestion pricing impact analysis
-% % - Asset lifetime sensitivity studies
-% % - Discount rate parameter sweeps
-% % - Load growth scenario comparisons
-% % - Renewable penetration sensitivity
-
-% \subsection{Integrated Workflow Demo}
-% % End-to-end run + gantt like result.
-% % TODO: Write about:
-% % - Complete workflow demonstration
-% % - End-to-end execution results
-% % - Timeline and scheduling visualization
-% % - Integration performance metrics
-% % - Workflow automation benefits
-
-% \newpage 

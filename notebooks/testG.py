@@ -17,7 +17,7 @@ Key improvements
    heavily on high‑quality meteorological inputs.  A recent study on
    building‑level PV forecasting emphasised that cloud coverage, solar
    radiation and temperature should be retrieved from reliable sources,
-   otherwise forecast accuracy suffers【202012340695412†L744-L751】.  This
+   otherwise forecast accuracy suffers.  This
    implementation therefore constructs an additional `cloudiness` index by
    comparing measured plane‑of‑array (POA) irradiance to the computed
    clear‑sky POA, as well as rolling means of that ratio.  If your data set
@@ -57,12 +57,13 @@ additional meteorological variables.
 """
 # %%
 from __future__ import annotations
-
+import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 import pvlib
 from dataclasses import dataclass
 from typing import List, Dict, Tuple, Optional
+import time
 
 from sklearn.model_selection import TimeSeriesSplit, RandomizedSearchCV
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -245,9 +246,12 @@ def tune_xgb_model(
         random_state=random_state,
         n_jobs=1,
     )
+    start_time = time.perf_counter()
     search.fit(X_train, y_train)
+    fit_time = time.perf_counter()- start_time
     best_model = search.best_estimator_
     best_params = search.best_params_
+    print(f"Tuning time: {fit_time:.2f} seconds")
     return best_model, best_params
 
 
@@ -268,43 +272,55 @@ def blend_predictions(model_pred: np.ndarray, historical_avg: np.ndarray, alpha:
     return alpha * model_pred + (1 - alpha) * historical_avg
 
 
-def plot_forecast_and_residuals(y_true, y_pred_raw, y_pred_blend, alpha, title_prefix=""):
-    """Plot forecast (first 2 days) and residuals (scatter) for raw and blended predictions."""
-    import matplotlib.pyplot as plt
-    n_hours = 48  # First 2 days
-    # 1. Time series forecast plot (first 2 days)
-    plt.figure(figsize=(14, 5))
-    plt.plot(y_true[:n_hours], label='Actual', color='black', linewidth=2)
-    plt.plot(y_pred_raw[:n_hours], label='XGBoost (raw)', color='blue', alpha=0.7)
-    plt.plot(y_pred_blend[:n_hours], label=f'XGBoost+Blend (α={alpha:.2f})', color='orange', alpha=0.7)
-    plt.title(f'{title_prefix}Operational Forecast (First 2 Days)')
-    plt.xlabel('Hour')
-    plt.ylabel('Electricity (kW)')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
+def plot_forecast_and_scatter(y_true, y_pred, label):
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6),
+                                   gridspec_kw={'width_ratios': [2, 1], 'height_ratios': [1]})
+    # Left: first 2 days forecast
+    n_hours = 48
+    ax1.plot(y_true[:n_hours], label='Actual', linewidth=2, color='black')
+    ax1.plot(y_pred[:n_hours], label=f'Predicted ({label})', alpha=0.7, color='blue')
+    ax1.set_title(f'Operational Forecast - {label} (First 2 Days from 2024-01-01)')
+    ax1.set_xlabel('Hour')
+    ax1.set_ylabel('Electricity (kW)')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    # Right: Scatter
+    ax2.scatter(y_true, y_pred, s=10, alpha=0.5, color='blue')
+    ax2.plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
+    ax2.set_xlabel("Actual")
+    ax2.set_ylabel("Predicted")
+    ax2.set_title(f'Predicted vs Actual ({label})')
+    ax2.grid(True, alpha=0.3)
+    ax2.set_aspect('equal', adjustable='box')
     plt.tight_layout()
     plt.show()
 
-    # 2. Residuals scatter plot (Predicted vs Actual)
-    fig, ax = plt.subplots(1, 2, figsize=(14, 5))
-    # Raw
-    ax[0].scatter(y_true, y_pred_raw, s=10, alpha=0.5, color='blue')
-    ax[0].plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
-    ax[0].set_xlabel('Actual')
-    ax[0].set_ylabel('Predicted')
-    ax[0].set_title(f'{title_prefix}Predicted vs Actual (XGBoost Raw)')
-    ax[0].grid(True, alpha=0.3)
-    ax[0].set_aspect('equal', adjustable='box')
-    # Blended
-    ax[1].scatter(y_true, y_pred_blend, s=10, alpha=0.5, color='orange')
-    ax[1].plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
-    ax[1].set_xlabel('Actual')
-    ax[1].set_ylabel('Predicted')
-    ax[1].set_title(f'{title_prefix}Predicted vs Actual (Blended α={alpha:.2f})')
-    ax[1].grid(True, alpha=0.3)
-    ax[1].set_aspect('equal', adjustable='box')
-    plt.tight_layout()
-    plt.show()
+def print_metrics(y_true, y_pred, label, fit_time=None, pred_time=None):
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+    print(f"{label} - Test Metrics:")
+    print(f"  RMSE: {rmse:.3f}")
+    print(f"  MAE:  {mae:.3f}")
+    print(f"  R²:   {r2:.3f}")
+    if fit_time is not None:
+        print(f"  Fit time:     {fit_time:.2f} seconds")
+    if pred_time is not None:
+        print(f"  Predict time: {pred_time:.2f} seconds")
+    print("-" * 50)
+    return dict(RMSE=rmse, MAE=mae, R2=r2, fit_time=fit_time, pred_time=pred_time)
+
+def calculate_daily_metrics(y_true, y_pred, dates):
+    df = pd.DataFrame({'y_true': y_true, 'y_pred': y_pred, 'date': dates})
+    daily = []
+    for d in sorted(df['date'].unique()):
+        group = df[df['date'] == d]
+        if not group.empty:
+            mae = mean_absolute_error(group['y_true'], group['y_pred'])
+            rmse = np.sqrt(mean_squared_error(group['y_true'], group['y_pred']))
+            r2 = r2_score(group['y_true'], group['y_pred'])
+            daily.append({'Date': str(d), 'MAE': mae, 'RMSE': rmse, 'R2': r2})
+    return pd.DataFrame(daily)
 
 
 def run_pipeline(
@@ -319,6 +335,7 @@ def run_pipeline(
     alpha: float = 0.5,
     random_state: int = 42,
 ) -> None:
+    # 1. Data loading
     df = load_dataset(csv_path)
     df_poa = calculate_poa_features(df, site)
     max_lag = 24
@@ -326,7 +343,8 @@ def run_pipeline(
     train_df = df_poa[df_poa["time"] < train_cutoff]
     valid_df = df_poa[(df_poa["time"] >= train_cutoff) & (df_poa["time"] < valid_cutoff)]
     test_df = df_poa[(df_poa["time"] >= test_start) & (df_poa["time"] < test_end)]
-    # Apply time and cloudiness features
+
+    # 2. Feature engineering
     for name, d in [("train", train_df), ("valid", valid_df), ("test", test_df)]:
         d = add_time_features(d)
         d = add_cloudiness_index(d)
@@ -344,10 +362,13 @@ def run_pipeline(
             valid_df = d
         else:
             test_df = d
-    # Drop rows with missing target lags
+            
+    # 3. Drop NaN
     for d in [train_df, valid_df, test_df]:
         essential_cols = [target_col] + [c for c in d.columns if c.startswith(f"{target_col}_lag") or c.startswith(f"{target_col}_rollmean")]
         d.dropna(subset=essential_cols, inplace=True)
+    
+    # 4. Prepare features/mask
     forecast_mask = test_df["time"] >= forecast_start
     time_features = ["hour", "month", "dayofweek", "dayofyear", "hour_sin", "hour_cos", "month_sin", "month_cos", "dayofweek_sin", "dayofweek_cos", "dayofyear_sin", "dayofyear_cos"]
     target_lag_cols = [c for c in train_df.columns if c.startswith(f"{target_col}_lag") or c.startswith(f"{target_col}_rollmean")]
@@ -358,11 +379,15 @@ def run_pipeline(
     X_valid, y_valid, _ = prepare_features(valid_df, feature_cols, target_col)
     X_train_valid = np.concatenate([X_train, X_valid])
     y_train_valid = np.concatenate([y_train, y_valid])
+
+    # 5. Model tuning and training
     print("Tuning XGBoost hyperparameters (this may take a few minutes)...")
     model, best_params = tune_xgb_model(X_train_valid, y_train_valid, n_splits=3, n_iter=40, random_state=random_state)
     print("Best XGBoost parameters:")
     for k, v in best_params.items():
         print(f"  {k}: {v}")
+        
+    # 6. Optional feature selection
     if top_k_features is not None and top_k_features < len(avail):
         importances = model.feature_importances_
         ranking = np.argsort(importances)[::-1]
@@ -371,19 +396,48 @@ def run_pipeline(
         X_train_valid = X_train_valid[:, selected_idx]
         model, _ = tune_xgb_model(X_train_valid, y_train_valid, n_splits=3, n_iter=20, random_state=random_state)
         avail = selected_features
+
+    # 7. Test set prep, prediction
     X_test_full, y_test_full, _ = prepare_features(test_df, avail, target_col)
     X_test_forecast = X_test_full[forecast_mask]
     y_test_forecast = y_test_full[forecast_mask]
     model.fit(X_train_valid, y_train_valid)
+    start_pred_time = time.perf_counter()
     y_pred_test_full = model.predict(X_test_full)
+    pred_time = time.perf_counter() - start_pred_time
     y_pred_test = y_pred_test_full[forecast_mask]
     profile = compute_historical_profile(train_df, target_col)
     test_with_profile = merge_historical_profile(test_df.copy(), profile)
     historical_avg_full = test_with_profile["historical_avg"].values
     historical_avg_forecast = historical_avg_full[forecast_mask]
     blended_pred = blend_predictions(y_pred_test, historical_avg_forecast, alpha)
-    metrics_model = evaluate_predictions(y_test_forecast, y_pred_test, prefix="XGBoost (raw)")
-    metrics_blend = evaluate_predictions(y_test_forecast, blended_pred, prefix=f"XGBoost + weighted avg (alpha={alpha:.2f})")
+    
+    # 8. Get daily metrics dates
+    forecast_dates = test_df.loc[test_df['time'] >= forecast_start, 'time'].dt.date.values
+
+    # 9. Plotting and metrics (repeat for each model as in testF.py)
+    for y_pred, label in [
+        (y_pred_test, "XGBoost"),
+        (blended_pred, "XGBoost + Blending")
+    ]:
+        plot_forecast_and_scatter(y_test_forecast, y_pred, label)
+        metrics = print_metrics(y_test_forecast, y_pred, label)
+
+    daily_df1 = calculate_daily_metrics(y_test_forecast, y_pred_test, forecast_dates)
+    daily_df2 = calculate_daily_metrics(y_test_forecast, blended_pred, forecast_dates)
+
+    print("\nDaily Metrics Table (XGBoost):")
+    print("-" * 50)
+    print(f"{'Date':<12} {'MAE':<8} {'RMSE':<8} {'R2':<8}")
+    for _, row in daily_df1.iterrows():
+        print(f"{row['Date']:<12} {row['MAE']:<8.3f} {row['RMSE']:<8.3f} {row['R2']:<8.3f}")
+
+    print("\nDaily Metrics Table (XGBoost + Blending):")
+    print("-" * 50)
+    print(f"{'Date':<12} {'MAE':<8} {'RMSE':<8} {'R2':<8}")
+    for _, row in daily_df2.iterrows():
+        print(f"{row['Date']:<12} {row['MAE']:<8.3f} {row['RMSE']:<8.3f} {row['R2']:<8.3f}")
+
     print("\nSummary of evaluation:")
     print(metrics_model)
     print(metrics_blend)

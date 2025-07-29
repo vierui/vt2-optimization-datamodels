@@ -17,7 +17,16 @@ package, but as a set of iterative improvements and notebooks organized in a
     
 Each notebook implements and tests its own set of features or single 
 “forecasting strategy,” incrementally building up from trivial baselines (like 
-time-only) to advanced feature sets including weather derived features. 
+time-only) to advanced feature sets including weather derived ones. 
+
+We want to forecast the electricity generation for the day ahead but will forecast on 7 days.
+We can already see the cyclic behavior and the ramping behavior of the generation.
+\begin{figure}[h!]
+\centering
+\includegraphics[width=0.9\textwidth]{images/week.png}
+\caption{PV Generation normalized data (1 week)}
+\label{fig:week}
+\end{figure}
 
 \subsection{Operational Forecasting Principle}
 Forecasting in the operational sense means predicting the next $h$ hours 
@@ -33,47 +42,59 @@ workflow.
 \subsection{Prototyping \& Machine Learning Models}
 \label{subsec:model-pool}
 
-To benchmark our operational forecasting framework, we used MAE and required all 
-machine learning models to outperform a SARIMA baseline. Although we began with 
-neural networks, we ultimately switched to gradient boosted trees for their 
-interpretability and practical strengths with engineered time features. Detailed below,
+To benchmark our operational forecasting framework, we used MAE as main metric but also 
+RMSE and R2. They can be interpreted as follow :
+\vspace{-0.4cm}
+\begin{itemize}
+    \item MAE: Mean Absolute Error, interpreted in the same units as the target variable. 
+    It is the average absolute difference between the predicted and actual values.
+    \item RMSE: Root Mean Square Error, penalizes big mistakes. It is the square root of 
+    the average of the squares of the errors.
+    \item R2: R-squared, measures how well the model explains the variance in the target 
+    variable. It assesses the overall fit.
+\end{itemize}
+
+We required all machine learning models to outperform a SARIMA baseline. 
+Although we began with neural networks, we ultimately switched to gradient boosted trees 
+for their interpretability and practical strengths with engineered time features. Detailed below,
 both modeling approaches and the feature design supporting them.
 
 \subsubsection*{Neural Network Models}
+We iterated on the following models:
 \begin{enumerate}
   \item \textbf{Simple Neural Network (NN)}\\
         A neural network is a computational model inspired by the human brain. 
-        In our model, it consisted of a single layer of interconnected nodes (neurons) 
+        Our simple model consisted of a single layer of interconnected nodes (neurons) 
         that process data by applying weights, biases, and activation functions.
-        Predictions are made from patterns learned during training.
+        Predictions are made from "patterns" learned during training.
+        \vspace{-0.4cm}
 
         \emph{Bad:} fails to capture strong seasonality $\rightarrow$ high bias.
   \item \textbf{Multilayer Perceptron (MLP)}\\
         MLP is a specific type of neural network: a fully connected feedforward neural 
         network with one or more hidden layers and nonlinear activation functions.
         We searched (tuned) for the optimal number of layers and units within an array of 1 
-        to 4 layers $\times$ 1 to 128 units, trained on the same 37-dim matrix.
+        to 4 layers and 1 to 128 units.
 
         \emph{Good:} smooth forecasts; handles non-linearities.\\
-        \emph{Bad:} night-time over-fit despite target scaling tricks.
+        \emph{Bad:} night-time over-fit (not 0) despite target scaling tricks.
   \item \textbf{Temporal Convolutional Network (TCN)}\\
         TCN is a type of neural network designed for sequential data. It uses 1D causal 
         convolutions to capture temporal dependencies and are particularly effective for 
         handling long-term dependencies.
 
         \emph{Good:} tracks ramps well; long memory.\\
-        \emph{Bad:} 3× GPU time, sensitive to feature scaling, and still
+        \emph{Bad:} 3--5× GPU time, sensitive to feature scaling, and still
         overshoots zero generation at night.
 \end{enumerate}
 
-
-We explicitly set $y_t=0$ between civil dusk and dawn (computed from the
+We explicitly set $y_t=0$ between dusk and dawn (computed from the
 solar-zenith angle in the weather feed) to remove the night signal forecasting errors.
 Although this removed the worst negative bias, the best TCN still landed at \textrm{MAE}$=4.2\%$ and required
 $>\!90$ min of hyper-parameter tuning. This was not a good trade off.
 
 \subsubsection*{Pivot to Ensemble Trees}  
-Gradient Boosted Decision Trees (GBDT) is an ensemble machine learning method. meaning in the 
+Gradient Boosted Decision Trees (GBDT) is an ensemble machine learning method. Meaning that in the 
 end, all the trees are combined to make one powerful model where each new tree tries to reduce 
 the errors (called Loss) made by the previous ones. This error is minimized via a technique called
 gradient descent who looks at how the error changes and then adjsuts the next tree based on it.
@@ -92,7 +113,8 @@ trees, the maximum depth per tree, the learning rate, and regularization setting
 
 For model development, we split our data into three sets: training, validation, and test. 
 The training set is used to fit the model, the validation set guides hyperparameter tuning 
-and prevents overfitting, and the final evaluation is performed on the test set.
+and prevents overfitting, and the final evaluation is performed on the test set (our 7days 
+of forecast -- 1st day being the main target).
 
 Tree ensembles have distinct strengths: they tend to be more interpretable, naturally 
 handle tabular (structured) data, and are robust to irrelevant features or collinearity. 
@@ -107,11 +129,11 @@ This made GBDT the clear choice for our prototyping and final model selection.
 
 \subsection{Feature Engineering}
 
-Feature engineering is a critical step in time-series forecasting models, as it enables 
-the extraction of temporal patterns, cyclic behavior, and relevant dependencies from the 
-raw data. In this project, feature engineering focused on three main strategies: 
-time features (including cyclical encoding), lagged features of the target variable, 
-and engineered weather/irradiance features.
+Feature engineering is a critical step in time-series forecasting models and gradient 
+boosted trees in particular, as it enables the extraction of temporal patterns, cyclic 
+behavior, and relevant dependencies from the raw data. In this project, feature 
+engineering focused on three main strategies: time features (cyclical encoding), 
+lagged features, and "engineered" weather/irradiance features.
 
 \subsubsection*{A. Cyclical Time Features}
 Hourly, daily, and seasonal periodicity in electricity generation and demand is well-known. 
@@ -146,17 +168,31 @@ This means the model, at each prediction time, has access to the target value fo
 to the past 7 days.
 
 \subsubsection*{C. Weather and Irradiance Features}
-For the advanced models (e.g., Set E and F in our code), we engineered domain-specific 
+For the advanced models (e.g., Set E and Set F in our code), we engineered domain-specific 
 features using both direct measurements and physical models:
 \begin{itemize}
     \item Plane of Array (POA) Irradiance: calculated with the \texttt{pvlib} library using 
     local site, solar position parameters and the weather data from the 
-    \texttt{Renewables.ninja} API.
-    \item Clear-sky Index: computed as the ratio between measured POA and modeled 
+    \texttt{Renewables.ninja} API. The physical formula is :
+    \begin{equation}
+    G_{\text{POA}} = G_b \cdot R_b + G_d \cdot F_d + G_h \cdot \rho_g \cdot \frac{1 - \cos(\beta)}{2}  
+    \end{equation}
+    % G_{\text{beam}} + G_{\text{diffuse}} + G_{\text{reflected}  
+    where:
+    \begin{itemize}
+        \item $G_b$ = direct normal irradiance (DNI)
+        \item $R_b$ = geometric factor for beam component (depends on solar and panel angles)
+        \item $G_d$ = diffuse horizontal irradiance (DHI)
+        \item $F_d$ = view factor for diffuse component (depends on tilt)
+        \item $G_h$ = global horizontal irradiance (GHI)
+        \item $\rho_g$ = ground reflectance (albedo)
+        \item $\beta$ = tilt angle of the panel
+    \end{itemize}
+ \item Clear-sky Index: computed as the ratio between measured POA and modeled 
     clear-sky POA :
-    \[
+    \begin{equation}
     \text{POA clear-sky index}[t] = \frac{\text{poa\_total}[t]}{\text{poa\_clearsky}[t]}
-    \]
+    \end{equation}
 \end{itemize}  
 For both the target and key weather features (especially POA clear-sky index), we also 
 included recent lags (e.g., 1h, 2h, 3h, 6h, 12h, 24h) and 24h rolling means.
@@ -167,11 +203,10 @@ included recent lags (e.g., 1h, 2h, 3h, 6h, 12h, 24h) and 24h rolling means.
 \subsubsection*{D. Maximum Lag and Buffering}
 A critical implementation detail is the handling of missing data at the start of each 
 split due to lagging. For any feature with maximum lag $\ell_{max}$, at least 
-$\ell_{max}$ time steps are dropped at the beginning of each set (e.g.
+$\ell_{max}$ time steps are dropped at the beginning of each set (e.g. :
 \vspace{-0.4cm}
 \begin{itemize}
-    \item $\ell_{max}=168$ for target lags in most models 
-    \item $\ell_{max}=24$ for POA lags in Set F 
+    \item $\ell_{max}=168$ for target lags in most models : "7 days of data are needed before the first prediction"
 \end{itemize}
 \vspace{-0.4cm}
 During forecasting, a lag buffer window is reserved so that the first prediction is always 
@@ -194,7 +229,7 @@ maximizing forecast skill.
 \subsection{Mathematical Background}
 \label{subsec:math}
 
-\subsubsection*{Statistical Model - Baseline}
+\subsubsection*{A. Statistical Model - Baseline}
 
 We used SARIMA a statistical model as a benchmark. It applies ARMA modeling on a 
 transformed (differenced) version of the time series to capture both short-term 
@@ -241,7 +276,7 @@ differencing, and moving-average smoothing at both the regular (hourly) and seas
 resemble white noise—i.e., they are uncorrelated and pattern-free—the model is 
 considered to have successfully extracted all systematic, predictable structure.
 
-\subsubsection*{Machine Learning Model - GBDT}
+\subsubsection*{B. Machine Learning Model - GBDT}
 Assume we aim to predict a target $y$ from input features $x \in \mathbb{R}^n$. 
 GBDT minimizes a loss function $L(y, \hat{y})$. (Minimizing mean absolute error via 
 gradient descent between a predicted $\hat{y}$ and true $y$ value).
@@ -277,8 +312,6 @@ This ensemble aggregates weak learners into a strong one.
 Because every tree focuses on what is still unexplained, the ensemble
 gradually improves until additional trees no longer cut the validation loss.
 
-
-
 \subsection{Implementation Workflow}
 \label{subsec:implementation}
 
@@ -290,17 +323,20 @@ are as follows:
 
 \begin{enumerate}
     \item \textbf{Data Loading:} Import and preprocess the raw data, including handling timestamps and missing values.
-    \item \textbf{Feature Engineering:} Generate cyclical time features, target and weather lags, rolling means, and any additional domain-specific variables.
-    \item \textbf{Data Splitting:} Partition the dataset into training, validation, and test sets, reserving lag buffers to avoid information leakage.
-    \item \textbf{Feature Selection:} Use methods such as SelectKBest or Bayesian optimization to identify the most informative subset of features.
-    \item \textbf{Hyperparameter Tuning:} Optimize model hyperparameters (e.g., number of trees, learning rate, max depth) using cross-validation.
-    \item \textbf{Model Training:} Fit the selected model (NN, MLP, TCN, or GBDT) on the training data.
-    \item \textbf{Validation and Evaluation:} Evaluate the model on the validation and test sets using MAE and other relevant metrics.
-    \item \textbf{Recursive Forecasting:} For operational scenarios, generate out-of-sample predictions step-by-step, recursively updating lag features.
+    \item \textbf{Feature Engineering:} Generate cyclical time features, target and weather lags, 
+    rolling means, and any additional domain-specific variables.
+    \item \textbf{Data Splitting:} Partition the dataset into training, validation, and test sets, 
+    reserving lag buffers to avoid information leakage.
+    \item \textbf{Feature Selection:} Use methods such as SelectKBest or Bayesian optimization 
+    to identify the most informative subset of features by minimizing the validation error (MAE).
+    \item \textbf{Hyperparameter Tuning:} Optimize model hyperparameters (e.g., number of trees, 
+    learning rate, max depth) using cross-validation.
+    \item \textbf{Validation and Evaluation:} Evaluate the model on the validation and test sets using error metrics.
     \item \textbf{Analysis:} Analyze feature importance, daily error metrics, and compare model performance to baseline.
 \end{enumerate}
 
-This modular workflow enables systematic experimentation, rigorous benchmarking, and easy extension with new features or algorithms.
+This modular workflow enables systematic experimentation, rigorous benchmarking, and easy 
+extension with new features or algorithms.
 
 \begin{figure}[h!]
 \centering
@@ -314,8 +350,8 @@ This modular workflow enables systematic experimentation, rigorous benchmarking,
     \node (htune) [draw, rounded corners, below=of fselect, fill=red!10] {Hyperparameter Tuning (CV)};
     \node (model) [draw, rounded corners, below=of split, fill=green!10] {Model Training};
     \node (val) [draw, rounded corners, below=of model, fill=purple!10] {Validation / Evaluation};
-    \node (recursive) [draw, rounded corners, below=of val, fill=cyan!10] {Recursive Forecasting};
-    \node (output) [draw, rounded corners, below=of recursive, fill=lime!10] {Results \& Analysis};
+%    \node (recursive) [draw, rounded corners, below=of val, fill=cyan!10] {Recursive Forecasting};
+    \node (output) [draw, rounded corners, below=of val, fill=cyan!10] {Results \& Analysis};
 
     % Arrows
     \draw[->] (data) -- (prep);
@@ -323,23 +359,23 @@ This modular workflow enables systematic experimentation, rigorous benchmarking,
     \draw[->] (features) -- (split);
     \draw[->] (split) -- (model);
     \draw[->] (model) -- (val);
-    \draw[->] (val) -- (recursive);
-    \draw[->] (recursive) -- (output);
+    \draw[->] (val) -- (output);
 
     % Feature Selection and Hyperparameter Tuning Branch
     \draw[->] (features) -- (fselect);
     \draw[->] (fselect) -- (htune);
     \draw[->] (htune) |- (model);
 
-    % Legend/Side notes (optional)
-    % \node[align=left, right=4.3cm of output, font=\scriptsize] (legend) {%
-    %     \textbf{Notes:} \\
-    %     - All steps modular \\
-    %     - Easy to swap models / features
-    % };
+    Legend/Side notes (optional)
+    \node[align=left, right=4.3cm of output, font=\scriptsize] (legend) {%
+        \textbf{Notes} \\
+        - All steps modular \\
+        - Recursive forecasting not implemented \\
+        - Easy to swap models / features
+    };
 
 \end{tikzpicture}
-\caption{End-to-end forecasting pipeline: from raw data and feature engineering, through feature selection and model training, to evaluation and operational recursive forecasting.}
+\caption{End-to-end forecasting pipeline: from raw data and feature engineering, through 
+feature selection and model training, to evaluation.}
 \label{fig:forecasting-workflow}
 \end{figure}
-

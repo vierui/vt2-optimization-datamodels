@@ -129,6 +129,27 @@ def dcopf(integrated_network):
             global_constraints.append(
                 storage_installed[(s, y)] == cp.sum(window_builds))
 
+    # Add mutual exclusion constraints for technology pairs
+    # Check if generators have a 'mutual_exclusion_group' column to define groups
+    if first_network and 'mutual_exclusion_group' in first_network.generators.columns:
+        # Group generators by their mutual exclusion group
+        exclusion_groups = {}
+        for g in generators:
+            if g in first_network.generators.index:
+                group = first_network.generators.at[g, 'mutual_exclusion_group']
+                if pd.notna(group) and group != '':
+                    if group not in exclusion_groups:
+                        exclusion_groups[group] = []
+                    exclusion_groups[group].append(g)
+        
+        # Add constraints for each group
+        for group, group_generators in exclusion_groups.items():
+            if len(group_generators) > 1:  # Only add constraint if group has multiple generators
+                for y in years:
+                    global_constraints.append(
+                        cp.sum([gen_installed[(g, y)] for g in group_generators]) <= 1
+                    )
+
     # -- 3) Create flat variable dictionaries and constraints
     # ----------------------------------------------------------
     # Flat dictionaries indexed (asset, year, season)
@@ -334,7 +355,9 @@ def dcopf(integrated_network):
             if g not in first_network.generators.index: continue
 
             # Retrieve fixed parameters from the network data
-            capex = first_network.generators.at[g, 'capex']
+            p_nom = first_network.generators.at[g, 'p_nom']
+            capex_spec = first_network.generators.at[g, 'capex']   # $ / MW
+            capex = capex_spec * p_nom                              # total $
             lifetime = first_network.generators.at[g, 'lifetime_years']
             discount_rate = first_network.generators.at[g, 'discount_rate']
             # Check if operating_costs exists, otherwise default to 0
@@ -364,7 +387,9 @@ def dcopf(integrated_network):
             if s not in first_network.storage_units.index: continue
 
             # Retrieve fixed parameters from the network data
-            capex = first_network.storage_units.at[s, 'capex']
+            p_nom = first_network.storage_units.at[s, 'p_nom']
+            capex_spec = first_network.storage_units.at[s, 'capex']   # $ / MW
+            capex = capex_spec * p_nom                              # total $
             lifetime_s = first_network.storage_units.at[s, 'lifetime_years']
             discount_rate_s = first_network.storage_units.at[s, 'discount_rate']
             # Check if operating_costs exists, otherwise default to 0

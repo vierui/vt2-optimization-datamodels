@@ -10,15 +10,16 @@ The previous linear (LP) formulation fixed the asset list ex-ante; any capacity
 study meant running dozens of “what-if” scenarios offline.  In the MILP,
 those scenarios collapse into one optimisation that jointly chooses
 dispatch \emph{and} build schedule for the lowest net present cost. Running this logic over
-multiple years, generates the possibility to assess when in a horizon, shoudl be build it.
+multiple years, generates the possibility to assess when in a horizon, should an asset be built 
+given its lifetime and associated cost.
 
 \subsection{Key modelling ideas}
 \label{ssec:MILP_methodology}
 
 \begin{enumerate}[label=\textbf{\roman*}.]
   \item \textbf{Two binary variables per asset and year}\footnote{Upper-case sets:
-        $\mathcal{A}$ assets, $\mathcal{Y}$ years, $\Sigma$ seasons.
-        Lower-case indices: $a,\,y,\,\sigma$ etc.}
+        $\mathcal{A}$ assets, $\mathcal{Y}$ years, $\mathcal{B}$ buses.
+        Lower-case indices: $a,\,y,\,b$ etc.}
         \begin{align*}
             z^{\text{build}}_{a,y} &= 
               \begin{cases}
@@ -33,8 +34,14 @@ multiple years, generates the possibility to assess when in a horizon, shoudl be
               \end{cases}
         \end{align*}
 
+        Two binaries per asset per year are present in the model, but:
+        \begin{itemize}
+            \item Only the $z^{\text{build}}$ variables are truly “free” (decision variables).
+            \item The $z^{\text{on}}$ variables are “dependent” binaries: each year’s installed status is determined (by constraint) as the sum of all unexpired builds.
+        \end{itemize}
+
   \item \textbf{Lifetime-aware coupling}\\
-        Each asset lives $L_a$ years.
+        Each asset lives $L_a$ (lifetime) years.
         \begin{equation}
             \setlength{\arraycolsep}{2em}
             \begin{array}{rlrl}
@@ -48,77 +55,78 @@ multiple years, generates the possibility to assess when in a horizon, shoudl be
         \noindent
         \begin{itemize}
             \item (a) says an asset is “on” if it was built in the last $L_a$ years
-            \item (b) forbids more than one build within that window.
+            \item (b) forbids more than one build : "at-most-one-build-per-lifetime"
+            \item $y'$ is the year of the last build
         \end{itemize}
 
   \item \textbf{Capacity gating}\\
        Dispatch variables (Generator : $P^{\mathrm{gen}}$, storage power : $(P^{\mathrm{ch}},
        \text{and} P^{\mathrm{dis}})$ and state of charge : $E$) are multiplied by the installation flag $i_{a,y}$ .
        If an asset is not built, its capacity is mathematically zero.
-       \[ 0 \leq X^{\text{asset}}_{a,y} \leq X^{\text{nom}}_{a} \cdot z^{\text{on}}_{a,y} \]
+       \[ 0 \leq X^{\text{asset}}_{a,y} \leq X^{\text{max}}_{a} \cdot z^{\text{on}}_{a,y} \]
 
 
   \item \textbf{Annualised CAPEX via Capital Recovery Factor (CRF)}\\
-        Capital expenditure (CAPEX) is annualized using the Capital Recovery Factor (CRF).  It is an asset-specific financial metric used to calculate the annualized cost of an investment over its lifetime.
-        The goal is to make investment and operational costs comparable in a single linear objective. It is defined as:
-        \begin{equation}
-          \text{CRF}_a \;=\; \frac{i\;(1+i)^{L_a}}{(1+i)^{L_a}-1},
-          \qquad
-          A_a \;=\; \text{CRF}_a \, \cdot\, C_a.
-        \end{equation}
-        $A_a$ is the \emph{annual} cost of owning one unit of asset $a$.
+      Capital expenditure (CAPEX) is annualized using the Capital Recovery Factor (CRF).  It is an asset-specific financial metric used to calculate the annualized cost of an investment over its lifetime.
+      The goal is to make investment and operational costs comparable in a single linear objective. It is defined as:
+      \begin{equation}
+      \text{CRF}_a \;=\; \frac{i\;(1+i)^{L_a}}{(1+i)^{L_a}-1},
+      \qquad
+      A_a \;=\; \text{CRF}_a \, \cdot\, C_a.
+      \end{equation}
+      \begin{itemize}
+            \item $A_a$ is the \emph{annual} cost of owning one unit of asset $a$.
+            \item $C_a$ is the \emph{capital cost} of asset $a$.
+            \item $i$ is the \emph{interest rate} (depreciation rate between 5--10\%) 
+      \end{itemize}
+      
+      The annulized cost brings a strong advantage in the context of a multi-year analysis.
+      Instead of charging the full investment (CAPEX) upfront or at the end of an asset's lifetime, 
+      the total cost is distributed evenly across each year that the asset is operational within the 
+      optimization horizon.
+      This approach has several technical and economic advantages:
+
+      \begin{itemize}
+            \item Each asset pays a fixed annual cost while installed, simplifying the objective.
+            \item Only pay for years the asset is in use, avoiding end-of-horizon "distortions".
+            \item Removes cost jumps at build/retire dates.
+            \item The annuity is linear and easy to implement, unlike full discounted cash-flow tracking.
+            \item Slight approximation error from annualizing if the asset is not used for all its lifetime, 
+            but negligible in practice.
+      \end{itemize}
+
+      This is implemented in code as follows:
+      \begin{lstlisting}[language=Python, numbers=none]
+      def compute_crf(lifetime, discount_rate):
+            # Capital Recovery Factor (CRF)
+            if lifetime is None or lifetime <= 0:
+                  return 1.0
+            i, n = discount_rate, lifetime
+            return (i * (1 + i)**n) / ((1 + i)**n - 1)
+      
+      # Annualized cost (annuity)
+      annual_asset_cost = npv * compute_crf(lifetime, discount_rate)
+      \end{lstlisting}
+
+      In the optimization: The annualized cost is added for every year the asset is installed, for both 
+      generators and storage units:
+      \begin{lstlisting}[language=Python, caption=Objective function cost term]
+      for y in years:
+      total_cost += annual_asset_cost * gen_installed[(g, y)]
+      \end{lstlisting}
+      
+      This modeling choice is implemented in \texttt{dcopf()} and post-processed in the cost analysis script. It ensures that costs are spread proportionally and that the cost function remains robust, regardless of asset timing or lifetime relative to the analysis horizon.
 
   \item \textbf{Load growth factor}\\
         To mimic a time-varying load through the years, the loads are scaled within the nodal-balance by a defined 
         factor $\gamma_y$. This induces a growing demand in the model without increasing the generation. 
         This induces a diversification of the generation mix through the years.
         \[
-        \tilde D_{b,y} = \gamma_y\,D_{b,y}.
+        \tilde D_{y} = \gamma_y\,D_{y}.
         \]
+        It was decided to model the load growth factor as a global factor for all buses, but it could be extended to a 
+        bus-specific factor.
 \end{enumerate}
-
-
-% \subsection{Methodology logic}
-% \label{ssec:MILP_methodology}
-
-% \begin{enumerate}[label=\textbf{\roman*.}]
-%     \item \textbf{Binary build and availability variables}\\ 
-%           Two $0/1$ variables are introduced for every asset $a$ (generator or storage) and planning year $y$:
-%           \[
-%              \underbrace{b_{a,y}}_{\text{build}} = 
-%              \begin{cases}1 &\text{if the unit is \emph{commissioned} in }y,
-%                 \\0&\text{otherwise,}\end{cases}
-%              \qquad
-%              \underbrace{i_{a,y}}_{\text{installed}} = 
-%              \begin{cases}1 &\text{if the unit is \emph{operational} in }y,
-%                 \\0&\text{otherwise.}\end{cases}
-%           \]
-%           These variables replace the fixed scenario-based asset list from the vt1 model.
-
-%     \item \textbf{Lifetime-aware build–installed coupling}\\  
-%           Each asset lives exactly $L_a$ years.  
-%           A sliding-window rule (see Eq.~\eqref{eq:installed_def_new}) links the two binaries 
-%           while preventing “double builds” inside its lifetime window 
-%           (Eq.~\eqref{eq:one_build_new}).
-
-%     \item \textbf{Capacity activation via installation flag}\\  
-%           Generator dispatch $p^{\mathrm{gen}}$, storage power $(p^{\mathrm{ch}},
-%           p^{\mathrm{dis}})$ and energy $\mathrm{soc}$ are all \emph{multiplied} by the installation flag $i_{a,y}$; if a unit is not built, its capacity is mathematically zero.
-
-%     \item \textbf{Unified cost metric}\\  
-%           Capital expenditure (CAPEX) is annualized using the Capital Recovery Factor (CRF).  It is an asset-specific financial metric used to calculate the annualized cost of an investment over its lifetime.
-%           The goal is to make investment and operational costs comparable in a single linear objective. It is defined as:
-%           \begin{equation}
-%             \mathrm{CRF}_a = \frac{i\,(1+i)^{L_a}}{(1+i)^{L_a}-1},
-%           \end{equation}
-%           where $i$ is the interest rate and $L_a$ the lifetime of the asset.
-
-%     \item \textbf{Demand growth inside the model}\\  
-%           To mimic a time-varying load through the years, the loads are scaled within the nodal-balance by a defined 
-%           factor $\gamma_y$. This induces a growing demand in the model without increasing the generation. 
-%           This should induce a diversification of the generation mix through the years.
-
-% \end{enumerate}
 
 \newpage
 \subsection{MILP formulation}
@@ -135,45 +143,38 @@ Only the constraints that changed vs.\ the LP are listed. For readability, the i
         \begin{itemize}
         \item Generator Output Limits:\\
             \begin{equation}
-                  0 \leq P^{\text{gen}}_{g,y,s,t} 
-                  \leq P^{\text{nom}}_{g} \cdot z^{\text{on}}_{g,y}
+                  0 \leq P^{\text{gen}}_{a,y} 
+                  \leq P^{\text{max}}_{a} \cdot z^{\text{on}}_{a,y}
             \end{equation}
     
         \item Storage Power Limits:\\
             \begin{equation}
                   \begin{aligned}
-                        0 &\leq P^{\text{ch}}_{s,y,s,t} \leq P^{\text{nom}}_{s} \cdot z^{\text{on}}_{s,y} \\
-                        0 &\leq P^{\text{dis}}_{s,y,s,t} \leq P^{\text{nom}}_{s} \cdot z^{\text{on}}_{s,y}
+                        0 &\leq P^{\text{ch}}_{a,y} \leq P^{\text{max}}_{a} \cdot z^{\text{on}}_{a,y} \\
+                        0 &\leq P^{\text{dis}}_{a,y} \leq P^{\text{max}}_{a} \cdot z^{\text{on}}_{a,y}
                   \end{aligned}
             \end{equation}
     
         \item Energy Capacity Limit:\\
             \begin{equation}
-                  0 \leq E_{s,y,s,t} \leq E^{\text{nom}}_{s} \cdot z^{\text{on}}_{s,y}
+                  - E^{\text{max}}_{a} \cdot z^{\text{on}}_{a,y} \leq E_{a,y} \leq E^{\text{max}}_{a} \cdot z^{\text{on}}_{a,y}
             \end{equation}
       \end{itemize}
 \end{itemize}
 
 \paragraph{B.~Operational constraints (modified)}
 \begin{itemize}
-      \item State-of-charge boundary\\
-            The cycle-equality used in vt1 is relaxed.
-            \begin{equation}
-                  \mathrm{soc}_{s,y,0}=0,\qquad
-                  0\;\le\;\mathrm{soc}_{s,y,T}\;\le\;0.1\,E^{\mathrm{nom}}_{s}\; z^{\text{on}}_{s,y}.
-            \end{equation}
-            The battery starts empty and may end anywhere within 10 \% of its energy capacity, avoiding cross-season 
-            infeasibility.
+
       
       \item Nodal balance with load scaling\\
             For each bus $b$, season $s$, year $y$, hour $t$:
             \begin{equation}
-                  \sum_{g \in \mathcal{G}_b} P^{\text{gen}}_{g,y,s,t} +
-                  \sum_{s \in \mathcal{S}_b} (P^{\text{dis}}_{s,y,s,t} - P^{\text{ch}}_{s,y,s,t}) +
-                  \sum_{\ell \in \text{in}(b)} F_{\ell,y,s,t}
+                  \sum_{a \in \mathcal{A}_b} P^{\text{gen}}_{a,y} +
+                  \sum_{a \in \mathcal{A}_b} (P^{\text{dis}}_{a,y} - P^{\text{ch}}_{a,y}) +
+                  \sum_{\ell \in \text{in}(b)} F_{\ell,y}
                   = 
-                  \gamma_y \cdot D_{b,s,t} +
-                  \sum_{\ell \in \text{out}(b)} F_{\ell,y,s,t}
+                  \gamma_y \cdot D_{b} +
+                  \sum_{\ell \in \text{out}(b)} F_{\ell,y}
                   \label{eq:nodal_new}
             \end{equation}
       
@@ -183,11 +184,11 @@ Only the constraints that changed vs.\ the LP are listed. For readability, the i
 \paragraph{C.~Objective function}
 \begin{equation}
       \min \quad
-      \underbrace{\sum_{s \in \Sigma} W_s \sum_{y,a} c_a \cdot P^{\text{gen}}_{a,y,s,t}}_{\substack{\text{operating costs} \\ \text{OPEX}}}
+      \underbrace{\sum_{s \in \Sigma} W_s \sum_{y}\Bigl(\sum_{a} c_a \cdot P^{\text{gen}}_{a}\cdot z^{\text{on}}_{a}\Bigr )}_{\substack{\text{operating costs} \\ \text{OPEX}}}
       +
       \underbrace{\sum_{y}\Bigl(
       \sum_{a\in\mathcal{A}}
-          A_a \;\cdot z^{\text{on}}_{a,y}\Bigr)}_{\substack{\text{investment costs} \\ \text{CAPEX}}}
+          A_a \;\cdot z^{\text{on}}_{a}\Bigr)}_{\substack{\text{investment costs} \\ \text{CAPEX}}}
   \end{equation}
   With:
   \begin{itemize}
@@ -197,155 +198,27 @@ Only the constraints that changed vs.\ the LP are listed. For readability, the i
 Hence the MILP simultaneously finds the least-cost \emph{dispatch} and the cheapest \emph{build / replace} schedule over the planning horizon. It eliminates the need for external spreadsheets computing NPV and manual scenarios comparison.
 
 \subsection{Implementation pipeline}
-Figures \ref{fig:investment_flow} and~\ref{fig:milp_internal_flow}
-show how CSV inputs and time-series flow through the four Python
+Figures \ref{fig:milp_internal_flow} and~\ref{fig:scripts_block}
+show how CSV inputs and time-series flow through the four main Python
 modules (\texttt{pre.py}, \texttt{network.py}, \texttt{optimization.py},
-\texttt{post.py}) and finally into cost analysis.  The code matches the
-math 1:1; see \texttt{scripts/optimization.py} for the
-\texttt{dcopf()} builder.
-
-\medskip
-\noindent\textbf{Model limitations — room for improvement}
-\begin{itemize}
-  \item Capacity can only be installed in one fixed block per asset.
-        Allowing multiple or continuous build variables would give
-        smoother cost curves.
-  \item Operational costs are not time-discounted; large $i$ values
-        therefore bias the solution towards OPEX-heavy assets.
-  \item Load growth is uniform across the grid.  Future work:
-        bus-specific $\gamma_{b,y}$.
-  \item No emissions or reliability (N-$k$) constraints yet.
-\end{itemize}
-
-
-
-% \subsection{Mathematical Implementation}
-% \label{ssec:MILP_implementation}
-
-% For clarity the modifications are grouped into  
-% \textbf{(A)~MILP-specific constraints} and  
-% \textbf{(B)~code-level modelling improvements}.  
-% Classical DC-OPF balances and line limits remain unchanged. \cite{wood2013power}
-
-% \subsubsection*{A.   MILP integration new constraints}
-
-% \begin{itemize}
-%     \item \textbf{Build–Installed coupling} (NEW)\\
-%     Once built, a unit stays alive for $L_a$ years; build at most once during that life.
-        
-%         \begin{equation}
-%             \setlength{\arraycolsep}{2em}
-%             \begin{array}{rlrl}
-%                 i_{a,y} = \displaystyle \sum_{\substack{y' \le y \\ y - y' < L_a}} b_{a,y'} 
-%                 & \displaystyle \sum_{\substack{y' \le y \\ y - y' < L_a}} b_{a,y'} \le 1
-%             \end{array}
-%             \tag{2a, 2b}
-%             \label{eq:build_install_new}
-%         \end{equation}
-%         \addtocounter{equation}{1}  % skips the unused (1) makes the next auto one (2)
-%         In plain terms:
-%         \begin{itemize}
-%             \item the first equation says “asset is operational in year $y$ if built in one of the last $L_a$ years.”  
-%             \item the second equation says “you can build or replace at most once per lifetime.”
-%         \end{itemize}
-
-
-%     \item \textbf{Generator Output Limits} (MODIF.)\\
-%     blablabla
-%     \begin{equation}
-%     0 \leq P^{\text{gen}}_{g,y,s,t} 
-%     \leq P^{\text{nom}}_{g} \cdot \cdot i_{g,y}
-%     \end{equation}
-
-%     \item \textbf{Storage Power Limits} (MODIF.)\\
-%     blablabla
-%     \begin{equation}
-%     \begin{aligned}
-%     0 &\leq P^{\text{ch}}_{s,y,s,t} \leq P^{\text{nom}}_{s} \cdot i_{s,y} \\
-%     0 &\leq P^{\text{dis}}_{s,y,s,t} \leq P^{\text{nom}}_{s} \cdot i_{s,y}
-%     \end{aligned}
-%     \end{equation}
-
-%     \item \textbf{Energy Capacity Limit} (MODIF.)\\
-%     blablabla
-%     \begin{equation}
-%     0 \leq E_{s,y,s,t} \leq E^{\text{nom}}_{s} \cdot i_{s,y}
-%     \end{equation}
-    
-%     These replace the vt1 constraints where capacities were fixed and exogenously defined.
-    
-% \end{itemize}
-
-% \subsubsection*{B.  Additional modelling changes}
-
-% \begin{itemize}
-%     \item \textbf{Seasonal state-of-charge boundary} (MODIF.)\\
-%     The cycle-equality used in vt1 is relaxed.
-%     \begin{equation}
-%         \mathrm{soc}_{s,y,s,0}=0,\qquad
-%         0\;\le\;\mathrm{soc}_{s,y,s,T}\;\le\;0.1\,E^{\mathrm{nom}}_{s}\; i_{s,y}.
-%     \end{equation}
-%     The battery starts empty and may end anywhere within 10 \% of its energy capacity, avoiding cross-season infeasibility.
-
-%     \item \textbf{Nodal balance with load scaling} (MODIF.)\\
-%     For each bus $b$, season $s$, year $y$, hour $t$:
-%     \begin{equation}
-%         \sum_{g \in \mathcal{G}_b} P^{\text{gen}}_{g,y,s,t} +
-%         \sum_{s \in \mathcal{S}_b} (P^{\text{dis}}_{s,y,s,t} - P^{\text{ch}}_{s,y,s,t}) +
-%         \sum_{\ell \in \text{in}(b)} F_{\ell,y,s,t}
-%         = 
-%         \gamma_y \cdot D_{b,s,t} +
-%         \sum_{\ell \in \text{out}(b)} F_{\ell,y,s,t}
-%         \label{eq:nodal_new}
-%         \end{equation}
-
-%     The only change is the growth factor $\gamma_y$ on the demand term.
-% \end{itemize}
-% 
-% 
-% \subsubsection*{C.  Objective function with annualised CapEx}
-% \label{ssec:MILP_objective}
-
-% \begin{adjustwidth}{1.5em}{0pt}  % adjust indent here to match other items
-% The new cost function minimises both dispatch cost and annualised investment:
-
-% \begin{equation}
-%     \min \quad
-%     \underbrace{\sum_{s \in \Sigma} W_s \sum_{y,t,g} c_g \cdot P^{\text{gen}}_{g,y,s,t}}_{\substack{\text{Operating Costs} \\ \text{OPEX}}}
-%     +
-%     \underbrace{\sum_{y}\Bigl(
-%     \sum_{a\in\mathcal{A}}
-%         A_a \;\cdot i_{a,y}\Bigr)}_{\substack{\text{Investment Costs} \\ \text{CAPEX}}}
-% \end{equation}
-
-% With:
-% \begin{itemize}
-%     \item $W_s$: Number of calendar weeks represented by each season $s$ (e.g., winter = 13)
-%     \item $A_a = \mathrm{CRF}_a \cdot C^{\text{cap}}_a$: Annualised CapEx per asset $a$
-% \end{itemize}
-
-% Hence the MILP simultaneously finds the least-cost \emph{dispatch} and the cheapest \emph{build / replace} schedule over the planning horizon. It eliminates the need for external spreadsheets computing NPV and manual scenarios comparison.
-% \end{adjustwidth}
+\texttt{post.py}) and finally into \texttt{cost.py} for the cost analysis. The code matches the
+math 1:1.
 
 %----------------------------------------------------------
-\subsection{Implementation Details (MILP pipeline)}
+\subsection{Investment analysis pipeline}
 \label{ssec:milp_impl}
 %----------------------------------------------------------
-%
-% This subsection mirrors the structure used for forecasting
-% (\S\ref{ssec:impl_details}), but now focuses on the
-% mixed-integer linear optimisation workflow that sizes,
-% installs and dispatches power-system assets over a
-% multi-year horizon.
 
 \subsubsection*{A.\ Overview and roles}
 
 \begin{figure}[h!]
       \centering
+      \begin{adjustbox}{width=0.8\textwidth}
       \begin{tikzpicture}[
           node distance=1.2cm and 1.6cm,
           every node/.style={font=\small, rounded corners},
-          io/.style={draw, fill=blue!20, minimum height=1cm, minimum width=2.1cm, align=center},
+          phase/.style={draw, fill=white!40, minimum height=1cm, minimum width=2.6cm, align=center},
+          io/.style={draw, fill=blue!20, minimum height=1cm, minimum width=2.6cm, align=center},
           main/.style={draw, fill=green!20, minimum height=1cm, minimum width=2.6cm, align=center},
           opti/.style={draw, fill=orange!20, minimum height=1cm, minimum width=2.6cm, align=center},
           output/.style={draw, fill=purple!20, minimum height=1cm, minimum width=2.6cm, align=center},
@@ -354,47 +227,49 @@ math 1:1; see \texttt{scripts/optimization.py} for the
       ]
   
       % Nodes
-      \node[io] (grid) {grid/\\\scriptsize grid config};
-      \node[main, right=of grid] (main) {main.py\\\scriptsize orchestration};
+      \node[phase] (cli) {CLI};
+      \node[main, right=of cli] (main) {main.py\\\scriptsize orchestration};
+      \node[io, below=1.2cm of main] (grid) {grid/\\\scriptsize grid config};
       \node[opti, right=of main, text=red] (opti) {scripts/\\\scriptsize Optimization framework};
       \node[data, below=1.2cm of opti] (data) {data/\\\scriptsize generation and loads profiles};
-      \node[output, right=of opti] (out) {outputs/\\\scriptsize plots, metrics, predictions, results};
+      \node[output, right=of opti] (out) {results/\\\scriptsize metrics, plots};
   
       % Arrows
+      \draw[arrow] (cli) -- (main);
       \draw[arrow] (grid) -- (main);
       \draw[arrow] (data.north) -- (opti.south);
       \draw[arrow] (main) -- (opti);
       \draw[arrow] (opti) -- (out);
   
       \end{tikzpicture}
+      \end{adjustbox}
       \caption{Compact overview of the forecasting pipeline.}
       \label{fig:forecast_flow_compact}
   \end{figure}
 
 \begin{itemize}
-    \item \texttt{main.py} –\- **driver script** accepting CLI flags, steering the four logical stages:
+    \item \texttt{main.py} –\- driver script accepting CLI flags, steering the four logical stages:
           preprocessing, network assembly, optimisation, and post-processing/logging.  
     \item \texttt{pre.py} –\- slices three \mbox{168-h} representative weeks, matches
           profiles to assets, and attaches analysis meta-data (years, season weights, load-growth).
-    \item \texttt{optimization.py} –\- builds the **DC-OPF MILP** with annualised CAPEX,
-          solves it via \textsc{Cplex}, then serialises all variables back into the
+    \item \texttt{optimization.py} –\- builds the "DC-OPF MILP" optimization problem with annualised CAPEX,
+          solves it via \textsc{CPLEX}, then serialises all variables back into the
           \texttt{IntegratedNetwork}.
     \item \texttt{post.py} –\- turns the raw decision variables into human-readable
           implementation plans, generation-mix graphics and asset timelines.
-    \item \texttt{analysis/production\_costs.py} –\- converts dispatch into MWh,
+    \item \texttt{analysis/costs.py} –\- converts dispatch into MWh,
           adds annuitised investment streams, and prints/plots per-asset
           cost breakdowns.
-    \item \texttt{results/} –\- central drop-zone for logs, JSON artefacts and figures.
+    \item \texttt{results/} –\- output directory for logs, results (.json) and figures.
 \end{itemize}
 
 \subsubsection*{B.\ Implementation}
-
-Figure~\ref{fig:scripts_block} shows the deeper call graph inside the
-\texttt{scripts/} package, highlighting the \emph{three}
+The figure below shows the deeper call graph inside the \texttt{scripts/} directory, highlighting the \emph{three}
 execution phases:
 
 \begin{figure}[h!]
     \centering
+    \begin{adjustbox}{width=0.8\textwidth}
     \begin{tikzpicture}[
         node distance=1.2cm and 1.2cm,
         every node/.style={font=\small, rounded corners},
@@ -413,26 +288,32 @@ execution phases:
     \node[io, below=of prep, yshift=-4.4cm] (raw) {main.py};
     \node[phase, right=of prep] (net)   {network.py\\\scriptsize \#2 Build objects};
     \node[phase, right=of net]  (milp)  {optimization.py\\\scriptsize \#3 Solve MILP};
-    \node[phase, right=of milp] (post)  {post.py\\\scriptsize \#5 Post-proc};
     \node[sub, below=of milp] (integ) {IntegratedNetwork()};
+    \node[phase, right=of integ] (post)  {post.py\\\scriptsize \#5 Post-proc};
     \node[phase, below=of integ] (analysis) {costs.py \\\scriptsize \#4 Costs analysis};
+    \node[coordinate, below=0.3cm of analysis] (mergepoint) {};
     \node[output, below=of analysis] (out) {results/};
     \node[data, above=of prep] (data) {data/};
 
       % data inputs
       \draw[arrow, dashed] (raw) -- (prep);
       \draw[arrow, dashed] (raw) |- (analysis.west);
-      \draw[arrow] (data) -- (prep);
+      \draw[arrow, dashed] (data) -- (prep);
 
       % build & optimisation flow
       \draw[arrow] (prep) -- (net);
       \draw[arrow] (net)  -- (milp);
-      \draw[arrow] (milp) -- (post);
+      \draw[arrow] (integ) -- (post);
+
       \draw[arrow] (milp) -- ++(0,-1.5) node[midway, left] {\scriptsize writes} -- (integ.north);
       \draw[arrow] (net.south) -- ++(0,-1.7) node[midway, left] {\scriptsize builds} -- (integ.west);
       \draw[arrow] (integ.south) -- (analysis.north);
-      \draw[arrow] (post.south) |- ++(0,-6.14) -- (out.east);
-      \draw[arrow] (analysis.south) -- (out.north);
+
+
+      % new: join arrows from post and analysis
+      \draw[arrow] (post.south) |- (mergepoint);
+      \draw[arrow] (analysis.south) -- (mergepoint);
+      \draw[arrow, dashed] (mergepoint) -- (out.north);
 
     % Envelope
     \begin{pgfonlayer}{background}
@@ -441,67 +322,79 @@ execution phases:
               label=above:{\textbf{\texttt{scripts/}}}] {};
     \end{pgfonlayer}
     \end{tikzpicture}
+    \end{adjustbox}
     \caption{Detailed flow inside \texttt{scripts/}: preprocessing \(\rightarrow\) object construction \(\rightarrow\) MILP solution \(\rightarrow\) reporting.}
     \label{fig:scripts_block}
 \end{figure}
 
 
+\begin{enumerate}
+      \item \textbf{Pre-processing}\\
+            \texttt{pre.py} converts raw CSV/time-series into \texttt{grid\_data} \(+\) \texttt{seasons\_profiles}.  
+            A light sanity-check now ensures the \texttt{representative\_weeks} sum to 52.
 
-\begin{description}
-    \item[Phase~1 – Pre-processing]  
-          \texttt{pre.py} converts raw CSV/time-series into
-          \texttt{grid\_data} \(+\) \texttt{seasons\_profiles}.  
-          A light sanity-check now ensures the
-          \texttt{representative\_weeks} sum to 52; otherwise a
-          default \(13/13/26\) split is injected.
-
-    \item[Phase 2 – Object assembly]  
-          \texttt{network.py} wraps every season in a
-          \texttt{Network} (data-only) and records them inside a
+      \item \textbf{Object assembly}\\
+            \texttt{network.py} wraps every season in a
+            \texttt{Network} (data-only) and records them inside a
           global \texttt{IntegratedNetwork}.  Tweaks that proved
           essential:
           \begin{itemize}
-              \item robust bus-ID matching (string vs.\ integer);
-              \item automatic snapshot creation with length \(T\);
-              \item load-growth factors attached for later scaling.
+              \item bus-ID matching (string vs.\ integer)
+              \item automatic snapshot creation with length \(T\)
+              \item load-growth factors attached for later scaling
           \end{itemize}
 
-    \item[Phase 3 – MILP formulation \& solve]  
-          \texttt{optimization.py} hosts two core functions:
-          \texttt{dcopf()} builds the model, while
-          \texttt{investement\_multi()} (sic) solves, extracts and
-          stores all variables.  Key modelling choices:
+      \item \textbf{Optimization formulation and solve}\\
+            \texttt{optimization.py} hosts two core functions:
+            \texttt{dcopf()} builds the model, while
+            \texttt{investement\_multi()} solves, extracts and stores all variables.
 
-          \begin{itemize}
-              \item \emph{at-most-one-build-per-lifetime} window  
-                    \(\Rightarrow\) removes legacy multi-binary logic.
-              \item Annualised CAPEX via CRF \(\bigl(\)\texttt{compute\_crf}\(\bigr)\);
-                    operational costs weighted by season-weeks.
-              \item No slack variables; nodal balances must close.
-              \item Storage SoC forced to zero at each season edge,
-                    breaking cross-season energy loops.
-          \end{itemize}
+            Key modelling choices:
+            \begin{itemize}
+                \item \emph{at-most-one-build-per-lifetime} window  
+                      \(\rightarrow\) The “installed” variable at year y is the sum of active builds not yet expired:
+      \begin{lstlisting}[language=Python]
+      for g in generators:
+            lifetime = int(first_network.generators.at[g, 'lifetime_years'])
+            for y_idx, y in enumerate(years):
+                  window_builds = [gen_build[(g, yb)]
+                  for yb_idx, yb in enumerate(years)
+                  if (y_idx - yb_idx) < lifetime and y_idx >= yb_idx]
+                       global_constraints.append(cp.sum(window_builds) <= 1)
 
-    \item[Phase 4 – Post-processing]  
-          \texttt{post.py} renders a Gantt-like timeline, seasonal
-          generation mixes and an implementation plan, whereas
-          \texttt{analysis/production\_costs.py} computes MWh and
-          \$ flows, re-using the same CRF/discount helpers to stay
-          consistent with the objective.
-\end{description}
+            # Installed status = sum of "active" build binaries in
+            for y_idx, y in enumerate(years):
+                  window_builds = [gen_build[(g, yb)]
+                                    for yb_idx, yb in enumerate(years)
+                                    if (y_idx - yb_idx) < lifetime and y_idx >= yb_idx]
+                  global_constraints.append(
+                  gen_installed[(g, y)] == cp.sum(window_builds))
+
+      \end{lstlisting}
+                      
+                \item Annualised CAPEX via CRF \(\bigl(\)\texttt{compute\_crf}\(\bigr)\)
+                      operational costs weighted by season-weeks
+                \item No slack variables; nodal balances must close (same as in the LP)
+                \item Storage SoC forced to zero at each season edge,
+                      \(\Rightarrow\) breaking cross-season energy loops (same as in the LP)
+            \end{itemize}
+
+      \item \textbf{Post-processing}\\  
+            \texttt{post.py} renders a Gantt-like timeline, seasonal
+                  generation mixes, and an implementation plan, while
+            \texttt{analysis/costs.py} computes MWh and
+                  \$ flows using the same annuity (CRF/discount) logic as
+                  in the objective, ensuring consistency.
+\end{enumerate}
 
 \subsubsection*{C.\ MILP model structure}
-
-Figure~\ref{fig:milp_internal_flow} sketches the internal control
-flow inside \texttt{dcopf()}.  It shows how build binaries cascade
-into installed status, which then gate capacity and dispatch
-variables before everything is funnelled into a single cost
-function.
-
+\begin{figure}[h!]
+      \centering
+      \begin{adjustbox}{width=0.8\textwidth}
 \begin{tikzpicture}[
       font=\small,
       node distance=1.4cm and 1.8cm,
-      every node/.style={align=center, rounded corners, minimum height=1.0cm, draw},
+      every node/.style={align=center, rounded corners, minimum height=1.0cm, minimum width=2cm, draw},
       box/.style={fill=blue!10},
       arrow/.style={->, thick}
   ]
@@ -535,8 +428,54 @@ function.
             label=below:{\textcolor{gray}{\textbf{\texttt{IntegratedNetwork()}}}}]{};
   \end{pgfonlayer}
   \end{tikzpicture}
+  \end{adjustbox}
+  \caption{Internal control flow inside \texttt{dcopf()}}
+  \label{fig:milp_internal_flow}
+\end{figure}
 
-\bigskip
-The resulting MILP stack therefore mirrors the earlier
-forecasting-pipeline layout while obeying power-system specific
-lifetimes, energy conservation and investment logic.
+Figure~\ref{fig:milp_internal_flow} sketches the internal control
+flow inside \texttt{dcopf()}. 
+
+A major bottleneck in large-scale optimization (e.g., MILP) is constraint assembly: explicit Python for-loops 
+to create constraints individually causes excessive overhead in both \texttt{CVXPY} (matrix stuffing) and the 
+solver’s pre-processing. By leveraging vectorized expressions and a modern solver interface (CPLEX), we significantly 
+reduced this overhead.
+
+\begin{itemize}
+\item \textbf{Old (CBC/PuLP):} Constraints are added one-by-one in explicit Python for-loops:
+      \begin{lstlisting}[language=Python]
+            for t in T:
+            for i in buses:
+            DCOPF += (
+            gen_sum - pd_val + flow_in - flow_out == 0
+            ), f"Power_Balance_Bus_{i}Time{t}"
+      \end{lstlisting}
+      This approach is highly inefficient: each constraint is parsed and processed individually in Python, resulting in excessive pre-solve times as problem size grows.
+\item \textbf{New (CVXPY/CPLEX):} Constraints are constructed in bulk using array operations:
+      \begin{lstlisting}[language=Python]
+            for s in seasons:
+            for y in years:
+            for b in buses:
+            flat_constraints.append(
+            gen_sum + st_net + flow_in == load_vec + flow_out
+            )
+      \end{lstlisting}
+      Or, for a fully vectorized version, all buses/time steps at once:
+      \begin{lstlisting}[language=Python]
+            flat_constraints.append(
+            cp.sum(p_gen_matrix, axis=0) + cp.sum(p_discharge_matrix, axis=0)
+            - cp.sum(p_charge_matrix, axis=0) + cp.sum(flow_in_matrix, axis=0)
+            == load_matrix + cp.sum(flow_out_matrix, axis=0)
+            )
+      \end{lstlisting}
+This eliminates per-constraint Python overhead and allows CVXPY to construct and pass large sparse matrices directly to CPLEX.
+\end{itemize}
+
+In the old model, assembly times scale poorly ($\mathcal{O}(n_{\text{vars}} \cdot n_{\text{time}})$ constraints 
+created in Python; pre-processing could take minutes for moderate $n$).
+In the new model, vectorized construction reduces overhead by $50\times$ to $100\times$; model build is near-
+instantaneous even for $10^5$+ constraints. Main constraints (capacities, flows, balances) are fully vectorized.
+
+For a multi-year, seasonal, multi-asset problem, model assembly dropped from \textasciitilde 5 minutes (old) 
+to $<$10 seconds (new), with no loss of model fidelity. The main bottleneck is now the mathematical difficulty
+itself (increased number of constraints and variables).

@@ -1,147 +1,3 @@
-% \newpage
-% \section{Methodology and Scope}
-% \label{sec:methodology}
-% % Again, this project extends the first semester LP framework in two directions:
-% % \begin{itemize}
-% %     \item \textbf{MILP investment-dispatch model} – replaces the single-year LP with a multi-year 
-% %     mixed-integer formulation that chooses both where to build and when to run it, so boths costs (CAPEX and 
-% %     OPEX) are minimised in one pass.
-% %     \item \textbf{Independent ML forecasting module} – delivers day-ahead predictions of a 
-% %     photovoltaic generator (can be extended to other renewable sources). It is stand-alone for now but 
-% %     provides the data that a rolling short-term optimisation would need.
-% % \end{itemize}
-
-% \subsection{System Boundaries and Planning Horizon}
-% This project addresses investment planning and operational scheduling for a power grid under increasing 
-% renewable penetration and growing demand. The scope is deliberately focused: all modeling and analysis 
-% are performed on a fixed transmission grid with a representative asset mix (generators, renewables, 
-% storage), using synthetic but realistic data for loads and generation. Retail tariffs, ancillary 
-% services, and distribution-level effects are excluded. The grid is fixed during the optimization but
-% configured before.
-
-% The planning horizon is multi-year, in our testcase : ranging from 1 to 30 years, to capture long-term investment 
-% and asset replacement decisions alongside short-term operational constraints. Each year is represented by 
-% three typical weeks (winter, summer, spring/autumn) to retain key seasonal patterns while keeping 
-% computational complexity manageable.
-
-% \subsection{Optimization Model Structure}
-
-% The central model is formulated as a Mixed-Integer Linear Program (MILP), which extends 
-% Linear Programming (LP) by introducing discrete decision variables, such as binary variables. They for
-% example For example, binary variables can track whether a unit is on/off, whether an investment is 
-% made in a specific year, or whether an asset is selected among alternatives.
-
-% In contrast, pure Linear Programming can only handle continuous decision variables and linear 
-% constraints of the form:
-% \[
-% Ax \leq b, \quad x \in \mathbb{R}^n
-% \]
-% A LP is unsuitable for modeling decisions involving logical conditions such as “if investment is made, 
-% then operation is allowed” or “choose only one technology among several options” — these require 
-% binary variables and logical constraints, which are beyond the expressiveness of LP alone.
-
-% This new logic allows to integrate investment (capital expenditure) and operational (dispatch, or operating cost)
-% decisions into one optimization framework.
-
-
-% \textit{Decision Variables}
-% \vspace{-0.3cm}
-% \begin{itemize}
-%     \item \textbf{Investment:} Binary variables for each candidate asset and year, indicating if an asset 
-%     is built or replaced.
-%     \item \textbf{Availability:} Binary variables tracking whether an asset is operational in each year, 
-%     coupled to the build logic and asset lifetimes.
-%     \item \textbf{Operational:} Continuous variables for generator dispatch, storage charging/discharging 
-%     and state-of-charge, and line flows.
-%     \item \textbf{Unit Commitment:} Binary on/off variables for thermal units, enabling explicit modeling 
-%     of startup, shutdown, and minimum up/down times (not fully exploited in this version, but structure 
-%     allows for easy extension).
-% \end{itemize}
-
-% \paragraph{Core Constraints}
-% \begin{itemize}
-%     \item \textbf{Lifetime and Build Coupling:} Once built, an asset remains available for its technical 
-%     lifetime. No overlapping builds are allowed within this period. 
-%     \item \textbf{Capacity Gating:} Only operational assets can produce power or provide storage services; 
-%     non-built assets are forced to zero output.
-%     \item \textbf{Power Balance:} Demand must be met at each bus, for every hour in the representative weeks, 
-%     unless the problem is proven infeasible.
-%     \item \textbf{Operational Limits:} All generation, storage, and line capacities are enforced. 
-%     Storage end-of-season state-of-charge is relaxed within a 10\% band to improve tractability.
-%     \item \textbf{Load Growth:} Demand is allowed to increase annually by a user-defined factor, 
-%     simulating system evolution under increasing electrification.
-%     \item \textbf{Capital Cost Accounting:} Investment costs are annualized using the Capital Recovery 
-%     Factor (CRF), bringing all costs to a common annual basis for direct comparison.
-% \end{itemize}
-
-% \paragraph{Objective Function}
-% The MILP minimizes the total discounted system cost, defined as the sum of annualized investment (CAPEX) 
-% and operating costs (OPEX) across all years and representative seasons:
-% \[
-% \min \left[\;
-% \sum_{\text{seasons, years, assets}} \text{OPEX} + \sum_{\text{years, assets}} \text{annualized CAPEX}
-% \;\right]
-% \]
-% This unified approach eliminates the need for external scenario analysis or NPV spreadsheets; investment 
-% timing and operational scheduling are optimized together.
-
-% \subsection{Data Pipeline and Model Implementation}
-
-% The codebase is structured to support modularity and reproducibility:
-
-% \begin{itemize}
-%     \item \textbf{Data Layer:} Static files (CSV/JSON) define the grid topology, asset specifications, and 
-%     load/generation profiles. A single configuration file sets the planning horizon, demand growth rates, 
-%     and scenario weights.
-%     \item \textbf{Preprocessing:} Scripts generate representative seasonal profiles and attach relevant 
-%     metadata, such as asset lifetimes and load growth.
-%     \item \textbf{Optimization Pipeline:} The MILP is formulated and solved using Python with the IBM 
-%     CPLEX solver. Key modeling logic (build/availability variables, coupling constraints, CRF application) 
-%     is directly encoded in the mathematical model and matched 1:1 in the implementation.
-%     \item \textbf{Post-processing:} Solution variables are parsed into implementation schedules, asset 
-%     timelines, and cost breakdowns for analysis.
-% \end{itemize}
-
-% \subsection{Short-Term Forecasting Module}
-
-% An independent forecasting pipeline supplements the investment/dispatch model by providing day-ahead (and 
-% up to one week ahead) predictions for load, wind, and solar profiles. This module relies on gradient-
-% boosted decision trees (GBDT) for primary predictions and SARIMA as a statistical baseline. Feature 
-% engineering draws on weather data, calendar effects, and recent time-series history.
-
-% While this forecasting module is stand-alone in this project, its outputs are designed for easy 
-% integration into rolling operational studies or for scenario stress-testing.
-
-% \subsection{Performance Indicators and Assessment}
-
-% The model’s effectiveness is evaluated using the following key performance indicators (KPIs):
-
-% \begin{itemize}
-%     \item \textbf{Total System Cost:} Sum of discounted investment and operational costs (main optimization 
-%     objective).
-%     \item \textbf{Solver Performance:} MILP wall-clock time and optimality gap for each scenario.
-%     \item \textbf{Forecast Accuracy:} MAE and RMSE for each forecasted series and horizon (with day-ahead 
-%     targets of $<$5\% MAE and $<$7\% RMSE relative to mean load).
-%     \item \textbf{Robustness:} Number of hours with unmet demand or line overloads (should be zero in 
-%     feasible scenarios).
-%     \item \textbf{Transparency:} Breakdown of costs by asset class and investment schedule, supporting 
-%     sensitivity analysis and traceability.
-% \end{itemize}
-
-% \paragraph{Limitations}
-
-% Several aspects are simplified in this version: asset capacity is installed in fixed blocks (not 
-% continuously), operational costs are not time-discounted, load growth is uniform across buses, and 
-% emissions/reliability constraints are not yet included. These are acknowledged areas for future improvement.
-
-
-
-
-
-
-
-
-
 \newpage
 \section{Methodology and Scope}
 \label{sec:method_scope}
@@ -155,23 +11,24 @@ and~\ref{sec:forecasting}.
 \subsection{Optimization model -- Long-Term Planning}
 The scope is deliberately focused: all modeling and analysis are performed on a fixed transmission 
 grid with a representative asset mix (generators, renewables, storage). The grid configuration spans
-the grid size, to the number of buses, lines, and asset types/locations. Same goes for the loads and 
-generation profiles.
+from the grid size to the number of buses, lines, and different asset types/locations. Same goes for 
+the loads and generation profiles.
 
-Multi-year power system planning requires both long-term investment decisions and short-term 
-operational modeling. Linear Programming can only handle continuous decision variables and linear 
-constraints of the form:
+Multi-year power system planning requires both a long-term investment decisions and short-term 
+operational modeling based ( which is here, a power flow problem optimzation). Linear Programming can only 
+handle continuous decision variables. We previously used it to solve the power flow problem, modelin it with 
+linear constraints of the form:
 \[
 Ax \leq b, \quad x \in \mathbb{R}^n
 \]
 A LP is unsuitable for modeling decisions involving logical conditions such as “if investment is made, 
-then operation is allowed”. Hence no ability to represent discrete (on/off) investment or unit-commitment 
-decisions. 
+then operation is allowed”. Hence no ability to represent discrete (on/off) logic or in our case, 
+unit-commitment decisions. 
 
 Mixed-Integer Linear Programming (MILP) extends LP by introducing binary variables, enabling explicit 
 modeling of build/replace decisions and operational constraints. The integrated MILP framework used 
 here allows capital (CAPEX) and operating (OPEX) costs to be co-optimized, simulating when and how 
-assets are built, retired, and dispatched~\cite{andersson2004power, wood2013power}.
+assets are built, retired, and optimally dispatched~\cite{andersson2004power, wood2013power}.
 
 
 \subsection{Machine Learning model -- Short-Term Forecasting}
@@ -183,9 +40,9 @@ models provide interpretable baselines and exploit seasonality and autocorrelati
 capture nonlinear patterns in larger, more complex datasets. Hybrid or ensemble approaches can 
 combine strengths of both~\cite{grzebyk2021xgboost, zhong2020xgboost}.
 
-For this project, both families are benchmarked: SARIMA as a baseline, Gradient Boost as the primary ML 
-forecaster. The forecasts target day-ahead horizons, aligning with operational requirements. 
-Forecast accuracy directly influences optimal short-term scheduling or spot price prediction.
+For this project, both families are benchmarked: Gradient Boost as the primary forecasting model and 
+SARIMA as a baseline. The forecasts target day-ahead horizons, aligning with demand for markets operations
+or grid stability to mitigate risks.
 
 \subsection{Solver and Toolchain Selection}
 
@@ -194,17 +51,17 @@ used in research but can struggle with large models, particularly those involvin
 long planning horizons. Commercial solvers (CPLEX, Gurobi) offer better performance, robustness, and 
 advanced features such as parallelization, which can be critical for realistic 
 studies~\cite{mittelmann2023benchmarks}. This project uses CPLEX via its Python API 
-(\texttt{docplex}), which integrates smoothly with Python-based data processing and ML workflows.
+(\texttt{docplex})~\cite{ibm2022cplexpython}.
 
 Python is the de facto standard language for research and development in optimization and ML due to 
 its broad library ecosystem. Key packages in this project include:
 \begin{itemize}
-    \item \texttt{docplex} for optimization and CPLEX solver integration,
-    \item \texttt{scikit-learn}, \texttt{XGBoost} for ML/forecasting,
-    \item \texttt{statsmodels} for SARIMA/statistical modeling,
-    \item \texttt{Optuna} and \texttt{skopt} for hyperparameter tuning,
-    \item \texttt{pvlib} for solar/weather features calculations,
-    \item standard data-handling libraries (\texttt{pandas}, \texttt{numpy}, \texttt{matplotlib}).
+    \item \texttt{docplex} for optimization and CPLEX solver integration~\cite{ibm2022cplexpython}
+    \item \texttt{scikit-learn}, \texttt{XGBoost} for ML/forecasting ~\cite{grzebyk2021xgboost, zhong2020xgboost, scikit-learn}
+    \item \texttt{statsmodels} for SARIMA/statistical modeling~\cite{seabold2010statsmodels}
+    \item \texttt{Optuna} and \texttt{skopt} for hyperparameter tuning ~\cite{head2018scikitoptimize}
+    \item \texttt{pvlib} for solar/weather features calculations~\cite{holmgren2018pvlib}
+    \item standard data-handling libraries (\texttt{pandas}, \texttt{numpy}, \texttt{matplotlib})~\cite{mckinney-proc-scipy-2010},~\cite{harris2020array}
 \end{itemize}
 
 \subsection{Scope and Boundaries of the Study}
@@ -217,7 +74,7 @@ The project’s scope covers:
     the optimization but configured before.
     \item \textbf{Decisions} Investment timing and size (build binaries), operational scheduling 
     (dispatch, unit commitment), and storage operation.
-    \item \textbf{Forecasting} Stand-alone module producing day-ahead (visually up to 2 days and 
+    \item \textbf{Forecasting} Independent module producing day-ahead (visually up to 2 days and 
     metrics up to 1 week) forecasts for Photovoltaic (PV) availability with accuracy assessed by 
     MAE, RMSE and R\textsuperscript{2}.
     \item \textbf{Performance indicators} Total system cost (objective function), solver performance 
